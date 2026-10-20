@@ -113,10 +113,10 @@
 
 到 **[Releases](https://github.com/QiuXiYueShiJiu/QX-PDFreader/releases)** 页面下载：
 
-- 文件名：`秋夕-PDF阅读器-1.0.0.1-安装程序.exe`
+- 文件名：`QX-PDFreader-1.0.0.1-setup.exe`（安装后程序名仍为「秋夕-PDF阅读器」）
 - 双击安装，可自选安装目录；
 - 「选择附加任务」页可分别勾选**桌面快捷方式**与**开始菜单快捷方式**（默认都勾，开始菜单统一放在「秋夕-教学软件」文件夹）；
-- 静默安装（批量部署）：`秋夕-PDF阅读器-1.0.0.1-安装程序.exe /S`
+- 静默安装（批量部署）：`QX-PDFreader-1.0.0.1-setup.exe /S`
 
 系统要求：Windows 10 / 11（x64）。安装包未做代码签名，首次运行若出现 SmartScreen 提示，选择「更多信息 → 仍要运行」。
 
