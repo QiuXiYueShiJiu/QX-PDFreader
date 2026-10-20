@@ -85,9 +85,8 @@ for (const d of DIRS) {
   copyTree(p, join(stage, d))
 }
 
-/* 安装包 */
-/* 安装包目录：跟随 package.json 的 build.directories.output（单一来源），
- * 允许用 PDF_RELEASE_DIR 覆盖；不再硬编码任何本机绝对路径。 */
+/* 安装包：跟随 package.json 的 build.directories.output（单一来源），
+ * 允许用 PDF_RELEASE_DIR 覆盖；不硬编码任何本机绝对路径。 */
 const releaseDir = resolve(root, process.env.PDF_RELEASE_DIR
   || pkg.build?.directories?.output || 'dist-installer')
 mkdirSync(join(stage, '安装包'), { recursive: true })

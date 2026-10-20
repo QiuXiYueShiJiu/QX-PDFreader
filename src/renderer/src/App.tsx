@@ -34,6 +34,7 @@ import { RightRail } from './components/RightRail'
 import { DrawToolbar } from './components/DrawToolbar'
 import { ScreenMask } from './components/ScreenMask'
 import { DisclaimerToast } from './components/DisclaimerToast'
+import { UpdateToast } from './components/UpdateToast'
 import { useDropZone } from './hooks/useDropZone'
 import { guardUnsaved, installCloseGuard, registerExporter } from './close-guard'
 
@@ -501,6 +502,9 @@ export default function App(): JSX.Element {
 
       {/* 启动声明：右下角浮层，可见主题自适应，可勾选不再提示 */}
       <DisclaimerToast />
+
+      {/* 版本更新：右下角浮层，自动下载、下完再问装不装 */}
+      <UpdateToast />
 
       {showSettings ? (
         <SettingsPanel

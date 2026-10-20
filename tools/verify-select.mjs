@@ -319,10 +319,36 @@ const s4b = await state()
 check(s4b.panel === 'format', '④ 点字号档后格式面板不关', `panel=${s4b.panel}`)
 
 /* ---------- ⑤ 点灰底：选区清空、浮条收起 ---------- */
-if (spot.gray) {
-  await mouse('mouseMoved', spot.gray.x, spot.gray.y, 0)
-  await mouse('mousePressed', spot.gray.x, spot.gray.y, 1)
-  await mouse('mouseReleased', spot.gray.x, spot.gray.y, 0)
+/*
+ * ★ 灰底要「现取」，不能用一开始算好的那个点：
+ *   浮条/面板一出现就盖住了原来的落点，按上去其实是按在 `.edit-selbar` 上
+ *   （选区被清掉、浮条却不动），整套里就出现过这一条假红。
+ */
+const grayNow = await json(`JSON.stringify((() => {
+  const sr = document.querySelector('.viewer-scroll').getBoundingClientRect()
+  const okPoint = (x, y) => {
+    const el = document.elementFromPoint(x, y)
+    if (!el || !el.closest('.pdf-page')) return false
+    if (el.closest('.textLayer span') || el.closest('.ocr-text-layer span')) return false
+    if (el.closest('.edit-selbar') || el.closest('.edit-item') || el.closest('.edit-bar')) return false
+    return true
+  }
+  const pages = [...document.querySelectorAll('.pdf-page')]
+    .map((p) => p.getBoundingClientRect())
+    .filter((r) => r.bottom > sr.top + 120 && r.top < sr.bottom - 120)
+  for (const r of pages) {
+    for (let y = Math.max(r.top, sr.top) + 40; y < Math.min(r.bottom, sr.bottom) - 40; y += 24) {
+      for (let x = r.left + 16; x < r.right - 16; x += 24) {
+        if (okPoint(x, y)) return { x: Math.round(x), y: Math.round(y), tag: 'DIV', cls: 'at-click' }
+      }
+    }
+  }
+  return null
+})())`).then(JSON.parse)
+if (grayNow) {
+  await mouse('mouseMoved', grayNow.x, grayNow.y, 0)
+  await mouse('mousePressed', grayNow.x, grayNow.y, 1)
+  await mouse('mouseReleased', grayNow.x, grayNow.y, 0)
   await sleep(420)
   const s5 = await state()
   const i5 = await selInfo()
@@ -330,8 +356,16 @@ if (spot.gray) {
   check(
     s5.sel.trim().length === 0,
     '⑤ 点灰底清空选区',
-    `${s5.sel.trim().length} 字 锚点 span#${i5.a?.i}@${i5.a?.off} 落点(${spot.gray.x},${spot.gray.y}) 压着 ${spot.gray.tag}.${spot.gray.cls} 选区「${s5.sel.trim().slice(0, 20)}」 轨迹=${trace5.join(' | ')}`
+    `${s5.sel.trim().length} 字 锚点 span#${i5.a?.i}@${i5.a?.off} 落点(${grayNow.x},${grayNow.y}) 选区「${s5.sel.trim().slice(0, 20)}」 轨迹=${trace5.join(' | ')}`
   )
+  check(!s5.bar, '⑤ 点灰底收起浮条')
+} else if (spot.gray) {
+  await mouse('mouseMoved', spot.gray.x, spot.gray.y, 0)
+  await mouse('mousePressed', spot.gray.x, spot.gray.y, 1)
+  await mouse('mouseReleased', spot.gray.x, spot.gray.y, 0)
+  await sleep(420)
+  const s5 = await state()
+  check(s5.sel.trim().length === 0, '⑤ 点灰底清空选区', `${s5.sel.trim().length} 字（用了初始落点）`)
   check(!s5.bar, '⑤ 点灰底收起浮条')
 } else {
   check(false, '⑤ 点灰底清空选区', '找不到页面灰底落点')

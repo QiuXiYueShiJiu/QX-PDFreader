@@ -24,6 +24,31 @@ export interface OpenPayload {
   size: number
 }
 
+/** 更新检查结果（与 src/main/updater.ts 的形状保持一致） */
+export interface UpdateAsset {
+  name: string
+  size: number
+  url: string
+}
+
+export interface UpdateCheckResult {
+  ok: boolean
+  newer: boolean
+  current: string
+  latest: string
+  page?: string
+  notes?: string
+  publishedAt?: string
+  asset?: UpdateAsset
+  error?: string
+}
+
+export interface UpdateProgress {
+  received: number
+  total: number
+  fraction: number
+}
+
 const api = {
   /* ---------- 打开 ---------- */
   open: {
@@ -222,6 +247,36 @@ const api = {
     const listener = (_e: unknown, payload: OpenPayload): void => handler(payload)
     ipcRenderer.on('pdf:open', listener)
     return () => ipcRenderer.removeListener('pdf:open', listener)
+  },
+
+  /* ---------- 版本更新 ---------- */
+  /**
+   * 更新检查的所有网络请求都在主进程做（渲染层 CSP 不放外网），
+   * 这里只暴露「查 / 下 / 装」三件事 + 两个事件订阅。
+   */
+  update: {
+    /** 查最新版本；失败也 resolve（带 error 文案），不 reject */
+    check: () => invoke<UpdateCheckResult>('app:update-check'),
+    /** 当前版本号（不联网） */
+    current: () => invoke<string>('app:update-current'),
+    /** 下载安装包；进度走 onProgress */
+    download: (asset: UpdateAsset) => invoke<{ ok: boolean; path?: string; error?: string }>('app:update-download', asset),
+    /** 打开安装包，交给系统安装程序 */
+    install: (path: string) => invoke<{ ok: boolean; error?: string }>('app:update-install', path),
+    /** 在浏览器里打开 release 页面 */
+    openPage: (url: string) => invoke<boolean>('app:update-open-page', url),
+    /** 启动时自动检查发现新版本（每个进程最多一次） */
+    onAvailable: (handler: (info: UpdateCheckResult) => void): (() => void) => {
+      const listener = (_e: unknown, info: UpdateCheckResult): void => handler(info)
+      ipcRenderer.on('app:update-available', listener)
+      return () => ipcRenderer.removeListener('app:update-available', listener)
+    },
+    /** 下载进度 */
+    onProgress: (handler: (p: UpdateProgress) => void): (() => void) => {
+      const listener = (_e: unknown, p: UpdateProgress): void => handler(p)
+      ipcRenderer.on('app:update-progress', listener)
+      return () => ipcRenderer.removeListener('app:update-progress', listener)
+    }
   }
 }
 

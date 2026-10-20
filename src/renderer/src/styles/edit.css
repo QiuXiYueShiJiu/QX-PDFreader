@@ -477,6 +477,12 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  /*
+   * 标签不换行：浮条宽度是靠内容撑的，但高倍率/窄窗口下它会落在
+   * max-width 附近，不写 nowrap 时「复制」「格式」会被拆成两行（截图里见过）。
+   */
+  white-space: nowrap;
+  flex: 0 0 auto;
   min-width: 32px;
   height: 32px;
   padding: 0 8px;

@@ -1330,8 +1330,24 @@ function PdfPage({
         if (cancelled) return
 
         container.innerHTML = ''
-        container.style.width = `${Math.floor(viewport.width)}px`
-        container.style.height = `${Math.floor(viewport.height)}px`
+        /*
+         * ★ 必须把 --scale-factor 设成**这一页当前的实际倍率**（v1.0.1 真因）。
+         *
+         *   pdf.js 4.10 的 TextLayer.render() 会把容器的宽高与字号改写成 CSS
+         *   表达式：
+         *       width: round(down, var(--scale-factor) * 594.96px, 1px)
+         *       font-size: calc(var(--scale-factor) * 7.99px)
+         *   也就是它并不直接用我们传进去的 viewport 像素，而是**再乘一次**
+         *   --scale-factor。此前 viewer.css 把该变量写死成 1（当年为了修
+         *   「选一串文字却选中一大串」），于是文本层永远停在 100%：
+         *   页与画布随缩放到 363%，文本层还只有 594px 宽 → 蓝色选区高亮整块
+         *   缩在左上角，和画布上的字完全对不上（用户 2026-10-20 报的错位，
+         *   任何非 100% 倍率都复现）。
+         *
+         *   修法：每次渲染前按当前倍率写一次（自定义属性会继承给所有 span），
+         *   不再手动写 width/height —— 那两行本来也会被 render() 覆盖。
+         */
+        container.style.setProperty('--scale-factor', String(scale))
 
         const itemCount = Array.isArray(textContent.items) ? textContent.items.length : -1
         const layer = new pdfjsLib.TextLayer({

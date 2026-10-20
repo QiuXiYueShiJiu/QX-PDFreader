@@ -23,6 +23,27 @@ import {
   type ZoomSpec
 } from '@shared/types'
 import { DEFAULT_SETTINGS } from '@shared/settings'
+
+/** 更新检查结果（渲染层只用到这几个字段） */
+export interface UpdateInfo {
+  ok: boolean
+  newer: boolean
+  current: string
+  latest: string
+  page?: string
+  notes?: string
+  publishedAt?: string
+  asset?: { name: string; size: number; url: string }
+  error?: string
+}
+
+export interface UpdateProgress {
+  received: number
+  total: number
+  /** 0~1；total 未知时为 -1 */
+  fraction: number
+}
+
 import {
   encodeStroke,
   splitStrokeByEraser,
@@ -168,6 +189,23 @@ interface ViewerState {
    *   · disclaimerDismissed = 只点了 ×，仅本次会话生效（重启后还会出现）
    */
   disclaimerDismissed: boolean
+
+  /* ---------- 版本更新 ---------- */
+  /**
+   * 查到的更新信息（null = 还没查/没查到）。
+   *
+   * 类型用结构化最小集，不 import 主进程模块：渲染层只关心
+   * 「有没有新版本 / 版本号 / 安装包信息 / release 页面」。
+   */
+  updateInfo: UpdateInfo | null
+  /** 下载进度（received/total 字节，fraction<0 表示总大小未知） */
+  updateProgress: UpdateProgress
+  /** 下载阶段：idle 未开始 / downloading / ready 下好了 / error */
+  updateStage: 'idle' | 'downloading' | 'ready' | 'error'
+  /** 下好的安装包路径（ready 后可用） */
+  updateFile: string
+  /** 本次会话已把浮层关掉 */
+  updateDismissed: boolean
   /** 查找栏是否展开 */
   showSearch: boolean
   /**
@@ -306,6 +344,16 @@ interface ViewerState {
   setShowSettings: (v: boolean) => void
   /** 关掉本次启动的声明浮层（不写持久化） */
   dismissDisclaimer: () => void
+
+  /* ---------- 更新 ---------- */
+  /** 写入「查到新版本」的信息，并清掉上一次的关闭状态 */
+  setUpdateInfo: (info: UpdateInfo | null) => void
+  setUpdateProgress: (p: UpdateProgress) => void
+  setUpdateStage: (stage: 'idle' | 'downloading' | 'ready' | 'error', file?: string) => void
+  /** 关掉本次会话的更新浮层 */
+  dismissUpdate: () => void
+  /** 手动查一次（设置页的「检查更新」用），返回结果供界面提示 */
+  checkUpdateNow: () => Promise<UpdateInfo>
   setShowSearch: (v: boolean) => void
   setSidebarTab: (t: 'thumbnails' | 'outline' | 'search') => void
   setSearchQuery: (q: string) => void
@@ -466,6 +514,11 @@ export const useViewer = create<ViewerState>((set, get) => ({
   showRightPanel: DEFAULT_SETTINGS.showRightPanel,
   showSettings: false,
   disclaimerDismissed: false,
+  updateInfo: null,
+  updateProgress: { received: 0, total: 0, fraction: 0 },
+  updateStage: 'idle',
+  updateFile: '',
+  updateDismissed: false,
   showSearch: false,
   sidebarTab: 'thumbnails',
   searchFocusTick: 0,
@@ -743,6 +796,31 @@ export const useViewer = create<ViewerState>((set, get) => ({
   setShowSettings: (v) => set({ showSettings: v }),
 
   dismissDisclaimer: () => set({ disclaimerDismissed: true }),
+
+  setUpdateInfo: (info) =>
+    set({
+      updateInfo: info,
+      // 有新信息就重新显示浮层（用户可能刚点过「稍后」）
+      updateDismissed: false,
+      updateStage: info?.newer ? 'downloading' : 'idle',
+      updateProgress: { received: 0, total: info?.asset?.size ?? 0, fraction: 0 },
+      updateFile: ''
+    }),
+  setUpdateProgress: (p) => set({ updateProgress: p }),
+  setUpdateStage: (stage, file) =>
+    set((s) => ({ updateStage: stage, updateFile: file ?? s.updateFile })),
+  dismissUpdate: () => set({ updateDismissed: true }),
+  checkUpdateNow: async () => {
+    const info = await window.pdfApp.update.check()
+    set({
+      updateInfo: info,
+      updateDismissed: false,
+      updateStage: info.newer ? 'downloading' : 'idle',
+      updateProgress: { received: 0, total: info.asset?.size ?? 0, fraction: 0 },
+      updateFile: ''
+    })
+    return info
+  },
 
   /**
    * 展开/收起全文搜索。

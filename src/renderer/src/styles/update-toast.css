@@ -1,0 +1,193 @@
+/**
+ * 更新提示浮层（右下角圆角卡片）。
+ *
+ * 位置与声明浮层同一套规则：
+ *   · right 84px —— 让开右侧竖排工具条（上一页/下一页/放大镜/退出）
+ *   · bottom 状态栏 + 92px —— 让开底部内容编辑条（撤销/重做/清空）
+ *   · z-index 950 —— 课堂遮罩（黑屏/聚光灯/放大镜，1000+）必须能盖住它
+ *
+ * 两个浮层可能同时存在（新用户第一次打开 + 正好有新版本），
+ * 所以更新提示再往下挪一条，避免与声明叠在一起。
+ */
+
+.update-toast {
+  position: fixed;
+  right: 84px;
+  /*
+   * 比声明浮层低 130px：声明高度约 120px，错开就不会互相压住。
+   * 声明不显示时这条多出来的空隙也不碍事（右下角本来就是空的）。
+   */
+  bottom: calc(var(--statusbar-h) + 222px);
+  z-index: 950;
+
+  box-sizing: border-box;
+  width: min(320px, calc(100vw - 36px));
+  padding: 12px 40px 12px 15px;
+
+  border: 1px solid rgb(var(--border));
+  border-radius: var(--radius-lg);
+  background: rgb(var(--surface));
+  color: rgb(var(--text));
+  box-shadow:
+    0 14px 36px rgb(var(--text) / 0.18),
+    0 1px 3px rgb(var(--text) / 0.1);
+
+  font-size: 0.84rem;
+  line-height: 1.6;
+  animation: update-in 220ms ease-out;
+  user-select: text;
+}
+
+.update-toast__title {
+  margin: 0 0 2px;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: rgb(var(--accent));
+}
+
+.update-toast__version {
+  font-variant-numeric: tabular-nums;
+}
+
+.update-toast__sub {
+  margin: 0 0 8px;
+  color: rgb(var(--muted));
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 进度条：底色用 border 的半透明，填充用 accent，三套主题都看得出 */
+.update-toast__bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgb(var(--border) / 0.75);
+  overflow: hidden;
+}
+
+.update-toast__bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: rgb(var(--accent));
+  transition: width 240ms ease-out;
+}
+
+/* 总量未知时让填充条自己来回跑，别让它看着像卡住 */
+.update-toast__bar-fill[data-update-percent='-1'] {
+  width: 35% !important;
+  animation: update-indeterminate 1.1s ease-in-out infinite;
+}
+
+.update-toast__hint {
+  margin: 7px 0 0;
+  color: rgb(var(--text) / 0.82);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.update-toast__hint--error {
+  color: rgb(220 38 38);
+}
+
+.update-toast__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.update-toast__btn {
+  flex: 1;
+  min-height: 30px;
+  padding: 4px 10px;
+
+  border: 1px solid rgb(var(--border));
+  border-radius: var(--radius-sm);
+  background: rgb(var(--surface));
+  color: rgb(var(--text));
+
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.update-toast__btn:hover {
+  border-color: rgb(var(--accent) / 0.55);
+  background: rgb(var(--accent) / 0.08);
+}
+
+.update-toast__btn--primary {
+  border-color: transparent;
+  background: rgb(var(--accent));
+  color: #fff;
+  font-weight: 600;
+}
+
+.update-toast__btn--primary:hover {
+  filter: brightness(1.06);
+}
+
+.update-toast__close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+
+  width: 26px;
+  height: 26px;
+  padding: 0;
+
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: rgb(var(--muted));
+
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.update-toast__close:hover {
+  background: rgb(var(--text) / 0.08);
+  color: rgb(var(--text));
+}
+
+/* 触屏一体机：按钮给足指头面积 */
+@media (pointer: coarse) {
+  .update-toast__btn {
+    min-height: 40px;
+    font-size: 0.86rem;
+  }
+
+  .update-toast__close {
+    width: 34px;
+    height: 34px;
+  }
+}
+
+@keyframes update-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes update-indeterminate {
+  0% {
+    margin-left: 0;
+  }
+  50% {
+    margin-left: 65%;
+  }
+  100% {
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .update-toast,
+  .update-toast__bar-fill[data-update-percent='-1'] {
+    animation: none;
+  }
+}

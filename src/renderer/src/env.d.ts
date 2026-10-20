@@ -108,7 +108,41 @@ export interface PdfAppApi {
     log: (line: string) => void
     info: () => Promise<{ 启用: boolean; 日志: string; 标记: string }>
   }
+  /**
+   * 版本更新。
+   *
+   * ★ 网络请求全部在主进程（渲染层 CSP 不放外网），这里只是壳。
+   *   与 preload 的 `update` 字段一一对应，改一边记得同步另一边。
+   */
+  update: {
+    check: () => Promise<UpdateInfoLike>
+    current: () => Promise<string>
+    download: (asset: {
+      name: string
+      size: number
+      url: string
+    }) => Promise<{ ok: boolean; path?: string; error?: string }>
+    install: (path: string) => Promise<{ ok: boolean; error?: string }>
+    openPage: (url: string) => Promise<boolean>
+    onAvailable: (handler: (info: UpdateInfoLike) => void) => () => void
+    onProgress: (
+      handler: (p: { received: number; total: number; fraction: number }) => void
+    ) => () => void
+  }
   onOpen: (handler: (payload: OpenPayload) => void) => () => void
+}
+
+/** 更新检查结果（与 src/main/updater.ts 的 UpdateCheckResult 同形） */
+export interface UpdateInfoLike {
+  ok: boolean
+  newer: boolean
+  current: string
+  latest: string
+  page?: string
+  notes?: string
+  publishedAt?: string
+  asset?: { name: string; size: number; url: string }
+  error?: string
 }
 
 declare global {

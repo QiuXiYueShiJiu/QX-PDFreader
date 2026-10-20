@@ -807,27 +807,21 @@
   user-select: text;
   z-index: 2;
   /*
-   * ★★ `--scale-factor` 必须定义，否则**选中范围会严重错位**
-   *    （用户报的「选一串文字却选中一大串」就是它）。
+   * `--scale-factor`：**由 JS 每次渲染时按当前倍率写入**
+   *   （DocumentView.tsx 文本层 effect 里的 setProperty）。
    *
-   *    pdf.js 的 TextLayer 把每个 span 的样式写成
-   *        fontSize      = calc(<PDF 字号对应的 px> * var(--scale-factor))
-   *        letterSpacing = calc(<advance 宽度> * var(--scale-factor) - 1ch)
-   *    也就是 span 的**字号与宽度**都靠这个变量换算。
+   *   pdf.js 的 TextLayer 把每个 span 与容器本身的样式写成
+   *       width         = round(down, var(--scale-factor) * <PDF 宽>px, 1px)
+   *       fontSize      = calc(<PDF 字号对应的 px> * var(--scale-factor))
+   *       letterSpacing = calc(<advance 宽度> * var(--scale-factor) - 1ch)
+   *   也就是它并**不**直接用传进去的 viewport 像素，而是再乘一次这个变量。
    *
-   *    我们的约定是「文本层容器按 CSS 像素布局、长度值 1:1 写」，
-   *    所以正确取值就是 1。
-   *
-   *    此前项目里从未定义它（CSS 全文搜不到），于是整条 calc() 失效、
-   *    字号回退到容器默认的约 16px。缩放到 177% 时真实字形已在 20px 以上，
-   *    两者对不上 → span 的宽度与实际字形偏差很大 →
-   *    选中高亮按错误的 span 尺寸铺开，盖住整行甚至跨行，
-   *    看起来就是「一选就选了一大串」。
-   *
-   *    pdf.js 官方 viewer 的 web/pdf_viewer.css 同样依赖这个变量，
-   *    只是它由页面容器统一提供；我们是自己搭的渲染管线，要在这里显式给上。
+   *   这里保留 1 只当作兜底（万一某次渲染前 JS 没跑到）。历史上它被写死成 1，
+   *   于是缩放后文本层永远停在 100%、选区高亮缩在左上角 —— 见 DocumentView.tsx
+   *   里那段「必须把 --scale-factor 设成当前倍率」的踩坑记录（v1.0.1）。
    */
   --scale-factor: 1;
+
 }
 
 .textLayer :is(span, br) {

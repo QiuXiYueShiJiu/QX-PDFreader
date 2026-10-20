@@ -22,6 +22,7 @@ import './styles/ink.css'
 import './styles/components.css'
 import './styles/edit.css'
 import './styles/disclaimer.css'
+import './styles/update-toast.css'
 
 /*
  * ---------- 自动化测试挂钩 ----------

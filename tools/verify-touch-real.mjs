@@ -347,24 +347,36 @@ try {
    *   灰底起手时「按了就拖 = 平移」这条契约与计时器先后无关，测得稳；
    *   顺带补一条「松手后还有惯性」——选择工具关掉了原生滚动，惯性是产品自己补的。
    */
+  /*
+   * ★ 别只盯 `document.querySelector('.pdf-page')`：
+   *   连续滚动模式下 DOM 里第一页常年是「上面几页」，它的 rect 早已在视口之外，
+   *   扫出来必然是空 → 整套里偶发红 `找不到可拖动的页面灰底落点`。
+   *   这里改成「所有页里取与视口相交面积最大的那一页」再扫。
+   */
   const gray = await evaluateJson(`
-    const page = document.querySelector('.pdf-page')
-    if (!page) return null
-    const r = page.getBoundingClientRect()
     const ok = (x, y) => {
       const el = document.elementFromPoint(x, y)
       if (!el || !el.closest('.pdf-page')) return false
-      if (el.closest('.textLayer') || el.closest('.edit-item') || el.closest('.edit-selbar')) return false
+      /* 文字层 div 本身铺满整页，它不算「压在字上」；只有 span 才是字 */
+      if (el.closest('.textLayer span') || el.closest('.ocr-text-layer span')) return false
+      if (el.closest('.edit-item') || el.closest('.edit-selbar')) return false
       return true
     }
-    const left = Math.max(8, r.left + 8)
-    const right = Math.min(innerWidth - 8, r.right - 8)
-    const top = Math.max(80, r.top + 8)
-    const bottom = Math.min(innerHeight - 12, r.bottom - 8)
-    for (let y = top; y < bottom; y += 10) {
-      for (let x = left; x < right; x += 10) {
-        /* 整段拖动路径（向上 120px）也得在灰底上，别中途压到文字 */
-        if (ok(x, y) && ok(x, y - 60) && ok(x, y - 120)) return { x: Math.round(x), y: Math.round(y) }
+    const pages = [...document.querySelectorAll('.pdf-page')]
+      .map((p) => ({ p, r: p.getBoundingClientRect() }))
+      .map((o) => ({ ...o, seen: Math.min(o.r.bottom, innerHeight) - Math.max(o.r.top, 0) }))
+      .filter((o) => o.seen > 240)
+      .sort((a, b) => b.seen - a.seen)
+    for (const { r } of pages) {
+      const left = Math.max(8, r.left + 8)
+      const right = Math.min(innerWidth - 8, r.right - 8)
+      const top = Math.max(80, r.top + 8)
+      const bottom = Math.min(innerHeight - 12, r.bottom - 8)
+      for (let y = top + 120; y < bottom; y += 10) {
+        for (let x = left; x < right; x += 10) {
+          /* 整段拖动路径（向上 120px）也得在灰底上，别中途压到文字 */
+          if (ok(x, y) && ok(x, y - 60) && ok(x, y - 120)) return { x: Math.round(x), y: Math.round(y) }
+        }
       }
     }
     return null
@@ -593,7 +605,7 @@ try {
    * 灰底 = 命中 .pdf-page 但不在任何文字 span 上（画布/空白）。
    * 触摸屏上「点一下空白取消选择」是最常用的退出动作，之前要点两下。
    */
-  const grayPoint = await evaluateJson(`
+  let grayPoint = await evaluateJson(`
     const scroll = document.querySelector('.viewer-scroll')
     const sr = scroll.getBoundingClientRect()
     const pages = Array.from(document.querySelectorAll('.pdf-page'))
@@ -635,18 +647,63 @@ try {
       await touch('touchEnd')
       await sleep(260)
     }
+    /*
+     * ★ 选完词以后浮条就落在「原来那块灰底」上，再按同一个坐标其实是按在
+     *   浮条的文案 span 上（.edit-selbar__text）—— 选区被清掉、浮条却不动。
+     *   所以拿到选区之后重新扫一次灰底（此时浮条已存在，会被 elementFromPoint 挡掉）。
+     */
+    grayPoint = await evaluateJson(`
+      const okPoint = (x, y) => {
+        const el = document.elementFromPoint(x, y)
+        if (!el || !el.closest('.pdf-page')) return false
+        if (el.closest('.textLayer span') || el.closest('.ocr-text-layer span')) return false
+        if (el.closest('.edit-selbar') || el.closest('.edit-item') || el.closest('.edit-bar')) return false
+        return true
+      }
+      const sr = document.querySelector('.viewer-scroll').getBoundingClientRect()
+      const pages = [...document.querySelectorAll('.pdf-page')]
+        .map((p) => p.getBoundingClientRect())
+        .filter((r) => r.bottom > sr.top + 120 && r.top < sr.bottom - 120)
+      for (const r of pages) {
+        for (let y = Math.max(r.top, sr.top) + 40; y < Math.min(r.bottom, sr.bottom) - 40; y += 24) {
+          for (let x = r.left + 16; x < r.right - 16; x += 24) {
+            if (okPoint(x, y)) return { x: Math.round(x), y: Math.round(y) }
+          }
+        }
+      }
+      return null
+    `)
     const before = await state()
-    await touch('touchStart', grayPoint.x, grayPoint.y)
-    await sleep(40)
-    await touch('touchEnd', grayPoint.x, grayPoint.y)
-    await sleep(320)
-    const after = await state()
-    grayState = { hit: before.sel !== '', sel: after.sel, bar: after.bar }
-    check(
-      '真触摸点灰底：一次点掉选区并收起工具条',
-      grayState.hit ? grayState.sel === '' && !grayState.bar : false,
-      `点前「${before.sel}」（bar=${before.bar}）→ 点后「${after.sel}」（bar=${after.bar}）@${grayPoint.x},${grayPoint.y}`
-    )
+    if (!grayPoint) {
+      check('真触摸点灰底：一次点掉选区并收起工具条', false, '选完词后找不到不被浮条压住的灰底落点')
+    } else {
+      const hitInfo = await evaluateJson(`
+        const el = document.elementFromPoint(${grayPoint.x}, ${grayPoint.y})
+        const bar = document.querySelector('.edit-selbar')
+        const b = bar ? bar.getBoundingClientRect() : null
+        return {
+          tag: el ? el.tagName + '.' + (el.className || '') : 'none',
+          barNow: b ? [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)] : null
+        }
+      `)
+      await touch('touchStart', grayPoint.x, grayPoint.y)
+      await sleep(40)
+      await touch('touchEnd', grayPoint.x, grayPoint.y)
+      await sleep(320)
+      const after = await state()
+      const afterInfo = await evaluateJson(`
+        const bar = document.querySelector('.edit-selbar')
+        const b = bar ? bar.getBoundingClientRect() : null
+        return { barRect: b ? [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)] : null }
+      `)
+      grayState = { hit: before.sel !== '', sel: after.sel, bar: after.bar }
+      check(
+        '真触摸点灰底：一次点掉选区并收起工具条',
+        grayState.hit ? grayState.sel === '' && !grayState.bar : false,
+        `点前「${before.sel}」（bar=${before.bar}）→ 点后「${after.sel}」（bar=${after.bar}）@${grayPoint.x},${grayPoint.y}` +
+          ` 命中=${hitInfo.tag} 条=${JSON.stringify(hitInfo.barNow)}→${JSON.stringify(afterInfo.barRect)}`
+      )
+    }
   } else {
     check('真触摸点灰底：一次点掉选区并收起工具条', false, '没找到灰底落点')
   }

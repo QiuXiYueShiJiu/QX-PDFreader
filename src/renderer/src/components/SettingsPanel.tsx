@@ -22,9 +22,11 @@ import {
   PanelLeft,
   Palette,
   Info,
+  RefreshCw,
   X
 } from 'lucide-react'
 import type { ReaderSettings, ThemeMode } from '@shared/types'
+import { useViewer } from '../store'
 
 /** 缩放预设：用 as const 保留字面量类型，减少 as 断言 */
 const ZOOM_PRESETS = [
@@ -112,6 +114,34 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
       alive = false
     }
   }, [])
+
+  /* ---------- 检查更新 ---------- */
+  /**
+   * 手动检查（设置页入口）。
+   *
+   * 查到新版本时把结果塞进全局 store —— 右下角浮层会自动出现并开始下载，
+   * 用户不需要在这里再点一次「下载」。查不到就只在本卡片里回一句，
+   * 不打扰界面其它部分。
+   */
+  const checkUpdateNow = useViewer((s) => s.checkUpdateNow)
+  const [checking, setChecking] = useState(false)
+  const [checkMsg, setCheckMsg] = useState('')
+
+  const onCheckUpdate = async (): Promise<void> => {
+    if (checking) return
+    setChecking(true)
+    setCheckMsg('')
+    try {
+      const result = await checkUpdateNow()
+      if (!result.ok) setCheckMsg(result.error ?? '检查失败，请稍后再试')
+      else if (result.newer) setCheckMsg(`发现新版本 v${result.latest}，正在下载…`)
+      else setCheckMsg('已是最新版本')
+    } catch {
+      setCheckMsg('检查失败，请稍后再试')
+    } finally {
+      setChecking(false)
+    }
+  }
 
   useEffect(() => {
     const previous = document.activeElement
@@ -389,6 +419,45 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
                 onChange={(checked) => onChange({ enableShortcuts: checked })}
               />
             </div>
+          </section>
+
+          {/* ---------------- 更新 ---------------- */}
+          <section className="sb-card" aria-labelledby={`${idPrefix}-sec-update`}>
+            <h3 className="sb-card-title" id={`${idPrefix}-sec-update`}>
+              <RefreshCw size={15} aria-hidden="true" />
+              更新
+            </h3>
+
+            <p className="sb-field-hint" data-update-current="1">
+              当前版本 {about?.build || about?.version || '…'}
+            </p>
+
+            <div className="sb-field-inline">
+              <button
+                type="button"
+                className="sb-btn sb-btn-primary"
+                data-tb-id="settings-check-update"
+                disabled={checking}
+                onClick={() => void onCheckUpdate()}
+              >
+                {checking ? '正在检查…' : '检查更新'}
+              </button>
+              {checkMsg ? (
+                <span className="sb-field-hint" data-update-msg="1">
+                  {checkMsg}
+                </span>
+              ) : null}
+            </div>
+
+            <Switch
+              id={`${idPrefix}-update-auto`}
+              label="启动时自动检查更新"
+              checked={settings.updateAutoCheck}
+              onChange={(v) => onChange({ updateAutoCheck: v })}
+            />
+            <p className="sb-field-hint">
+              自动检查是静默的：只有查到新版本才会在右下角提示并开始下载，下载完由你决定什么时候装。
+            </p>
           </section>
 
           {/* ---------------- 关于 ---------------- */}

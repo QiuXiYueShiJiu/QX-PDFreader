@@ -52,8 +52,8 @@ const resolved = JSON.parse(readFileSync('build/.packaging-resolved.json', 'utf8
  * 产物输出目录：读 package.json 的 build.directories.output（单一来源）。
  *
  * 早先这里写死 `--config.directories.output=dist-installer`，
- * 于是 package.json 里配了别的目录也不生效 —— 现在统一跟随
- * package.json 的 build.directories.output，不再硬编码任何本机路径。
+ * 于是 package.json 里配了别的目录也不生效 —— 用户要求把安装包
+ * 放到 dist-installer，所以改成跟着配置走。
  */
 const OUT_DIR = pkgForOut.build?.directories?.output ?? 'dist-installer'
 

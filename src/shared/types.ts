@@ -45,6 +45,13 @@ export interface ReaderSettings {
    * 勾上它，以后启动就不再出现；没勾就关掉，只对本次启动生效。
    */
   disclaimerHidden: boolean
+  /**
+   * 启动时是否自动查一次新版本。
+   *
+   * 自动检查是静默的：只有查到更新才在右下角提一句，查不到/断网什么都不显示。
+   * 设置页里的「检查更新」按钮不受这个开关影响。
+   */
+  updateAutoCheck: boolean
 }
 
 /** 一条最近打开的记录 */

@@ -98,7 +98,7 @@ const installDir = (cfg.installDir ?? DEFAULT_INSTALL_DIR).replace(/\\+$/, '')
 /**
  * 需要顺带清掉的**旧安装目录**（交付值，源码里为空数组）。
  *
- * 本版默认安装位置从 C:\Program Files\QiuXiPDFReader-legacy 改成 C:\Program Files\QiuXiPDFReader。
+ * 本版默认安装位置从 C:\Program Files\QiuXiPDFReader 改成 C:\Program Files\QiuXiPDFReader。
  * 老机器上可能留着整个旧目录：两份 exe、两个卸载器、
  * 指向旧 exe 的快捷方式。安装时清掉，避免用户点错版本。
  */

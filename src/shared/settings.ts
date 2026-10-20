@@ -44,7 +44,9 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   uiScale: 1.15,
   enableShortcuts: true,
   /* 启动声明默认显示：第一次用的人需要知道「免费 / 早期版本 / 到哪反馈」 */
-  disclaimerHidden: false
+  disclaimerHidden: false,
+  /* 启动时静默查一次新版本：查到才提示，查不到什么都不显示 */
+  updateAutoCheck: true
 }
 
 export function cloneDefaults(): ReaderSettings {
@@ -70,6 +72,8 @@ export function mergeSettings(raw: unknown): ReaderSettings {
     enableShortcuts:
       typeof input.enableShortcuts === 'boolean' ? input.enableShortcuts : base.enableShortcuts,
     disclaimerHidden:
-      typeof input.disclaimerHidden === 'boolean' ? input.disclaimerHidden : base.disclaimerHidden
+      typeof input.disclaimerHidden === 'boolean' ? input.disclaimerHidden : base.disclaimerHidden,
+    updateAutoCheck:
+      typeof input.updateAutoCheck === 'boolean' ? input.updateAutoCheck : base.updateAutoCheck
   }
 }

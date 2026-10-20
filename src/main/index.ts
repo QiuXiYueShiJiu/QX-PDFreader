@@ -30,6 +30,7 @@ import {
   writeLastPosition,
 } from './settings'
 import type { Annotation, OpenResult } from '@shared/types'
+import { checkForUpdate, currentVersion, downloadUpdate, installUpdate } from './updater'
 
 /**
  * ★ 必须在模块加载时立刻声明特权协议，位置不能挪到文件底部。
@@ -883,8 +884,30 @@ function registerIpc(): void {
   ipcMain.handle('app:renderer-ready', () => {
     rendererReady = true
     flushPendingOpens()
+    void autoCheckUpdateOnce()
     return true
   })
+
+  /**
+   * 启动后静默查一次新版本（每个进程只查一次）。
+   *
+   * 为什么延迟 4 秒：刚启动时渲染层在解析 PDF、画首页，网络请求与
+   * 版本比较虽然不重，但没必要和首屏抢带宽/主线程。查不到（断网、
+   * 镜像站挂了）就什么都不做 —— 用户不该被「检查失败」打扰。
+   */
+  let autoChecked = false
+  async function autoCheckUpdateOnce(): Promise<void> {
+    if (autoChecked) return
+    autoChecked = true
+    if (getSettings().updateAutoCheck === false) return
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 4000))
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    const result = await checkForUpdate(6000)
+    if (!result.ok || !result.newer) return
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    mainWindow.webContents.send('app:update-available', result)
+  }
+
 
   /* ---------- 打开文件 ---------- */
 
@@ -1144,6 +1167,57 @@ function registerIpc(): void {
 
   /** 「关于」里的版本号取自 package.json，避免界面里硬编码一个会过期的号 */
   ipcMain.handle('app:info', () => appVersionInfo())
+
+  /* ---------- 版本更新 ---------- */
+
+  /**
+   * 查最新版本。
+   *
+   * 走镜像站（见 src/main/updater.ts），返回结构化结果而不是抛异常：
+   * 断网/镜像挂了都只是「查不到」，界面据此显示一句话即可。
+   */
+  ipcMain.handle('app:update-check', async () => {
+    const result = await checkForUpdate()
+    console.log(
+      `[update] 检查完成：本地 ${result.current}，远端 ${result.latest}` +
+        (result.newer ? '（有新版本）' : result.ok ? '（已是最新）' : `（${result.error}）`)
+    )
+    return result
+  })
+
+  /** 当前版本号（界面显示用，不触发网络） */
+  ipcMain.handle('app:update-current', () => currentVersion())
+
+  /**
+   * 下载安装包。进度用 send 推给渲染层，避免 IPC invoke 一直挂着。
+   * 下载是长任务（约 100 MB），这里不设超时 —— 由用户取消或断网结束。
+   */
+  ipcMain.handle('app:update-download', async (event, asset: unknown) => {
+    const item = asset as { name?: string; size?: number; url?: string }
+    if (!item || typeof item.url !== 'string' || typeof item.name !== 'string') {
+      return { ok: false, error: '下载信息不完整' }
+    }
+    const result = await downloadUpdate(
+      { name: item.name, size: Number(item.size ?? 0), url: item.url },
+      (p) => {
+        if (event.sender.isDestroyed()) return
+        event.sender.send('app:update-progress', p)
+      }
+    )
+    console.log(`[update] 下载${result.ok ? '完成' : '失败'}：${result.path ?? result.error}`)
+    return result
+  })
+
+  /** 打开下载好的安装包（用系统默认方式，装不装由用户决定） */
+  ipcMain.handle('app:update-install', (_e, path: unknown) => installUpdate(String(path ?? '')))
+
+  /** 在浏览器里打开 release 页面，供用户自己看说明/手动下载 */
+  ipcMain.handle('app:update-open-page', (_e, url: unknown) => {
+    const target = String(url ?? '')
+    if (!/^https:\/\//i.test(target)) return false
+    void shell.openExternal(target)
+    return true
+  })
 
   /**
    * 标签页切换时同步窗口标题。
