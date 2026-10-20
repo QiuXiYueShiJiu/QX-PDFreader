@@ -1,0 +1,188 @@
+/**
+ * 全局基础样式与设计令牌。
+ *
+ * 约定：
+ *   · 颜色令牌写成 `R G B` 三数字，用 `rgb(var(--text))` 或
+ *     `rgb(var(--text) / 0.6)` 使用，同一个令牌可复用于任意透明度。
+ *   · 主题切换靠 `html[data-theme='light'|'dark'|'sepia']`（由 App 写入）。
+ *   · 界面缩放靠 `html { font-size }` + 组件使用 rem/em 实现，
+ *     这样滑块调一个变量就能整体缩放，不必改每个组件。
+ */
+
+:root {
+  /* ---------- 浅色主题（默认） ---------- */
+  --bg: 243 244 247;
+  --surface: 255 255 255;
+  --surface-strong: 248 249 252;
+  --text: 24 32 46;
+  --muted: 110 122 140;
+  --border: 216 222 232;
+  --accent: 47 127 232;
+  --accent-fg: 255 255 255;
+
+  /*
+   * 阅读区（页面背后的底色）。
+   *
+   * 对齐 pdf.js 的 `--page-margin: #f9f9fa`（= 249 249 250）。
+   * 原先用的 226 229 235 比纸暗一档，页面画好时会有一次可见的亮度跳变；
+   * 用得比纸稍暗一点点（但只有一点点）才既能衬托出纸张边界、
+   * 又不会在加载完成时闪一下。
+   */
+  --reader-bg: 249 249 250;
+
+  /* 尺寸与圆角 */
+  --radius: 10px;
+  --radius-sm: 6px;
+  --radius-lg: 16px;
+
+  /* 标题栏与状态栏高度（自绘） */
+  --titlebar-h: 40px;
+  --statusbar-h: 30px;
+  --sidebar-w: 232px;
+  --right-panel-w: 268px;
+
+  --dur-fast: 110ms;
+  --dur: 180ms;
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+
+  color-scheme: light;
+}
+
+html[data-theme='dark'] {
+  --bg: 22 25 32;
+  --surface: 30 34 43;
+  --surface-strong: 38 43 54;
+  --text: 230 235 244;
+  --muted: 150 160 178;
+  --border: 56 63 78;
+  --accent: 88 160 255;
+  --reader-bg: 16 18 24;
+
+  color-scheme: dark;
+}
+
+/* 米色：长时间阅读与投影都更柔和，是教学场景的推荐主题 */
+html[data-theme='sepia'] {
+  --bg: 240 233 219;
+  --surface: 250 246 237;
+  --surface-strong: 245 239 226;
+  --text: 62 52 38;
+  --muted: 132 118 98;
+  --border: 214 202 180;
+  --accent: 176 118 58;
+  --reader-bg: 226 216 196;
+
+  color-scheme: light;
+}
+
+/* ---------- 重置 ---------- */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: rgb(var(--bg));
+  color: rgb(var(--text));
+  font-family: 'Microsoft YaHei UI', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow: hidden;
+  /* 触屏：禁止长按选中造成的蓝色高亮；文本选择在阅读区单独开启 */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+button,
+[role='button'] {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+:focus-visible {
+  outline: 2px solid rgb(var(--accent));
+  outline-offset: 1px;
+}
+
+/* ---------- 滚动条 ---------- */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--text) / 0.22);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--text) / 0.38);
+  background-clip: content-box;
+}
+
+/* ---------- 通用控件 ---------- */
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  color: rgb(var(--text));
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.icon-btn:hover {
+  background: rgb(var(--text) / 0.1);
+}
+
+.icon-btn:active {
+  background: rgb(var(--text) / 0.18);
+}
+
+.icon-btn[aria-pressed='true'] {
+  background: rgb(var(--accent) / 0.16);
+  color: rgb(var(--accent));
+}
+
+.icon-btn:disabled {
+  opacity: 0.36;
+  cursor: default;
+}
+
+.icon-btn:disabled:hover {
+  background: none;
+}

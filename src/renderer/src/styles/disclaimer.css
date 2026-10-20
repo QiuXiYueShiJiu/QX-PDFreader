@@ -1,0 +1,126 @@
+/**
+ * 启动声明浮层（右下角圆角提示）。
+ *
+ * 设计要点：
+ *   · 位置：右下角、贴在状态栏上方，不挡工具栏、不挡页面正文
+ *   · 颜色：全部用主题令牌 —— 浅色 / 深色 / 米色都能自动适配
+ *   · 圆角：--radius-lg（16px），与设置面板、工具条保持同一套体感
+ *   · 层级：950 —— 在内容与遮罩之上（1000+ 的遮罩/设置仍能盖住它）
+ *     实际上它必须让课堂遮罩（黑屏/聚光灯）压下去，否则投影时
+ *     右下角一直挂着一块亮色提示；所以这里的 z-index 故意低于 mask。
+ */
+
+.disclaimer {
+  position: fixed;
+  /*
+   * 让开右侧竖排工具条（raile 宽约 64px + 边距）与底部内容编辑条：
+   * 两个都是常驻且可点的，盖住它们会挡住撤销/重做/退出。
+   */
+  right: 84px;
+  bottom: calc(var(--statusbar-h) + 92px);
+  z-index: 950;
+
+  box-sizing: border-box;
+  width: min(310px, calc(100vw - 36px));
+  padding: 12px 40px 11px 15px;
+
+  border: 1px solid rgb(var(--border));
+  border-radius: var(--radius-lg);
+  background: rgb(var(--surface));
+  color: rgb(var(--text));
+  box-shadow:
+    0 14px 36px rgb(var(--text) / 0.18),
+    0 1px 3px rgb(var(--text) / 0.1);
+
+  font-size: 0.84rem;
+  line-height: 1.65;
+  animation: disclaimer-in 200ms ease-out;
+
+  /* 用户要能选中里面的文字（复制反馈渠道之类），别被全局 draggable 吃掉 */
+  user-select: text;
+}
+
+.disclaimer__title {
+  margin: 0 0 4px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: rgb(var(--accent));
+}
+
+.disclaimer__lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: rgb(var(--text) / 0.86);
+}
+
+.disclaimer__lines li {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.disclaimer__close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+
+  width: 26px;
+  height: 26px;
+  padding: 0;
+
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: rgb(var(--muted));
+
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.disclaimer__close:hover {
+  background: rgb(var(--text) / 0.08);
+  color: rgb(var(--text));
+}
+
+.disclaimer__mute {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgb(var(--border) / 0.7);
+
+  color: rgb(var(--muted));
+  font-size: 0.78rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.disclaimer__mute input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: rgb(var(--accent));
+  cursor: pointer;
+}
+
+@keyframes disclaimer-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .disclaimer {
+    animation: none;
+  }
+}

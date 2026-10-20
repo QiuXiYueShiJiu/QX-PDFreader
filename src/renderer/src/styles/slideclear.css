@@ -1,0 +1,216 @@
+/* ============================================================
+ * 橡皮大小档位
+ *
+ * 与画笔粗细滑块共用同一块位置（橡皮模式下替换显示）——
+ * 两者不会同时有用，共用位置能让工具条宽度保持稳定，
+ * 不会因为切换工具而突然变宽变窄。
+ * ============================================================ */
+
+.drawbar__group--eraser {
+  gap: 2px;
+  padding: 0 8px;
+}
+
+.drawbar__group-label {
+  margin-right: 4px;
+  color: rgb(200 208 220);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.drawbar__esize {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+
+  /* 触摸热区：宽度足够、高度铺满工具条 */
+  width: 42px;
+  height: 46px;
+  border-radius: 9px;
+
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.drawbar__esize-dot {
+  border-radius: 50%;
+  background: rgb(232 236 244);
+  transition:
+    background var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+
+.drawbar__esize-label {
+  color: rgb(200 208 220);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.drawbar__esize:hover {
+  background: rgb(255 255 255 / 0.12);
+}
+
+.drawbar__esize.is-active {
+  background: rgb(90 160 255 / 0.26);
+  /* 底边下划线：与其它激活态保持统一的视觉语言 */
+  box-shadow: inset 0 -2px 0 rgb(90 160 255);
+}
+
+.drawbar__esize.is-active .drawbar__esize-dot {
+  background: #fff;
+  transform: scale(1.1);
+}
+
+.drawbar__esize.is-active .drawbar__esize-label {
+  color: #9ec5ff;
+}
+
+/* ============================================================
+ * 弹簧式滑动清屏
+ *
+ * 借鉴鸿合 π6 的「滑动清页」：
+ * 圆钮从最左拖到最右触发清屏，松手回弹归位。
+ *
+ * 尺寸按触屏给足：轨道高 40px，圆钮 32px ——
+ * 手指按在圆钮上不会滑脱。
+ * ============================================================ */
+
+.slideclear {
+  position: relative;
+  display: flex;
+  align-items: center;
+
+  width: 168px;
+  height: 40px;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 20px;
+
+  /* 比工具条底色更深一点，视觉上像一个「槽」 */
+  background: rgb(0 0 0 / 0.28);
+  border: 1px solid rgb(255 255 255 / 0.1);
+
+  cursor: pointer;
+  user-select: none;
+  /* 触屏上禁止浏览器自己的手势解释，否则拖动会被当成滚动 */
+  touch-action: none;
+  overflow: hidden;
+}
+
+/* 进度填充：跟着圆钮推进，给出「已完成多少」的反馈 */
+.slideclear__fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 20px 0 0 20px;
+  background: rgb(229 72 77 / 0.34);
+  /* 拖动时实时跟手，不要过渡；回弹时由下面的 transition 负责 */
+  transition: none;
+  pointer-events: none;
+}
+
+/* 松手回弹时才加过渡，形成「弹回去」的动画 */
+.slideclear:not(.is-dragging) .slideclear__fill {
+  transition: width 260ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.slideclear__text {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+
+  color: rgb(210 216 226);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.slideclear.is-near .slideclear__text {
+  color: #ffb4b6;
+  font-weight: 600;
+}
+
+/* 圆钮：拖到底触发清屏 */
+.slideclear__knob {
+  position: relative;
+  display: grid;
+  place-items: center;
+
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+
+  background: rgb(232 236 244);
+  color: rgb(40 46 58);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.4);
+
+  pointer-events: none;
+  transition: none;
+}
+
+.slideclear:not(.is-dragging) .slideclear__knob {
+  /* 轻微回弹：超过终点一点再收回，手感更「弹」 */
+  transition: left 260ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.slideclear.is-dragging .slideclear__knob {
+  background: #fff;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.5);
+}
+
+.slideclear.is-near .slideclear__knob {
+  background: #ffd7d8;
+  color: rgb(160 20 30);
+}
+
+.slideclear.is-disabled {
+  opacity: 0.34;
+  cursor: default;
+}
+
+.slideclear.is-disabled .slideclear__knob {
+  background: rgb(160 168 180);
+}
+
+/* 键盘可达性：聚焦时给出清晰轮廓 */
+.slideclear:focus-visible {
+  outline: 2px solid rgb(90 160 255);
+  outline-offset: 2px;
+}
+
+/* ============================================================
+ * 触屏增强
+ * ============================================================ */
+
+@media (hover: none) and (pointer: coarse) {
+  .drawbar__esize {
+    width: 52px;
+    height: 56px;
+  }
+
+  .drawbar__esize-label {
+    font-size: 11px;
+  }
+
+  /* 手指比鼠标粗，滑动条整体放大一档更好操作 */
+  .slideclear {
+    width: 200px;
+    height: 48px;
+    border-radius: 24px;
+  }
+
+  .slideclear__knob {
+    width: 40px;
+    height: 40px;
+  }
+
+  .slideclear__text {
+    font-size: 12px;
+  }
+}

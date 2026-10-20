@@ -1,0 +1,614 @@
+/* ============================================================
+ * 绘图工具条（PPT 式墨迹工具条）
+ *
+ * 设计参考鸿合 π6 与 PowerPoint 放映时的墨迹工具。
+ *
+ * ── 位置调整记录（两次）────────────────────────────────────
+ *   最初放在底部居中（照搬 PPT），但**带左右两条竖排工具栏**之后
+ *   阅读区被夹在中间，底部居中会让工具条压在常看的正文下半部分，
+ *   用户反馈看不到画在页面下半部的笔迹。
+ *   于是改到右上角避开正文 —— 结果触屏上要抬手去够，操作不便。
+ *   最终按用户要求定在**底部**：这是触屏最佳操作区
+ *   （拇指自然落点），代价是要保证不遮住正文。
+ *
+ * ── 怎么同时满足「在底部」与「不遮正文」─────────────────────
+ *   不占用阅读区高度，而是**悬浮**在阅读区底部，
+ *   并给半透明深色底 + 阴影，视觉上明确是浮层。
+ *   同时把高度压到 60px 左右，比正文一行的两倍还矮，
+ *   遮挡面积可控。
+ *
+ * ── 两个功能问题也在这里解决 ────────────────────────────────
+ *   ① 颜色盘曾重复出现（顶栏 + 左栏），位置分散
+ *      → 现在只有这一个面板，颜色只在这里出现
+ *   ② 粗细曾用 78×16px 的滑块，手指拖不准
+ *      → 现在滑块高 44px（触屏最小可靠点击尺寸）
+ * ============================================================ */
+
+.drawbar {
+  position: fixed;
+  /*
+   * 底部居中，且只锚定在**两侧竖栏之间**的区域。
+   *
+   * ★ 为什么用 fixed 而不是 absolute：
+   *   absolute 会相对 .app__viewer 定位，而那个容器的左边界被
+   *   左侧栏 + 缩略图栏推到了 278px（实测），
+   *   于是在它里面居中会让工具条整体右偏 105px，与正文不对齐。
+   *   用 fixed 相对视口定位，再显式让开两条竖栏的宽度，
+   *   就能精确对准正文区中心。
+   *
+   * ★ 也不要用 `left: 50% + translateX(-50%)`：
+   *   那样写时绝对/固定定位元素的可用宽度会被限制成
+   *   「从 50% 到右边缘」（实测 1094px 容器里只剩 547px），
+   *   内容被迫折成两行。`left/right + margin-inline: auto` 才正确。
+   */
+
+  /* 让开两侧竖栏（宽度由 rails.css 的 --rail-w 统一维护） */
+  left: var(--rail-w, 68px);
+  right: var(--rail-w, 68px);
+  /*
+   * 底部位置 = 状态栏高度 + 8px 间距。
+   * fixed 是相对视口定位的，不扣掉状态栏会盖在它上面（实测超出 22px）。
+   */
+  bottom: calc(var(--statusbar-h, 30px) + 8px);
+  margin-inline: auto;
+  width: fit-content;
+  z-index: 40;
+
+  display: flex;
+  align-items: center;
+  /* 用分组块的内边距做间隔，不用分隔线元素 ——
+     分隔线在换行时会被拉成一条粗黑条，把工具栏撑得很难看（踩过） */
+  gap: 4px;
+
+  padding: 6px 8px;
+  border-radius: 14px;
+
+  /*
+   * 深色玻璃底：批注时会停在页面上很久，
+   * 浅色工具条在白色纸张上边界不清，深色能稳稳「浮」在上面。
+   * 三套主题下都用同一个深色，保证对比度一致。
+   */
+  background: rgb(28 32 40 / 0.95);
+  border: 1px solid rgb(255 255 255 / 0.1);
+  box-shadow:
+    0 8px 28px rgb(0 0 0 / 0.34),
+    0 2px 6px rgb(0 0 0 / 0.2);
+
+  /*
+   * 一行放不下时才折行。实测完整一行约 902px，
+   * 因此上限给 980px 留出余量；窄窗口下自然会折成两行。
+   */
+  max-width: min(980px, calc(100% - 16px));
+  /*
+   * ★ 这里原来是 `overflow: auto hidden`（横向自动滚动、纵向裁掉）。
+   *   合并了编辑功能区之后，这一行的内容会随工具变化而变宽变窄 ——
+   *   一旦被裁，**按钮会既看不见也点不到**（elementFromPoint 返回 null），
+   *   表现得像「工具按钮失灵」，极难往 CSS 上想。
+   *   改成整体可见 + 允许换行：工具条本来就靠 flex-wrap 折行，不需要裁剪。
+   */
+  overflow: visible;
+  flex-wrap: wrap;
+  animation: drawbar-in 160ms var(--ease);
+}
+
+@keyframes drawbar-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.drawbar__group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  /* 内边距撑开间距，替代分隔线；同时让每组的可点区域更完整 */
+  padding: 0 4px;
+  border-radius: 10px;
+  background: rgb(255 255 255 / 0.05);
+}
+
+/*
+ * 旧的分隔线样式。
+ * 现在模板里已不再渲染 .drawbar__sep（换行时会被拉成粗黑条），
+ * 保留这条规则是为了万一有遗漏引用时不至于完全没有样式。
+ */
+.drawbar__sep {
+  display: none;
+}
+
+/* ---------- 工具按钮（画笔 / 橡皮 / 撤销 / 清空） ---------- */
+
+.drawbar__tool {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+
+  min-width: 50px;
+  height: 46px;
+  padding: 0 8px;
+  border-radius: 10px;
+
+  color: rgb(232 236 244);
+  font-size: 11px;
+  line-height: 1.15;
+
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.drawbar__tool:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.12);
+}
+
+.drawbar__tool:active:not(:disabled) {
+  background: rgb(255 255 255 / 0.2);
+}
+
+.drawbar__tool.is-active {
+  background: rgb(90 160 255 / 0.26);
+  color: #9ec5ff;
+  /* 底边下划线：借鉴 π6 的激活反馈，比整块反白克制 */
+  box-shadow: inset 0 -2px 0 rgb(90 160 255);
+}
+
+.drawbar__tool:disabled {
+  opacity: 0.34;
+  cursor: default;
+}
+
+/* 清空按钮：危险操作用红调提示 */
+.drawbar__tool--danger:hover:not(:disabled) {
+  background: rgb(229 72 77 / 0.28);
+  color: #ffb4b6;
+}
+
+/* ============================================================
+ * 颜色
+ *
+ * 36px 圆点 + 8px 间距。触屏推荐最小点击区 44px，
+ * 这里靠内边距把可点区域撑到 44px，同时不让视觉上的圆点过大。
+ * ============================================================ */
+
+.drawbar__group--colors {
+  gap: 2px;
+}
+
+.drawbar__color {
+  position: relative;
+  display: grid;
+  place-items: center;
+
+  width: 40px;
+  height: 44px;
+  border-radius: 9px;
+
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.drawbar__color::before {
+  content: '';
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+
+  background: var(--pen-color);
+  /* 白色描边让深色圆点在深色底上也有边界 */
+  border: 2px solid rgb(255 255 255 / 0.22);
+
+  transition:
+    transform var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+
+.drawbar__color:hover:not(:disabled)::before {
+  transform: scale(1.1);
+}
+
+.drawbar__color.is-active {
+  background: rgb(255 255 255 / 0.14);
+}
+
+/* 选中：圆点放大 + 双层描边，远处也能一眼看出选了哪个色 */
+.drawbar__color.is-active::before {
+  transform: scale(1.18);
+  border-color: #fff;
+  box-shadow:
+    0 0 0 2px rgb(28 32 40),
+    0 0 0 4px #fff;
+}
+
+.drawbar__color:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* ============================================================
+ * 粗细滑块
+ *
+ * 用户明确要求用滑动条，因此这里把触摸热区做足：
+ * 轨道视觉高度只有 4px，但整个 input 高 44px（触屏最小可靠点击尺寸），
+ * 手指落在轨道上下各 20px 范围内都能拖到。
+ * ============================================================ */
+
+.drawbar__group--width {
+  gap: 8px;
+  padding: 0 10px;
+}
+
+.drawbar__preview {
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: rgb(232 236 244);
+  /* 尺寸由内联样式按当前笔宽给，这里只保证最小可见 */
+  min-width: 5px;
+  min-height: 5px;
+  transition: width 80ms linear, height 80ms linear;
+}
+
+.drawbar__slider {
+  -webkit-appearance: none;
+  appearance: none;
+
+  width: 108px;
+  height: 44px; /* 触摸热区 */
+  background: transparent;
+  cursor: pointer;
+}
+
+.drawbar__slider:disabled {
+  opacity: 0.34;
+  cursor: default;
+}
+
+/* 轨道 */
+.drawbar__slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgb(255 255 255 / 0.22);
+}
+
+/* 滑块头：做小一点但热区大，视觉上不笨重 */
+.drawbar__slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+
+  width: 18px;
+  height: 18px;
+  margin-top: -7px; /* 让滑块头在 4px 轨道上垂直居中 */
+  border-radius: 50%;
+
+  background: #fff;
+  border: none;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.4);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.drawbar__slider:hover::-webkit-slider-thumb {
+  transform: scale(1.12);
+}
+
+.drawbar__slider:active::-webkit-slider-thumb {
+  transform: scale(1.2);
+}
+
+/* Firefox 走另一套伪元素，一并给上以免样式丢失 */
+.drawbar__slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgb(255 255 255 / 0.22);
+}
+
+.drawbar__slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.4);
+}
+
+.drawbar__readout {
+  min-width: 26px;
+  color: rgb(200 208 220);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* ---------- 漫游（第三工具：拖动平移 + 缩放） ---------- */
+
+/*
+ * 按钮本体沿用 .drawbar__tool 的尺寸与 .is-active 的激活高亮，
+ * 这里只补一个「手形」的语义色弱提示：未激活时与画笔/橡皮同色即可，
+ * 激活时由 .is-active 统一处理 —— 三个工具必须**长得像同一组**，
+ * 否则用户会以为漫游不是工具而是别的操作。
+ *
+ * 保留一个类名是为了窄屏媒体查询里能单独调宽度（见文件末尾）。
+ */
+.drawbar__tool--roam {
+  min-width: 56px;
+}
+
+/* ============================================================
+ * 触屏增强：一体机上手指比鼠标粗得多，整体再放大一档
+ * ============================================================ */
+
+@media (hover: none) and (pointer: coarse) {
+  .drawbar {
+    gap: 8px;
+    padding: 10px 14px;
+    border-radius: 16px;
+  }
+
+  .drawbar__tool {
+    min-width: 60px;
+    height: 56px;
+    font-size: 12px;
+  }
+
+  .drawbar__color,
+  .drawbar__width {
+    width: 48px;
+    height: 52px;
+  }
+
+  .drawbar__color::before {
+    width: 30px;
+    height: 30px;
+  }
+
+  .drawbar__sep {
+    height: 32px;
+  }
+}
+
+/* 窄屏时允许横向滚动，避免工具条被压变形 */
+@media (max-width: 900px) {
+  .drawbar {
+    max-width: calc(100% - 24px);
+    overflow-x: auto;
+  }
+}
+
+/* 尊重系统的减少动效设置 */
+@media (prefers-reduced-motion: reduce) {
+  .drawbar {
+    animation: none;
+  }
+}
+
+/* ============================================================
+ * 橡皮大小预览圈
+ *
+ * 画成**空心圆**而不是实心点：
+ *   画笔预览是实心点（表示笔尖粗细），
+ *   橡皮若也用实心点会和它混淆。空心圆正好对应橡皮光标的样子，
+ *   用户一眼就知道这是"擦除范围"而不是"笔迹粗细"。
+ * ============================================================ */
+
+.drawbar__preview--eraser {
+  background: rgb(20 22 28 / 0.28);
+  border: 1.5px solid var(--text-muted, #5a6270);
+  box-sizing: border-box;
+}
+
+/* ============================================================
+ * 工具条收起态
+ *
+ * ── 为什么需要 ──────────────────────────────────────────────
+ *   工具条是 fixed 悬浮在底部中央的，实测占 99px 高，
+ *   会**盖住页面最下面那条内容** —— 那片的笔迹既擦不到也画不上。
+ *   老师板书多集中在页面下半部，正好撞上。
+ *
+ *   收起后缩成右下角一个小圆钮（约 40×40），几乎不占内容区。
+ * ============================================================ */
+
+.drawbar__peek {
+  position: fixed;
+  /* 贴着状态栏上方、靠右下 —— 与缩放滑条同侧，符合"控件在右下"的布局 */
+  right: calc(var(--rail-w, 68px) + 16px);
+  bottom: calc(var(--statusbar-h, 30px) + 12px);
+  z-index: 41;
+
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+
+  background: rgb(28 32 40 / 0.94);
+  color: #fff;
+  font-size: 12px;
+
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.34);
+  border: 1px solid rgb(255 255 255 / 0.12);
+
+  transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+
+  animation: peek-in 180ms var(--ease);
+}
+
+@keyframes peek-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.94); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.drawbar__peek:hover {
+  background: rgb(40 46 58 / 0.98);
+  transform: translateY(-1px);
+}
+
+.drawbar__peek:active {
+  transform: scale(0.96);
+}
+
+.drawbar__peek-label {
+  /* 窄屏时只留图标，避免挡住正文 */
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .drawbar__peek-label { display: none; }
+  .drawbar__peek { padding: 0; width: 40px; justify-content: center; }
+}
+
+/* 触屏加大热区 */
+@media (hover: none) and (pointer: coarse) {
+  .drawbar__peek { height: 46px; padding: 0 18px; font-size: 13px; }
+}
+
+/* 收起按钮的视觉弱化：它是次要操作，不该和画笔橡皮抢注意力 */
+.drawbar__tool--collapse {
+  opacity: 0.72;
+}
+
+.drawbar__tool--collapse:hover {
+  opacity: 1;
+}
+
+/* ============================================================
+ * 单行约束
+ *
+ * ── 为什么必须显式 nowrap ────────────────────────────────────
+ *   工具条宽度是 fit-content，内容变多时会超过可用宽度
+ *   （两侧竖栏之间），默认的 flex-wrap: wrap 就会折成两行 ——
+ *   底部多出一行、高度翻倍，挡住的页面更多。
+ *
+ *   强制单行之后，超宽时改为**横向滚动**而不是折行：
+ *   工具条自身很窄，滚动条几乎不会出现；
+ *   万一条目太多，用户也能横向划过找到需要的按钮，
+ *   比折成两行（把页面挡更多）要好。
+ *
+ * ★★ 2026-10-16 修正：这套「单行 + 横向滚动」只适用于**下面那一行工具按钮**，
+ *    不能套在「编辑功能区」那一行上 ——
+ *    编辑选项（字号 6 档 + 调色板 + 导出……）本身就有 454px 宽，
+ *    再叠上工具行的 900px，总宽远超可用宽度；横向滚动一出现，
+ *    编辑区的按钮就被推到视口之外，**既看不见也点不到**
+ *    （elementFromPoint 返回 null），表现得像「工具按钮全部失灵」。
+ *    实测：按钮 x=1669，而视口只有 1440 宽。
+ *
+ *    所以这里把规则拆开：
+ *      · `.drawbar__row`（工具行）→ nowrap + 横向滚动（原行为）
+ *      · `.drawbar__editdock`（编辑功能区）→ 允许折行，绝不横向滚动
+ *    这样编辑选项多了就往下多占一行，而不会跑出屏幕。
+ * ============================================================ */
+
+.drawbar {
+  flex-wrap: wrap; /* 允许编辑行独占一行 */
+  overflow: visible;
+  /* 宽度上限 = 两侧竖栏之间再留 12px 余量，避免贴边 */
+  max-width: calc(100% - 12px);
+}
+
+/* 工具按钮那一行：单行 + 超宽横向滚动 */
+.drawbar__tools {
+  flex: 1 1 100%;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+/*
+ * 编辑功能区：**绝对不要**横向滚动。
+ * 宁可折行（多占一行高度），也不能让按钮跑出可视区。
+ */
+.drawbar__editdock {
+  flex: 0 0 100%;
+  overflow: visible;
+  flex-wrap: wrap;
+}
+
+.drawbar::-webkit-scrollbar {
+  height: 4px;
+}
+
+.drawbar::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.22);
+  border-radius: 2px;
+}
+
+.drawbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 条目被压扁时不让文字换行（文字换行会顶高整条） */
+.drawbar > *,
+.drawbar__group > * {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* ---------- 空间不足时：横向滚动，绝不隐藏 ---------- */
+
+/*
+ * ★ 用户明确要求「不能隐藏任何工具栏图标」。
+ *
+ *   我曾写过一组按宽度渐进隐藏的媒体查询（窄屏时隐藏滑动清屏、
+ *   隐藏按钮文字），已被移除 —— 那种做法会让用户
+ *   「明明有这个功能却找不到按钮」，在课堂上是灾难：
+ *   老师不知道工具条少了什么，只会以为功能坏了。
+ *
+ *   现在的策略是：所有条目一律保留，超宽时让工具条**横向滚动**。
+ *   宁可让用户滑一下，也不让任何功能消失。
+ *   滚动条本身在深色底上很细，不干扰视觉。
+ */
+
+/* 极窄时压缩间距，把能省的空间省出来（但不隐藏任何东西） */
+@media (max-width: 1180px) {
+  .drawbar {
+    gap: 2px;
+    padding: 6px 6px;
+  }
+  .drawbar__group {
+    gap: 2px;
+  }
+}
+
+@media (max-width: 980px) {
+  /* 只缩小颜色块尺寸，色块本身仍在 */
+  .drawbar__group--colors .drawbar__color {
+    width: 26px;
+    height: 26px;
+  }
+  .drawbar__tool {
+    padding: 0 8px;
+  }
+}
+
+/* ============================================================
+ * 未进入绘画时的「置灰」状态
+ *
+ * 用户反馈：退出绘画后颜色盘与粗细条仍高亮可选，
+ * 正常逻辑应是变暗不可选。
+ *
+ * 做法是**降透明度 + 去掉交互反馈**，而不是隐藏 ——
+ * 用户明确要求「不能隐藏任何工具栏图标」：
+ * 隐藏会让人以为功能没了，置灰则清楚表达「现在不能用」。
+ * ============================================================ */
+
+.drawbar__group.is-muted {
+  opacity: 0.38;
+  /* 置灰的整组不吃鼠标事件，连 hover 反馈也一并去掉，
+     否则鼠标移上去仍会变色，看起来还是「能点」 */
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+/* 置灰时内部控件的禁用态不要再叠一层透明度，
+ * 否则会淡到几乎看不见（两层 0.38 叠加 ≈ 0.14） */
+.drawbar__group.is-muted * {
+  opacity: 1;
+}

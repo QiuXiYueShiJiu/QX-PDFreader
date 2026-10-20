@@ -1,0 +1,449 @@
+/**
+ * 两侧竖排工具条样式。
+ *
+ * 设计参考鸿合 π6 的侧边工具条：竖向贴在屏幕两侧中部，
+ * 大图标 + 小字标签，触屏上一眼能认、一点就中。
+ *
+ * 关键尺寸决策：
+ *   · 按钮 60px 宽，图标 20px，文字 10px —— 触屏最小可靠点击区是 44px，
+ *     这里给到 60px 宽、56px 高，戴手套或粉笔手也能点准
+ *   · 工具条整体垂直居中，但不占满高度，避免遮挡正文上下两端
+ *   · 用半透明玻璃底 + 圆角，视觉上「浮」在阅读区之上而不是切掉一块
+ */
+
+.rail {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /*
+   * ★ 2026-10-16 修「退出应用按钮显示不出来」：
+   *
+   *   原来是 `justify-content: center` 且没有 overflow。右栏内容实测
+   *   ≈884px（5 组按钮 + 4 条分隔线 + gap + padding），而 1440×940 的
+   *   默认窗口可用高度只有 940-40(标题栏)-30(状态栏)=870px —— 一开始就
+   *   溢出 14px，居中后上下各裁一半，底部「退出应用」被切；
+   *   窗口再矮（一体机 150% 缩放时 CSS 视口高只有 ~680px）就整个裁没了。
+   *   裁切发生在祖先 `.app__body { overflow: hidden }`，不是被谁遮住。
+   *
+   *   现在：`safe center` 让「装得下就居中、装不下就从顶部排」，
+   *   再加纵向滚动兜底 —— 任何窗口高度下最后一个按钮都点得到。
+   *   滚动条隐藏（宽度 0），因为这是一条 68px 宽的图标栏，
+   *   多一条滚动条会挤掉按钮宽度；触屏直接上下拖即可。
+   */
+  justify-content: safe center;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  gap: 10px;
+
+  /*
+   * 宽度固定，阅读区自动让位；触屏上够宽才好点。
+   *
+   * 这个值同时被底部绘图工具条用来「让开竖栏」，
+   * 因此抽成变量统一维护 —— 以后改宽度只需要改这里一处，
+   * 工具条的定位会自动跟着变（见 drawbar.css 里的 --rail-w 用法）。
+   */
+  --rail-w: 68px;
+  width: var(--rail-w);
+  padding: 12px 0;
+
+  background: rgb(var(--surface));
+  z-index: 5;
+}
+
+.rail--left {
+  border-right: 1px solid rgb(var(--border));
+}
+
+.rail--right {
+  border-left: 1px solid rgb(var(--border));
+}
+
+/* ---------- 分组与分隔线 ---------- */
+
+.rail__group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.rail__divider {
+  width: 32px;
+  height: 1px;
+  background: rgb(var(--border));
+  margin: 2px 0;
+}
+
+/* ---------- 工具按钮 ---------- */
+
+.rail-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+
+  width: 60px;
+  height: 56px;
+  border-radius: var(--radius-sm);
+
+  color: rgb(var(--text));
+  transition:
+    background var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+
+.rail-btn__icon {
+  display: grid;
+  place-items: center;
+  line-height: 0;
+}
+
+.rail-btn__label {
+  font-size: 10px;
+  line-height: 1.1;
+  opacity: 0.82;
+  white-space: nowrap;
+}
+
+.rail-btn:hover {
+  background: rgb(var(--text) / 0.09);
+}
+
+.rail-btn:active {
+  background: rgb(var(--text) / 0.16);
+  transform: scale(0.95);
+}
+
+.rail-btn.is-active {
+  background: rgb(var(--accent) / 0.16);
+  color: rgb(var(--accent));
+}
+
+.rail-btn:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
+.rail-btn:disabled:hover {
+  background: none;
+}
+
+.rail-btn:disabled:active {
+  transform: none;
+}
+
+/* ---------- 页码与比例读数 ---------- */
+
+.rail__page,
+.rail__scale {
+  display: grid;
+  place-items: center;
+  min-width: 52px;
+  height: 26px;
+  border-radius: 13px;
+
+  background: rgb(var(--text) / 0.08);
+  color: rgb(var(--text));
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---------- 画笔颜色 ---------- */
+
+.rail__colors {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  background: rgb(var(--text) / 0.06);
+}
+
+.rail-color {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--anno-color);
+  border: 2px solid transparent;
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.rail-color:hover {
+  transform: scale(1.12);
+}
+
+.rail-color.is-active {
+  border-color: rgb(var(--text));
+  box-shadow: 0 0 0 2px rgb(var(--surface));
+}
+
+/* ============================================================
+ * 触屏增强
+ * ============================================================ */
+
+@media (hover: none) and (pointer: coarse) {
+  .rail {
+    width: 78px;
+  }
+
+  .rail-btn {
+    width: 70px;
+    height: 64px;
+  }
+
+  .rail-btn__label {
+    font-size: 11px;
+  }
+
+  .rail-color {
+    width: 32px;
+    height: 32px;
+  }
+
+  .rail__page,
+  .rail__scale {
+    height: 30px;
+    font-size: 12px;
+  }
+}
+
+/* ============================================================
+ * 高度分档（2026-10-16 重写）
+ *
+ * 原来是「触屏档 64px」写在前面、「max-height:800px → 50px」写在后面，
+ * 两者特异性相同，一体机上「视口高 <800px + pointer:coarse」两个查询同时
+ * 命中，实际按 50px 生效 —— 触屏档形同虚设。
+ *
+ * 现在：默认档 → 两档高度压缩 → 触屏专用高度档。带触屏条件的查询特异性更高，
+ * 与书写顺序无关，矮屏一体机也不会把按钮压到难点。
+ * ============================================================ */
+
+/* 矮屏第一档：默认 1440×940 窗口可用高 870px 就该开始收，给底部留余量 */
+@media (max-height: 900px) {
+  .rail {
+    gap: 8px;
+    padding: 10px 0;
+  }
+
+  .rail-btn {
+    height: 52px;
+  }
+}
+
+/* 矮屏第二档：一体机 150% 缩放时 CSS 视口高只有约 680px */
+@media (max-height: 760px) {
+  .rail {
+    gap: 6px;
+    padding: 6px 0;
+  }
+
+  .rail-btn {
+    height: 46px;
+  }
+
+  .rail-btn__label {
+    font-size: 9.5px;
+  }
+
+  .rail__divider {
+    margin: 0;
+  }
+}
+
+/* 触屏 + 矮屏：宽度仍按触屏给足，高度折中，保住 44px 以上的可靠点击区 */
+@media (max-height: 900px) and (hover: none) and (pointer: coarse) {
+  .rail-btn {
+    height: 58px;
+  }
+}
+
+@media (max-height: 760px) and (hover: none) and (pointer: coarse) {
+  .rail-btn {
+    height: 52px;
+  }
+}
+
+/* 滚动条隐藏：这是 68/78px 宽的图标栏，多一条滚动条会挤掉按钮宽度。
+   Chromium 不认 scrollbar-width（那是 Firefox 属性），必须同时写
+   ::-webkit-scrollbar，否则这条规则在打包版里等于没写。 */
+.rail::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* ============================================================
+ * 退出应用确认框 —— 样式已移除
+ *
+ * 原先这里有一整套 .exit-confirm / __mask / __box / __btn 的自绘浮层样式。
+ * 之所以删掉，是因为确认框改成了**主进程原生对话框**
+ * （src/main/index.ts 的 app:quit 用 dialog.showMessageBox）：
+ *   · DOM 浮层不进任务栏、Alt+Tab 切不到；
+ *   · 主窗口最小化时浮层跟着消失，用户会以为「退出应用」按钮失灵；
+ *   · 观感与 Windows 原生确认框不一致。
+ * 原生对话框由系统绘制，不需要这里的任何一条规则。
+ *
+ * 顺带记一笔当年踩过的坑（换成原生框后再不会遇到，留作后人参考）：
+ *   `background: var(--danger, #e5484d)` 这种写法**不是**兜底 ——
+ *   --danger 在主题里定义成通道三元组（209 58 58），变量存在所以 fallback
+ *   永不生效，最后算出非法的 `background: 209 58 58`，
+ *   浏览器丢弃该声明 → 按钮背景透明 → 白字彻底隐身，
+ *   用户报的「对话框里没有确认按钮」就是这个。
+ *   结论：通道三元组的变量必须包在 `rgb(...)` 里用。
+ * ============================================================ */
+
+/* 危险色的右侧栏按钮 */
+.rail-btn.is-danger:hover {
+  /* 同 --danger 的通道三元组问题：必须包在 rgb() 里 */
+  color: rgb(var(--danger, 209 58 58));
+  background: rgb(229 72 77 / 0.1);
+}
+
+/* ============================================================
+ * 右栏的连续缩放滑块
+ *
+ * 竖排布局里滑块要旋转 90° —— 直接写 vertical 方向的样式，
+ * 避免用 transform 旋转（旋转后命中区域与视觉位置错位，
+ * 触屏上很难拖准）。
+ * ============================================================ */
+
+.rail__zoom-slider {
+  /* 竖排：高度是滑动行程，宽度是轨道粗细 */
+  writing-mode: vertical-lr;
+  direction: rtl; /* 向上拖动 = 放大，符合"上大下小"的直觉 */
+
+  width: 22px;
+  height: 96px;
+  margin: 6px 0;
+
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.rail__zoom-slider:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* 轨道 */
+.rail__zoom-slider::-webkit-slider-runnable-track {
+  width: 4px;
+  border-radius: 2px;
+  background: var(--border, rgb(0 0 0 / 0.14));
+}
+
+/* 滑块头：做得比轨道大一圈，触屏上好抓 */
+.rail__zoom-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-left: -6px; /* 让滑块头在轨道上居中 */
+  border-radius: 50%;
+
+  background: var(--accent, #2f7cf6);
+  border: 2px solid var(--bg-elevated, #fff);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.28);
+
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.rail__zoom-slider:hover::-webkit-slider-thumb {
+  transform: scale(1.12);
+}
+
+.rail__zoom-slider:active::-webkit-slider-thumb {
+  transform: scale(1.2);
+}
+
+/* 触屏上再放大一点，手指更好按 */
+@media (hover: none) and (pointer: coarse) {
+  .rail__zoom-slider { height: 120px; }
+  .rail__zoom-slider::-webkit-slider-thumb { width: 20px; height: 20px; margin-left: -8px; }
+}
+
+
+/* ============================================================
+ * 右下角连续缩放滑条
+ *
+ * 放在状态栏右侧（不用竖排滑块：竖排在触屏上很难拖准，
+ * 且会占掉右栏一整行高度）。
+ * 两端带 −/+ 图标提示方向，右侧跟百分比数值。
+ * ============================================================ */
+
+.statusbar__zoom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+  /* 视觉上与其它状态项对齐，但整体是一块可点的控件 */
+  padding: 0 6px;
+  border-radius: 6px;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.statusbar__zoom:hover {
+  background: var(--bg-hover, rgb(0 0 0 / 0.05));
+}
+
+.statusbar__zoom-icon {
+  display: grid;
+  place-items: center;
+  color: var(--text-muted, #5a6270);
+}
+
+.statusbar__zoom-slider {
+  width: 132px;
+  height: 14px;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.statusbar__zoom-slider:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* 轨道 */
+.statusbar__zoom-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border, rgb(0 0 0 / 0.14));
+}
+
+/* 滑块头：比轨道大一圈，触屏上好抓 */
+.statusbar__zoom-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  /* 让滑块头在 4px 轨道上垂直居中：(4-14)/2 = -5 */
+  margin-top: -5px;
+  border-radius: 50%;
+
+  background: var(--accent, #2f7cf6);
+  border: 2px solid var(--bg-elevated, #fff);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.statusbar__zoom-slider:hover::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+
+.statusbar__zoom-value {
+  min-width: 40px;
+  text-align: right;
+  font-variant-numeric: tabular-nums; /* 数字等宽，拖动时不跳动 */
+  color: var(--text, #1c2028);
+}
+
+/* 触屏上加大热区 */
+@media (hover: none) and (pointer: coarse) {
+  .statusbar__zoom-slider { width: 180px; height: 22px; }
+  .statusbar__zoom-slider::-webkit-slider-thumb { width: 20px; height: 20px; margin-top: -8px; }
+}

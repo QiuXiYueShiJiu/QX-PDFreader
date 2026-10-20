@@ -1,0 +1,696 @@
+/**
+ * 覆盖式内容编辑（选择 / 文字 / 图片 / 涂白 / 矩形 / 椭圆）的样式。
+ *
+ * ============================================================
+ * 三条硬约束，改动前先读一遍
+ * ============================================================
+ *  ① `editTool === 'none'` 时**不许有任何视觉与交互变化**。
+ *     所以下面所有规则都挂在 `.is-edit-*` 前缀下，非编辑态一条都不生效。
+ *
+ *  ② 文字层默认可选中（漫游模式下拖选文字加高亮是现有功能）。
+ *     只有内容编辑工具激活时才把它彻底关掉 —— 否则拖框画矩形会顺手
+ *     把页面文字选成一片蓝，还会让 pointerup 落到选区而不是页面上。
+ *
+ *  ③ 编辑层默认 `pointer-events: none`，只有 `is-interactive` 时物件才吃
+ *     指针事件。否则批注层会挡住文字选中与页面拖动。
+ *
+ * 深色玻璃底与底部 .drawbar 保持一致（三套主题下用同一个深色，
+ * 保证在白色纸张上边界清楚）。
+ */
+
+/* ============================================================
+ * 一、每页的内容编辑层
+ * ============================================================ */
+
+.edit-layer {
+  position: absolute;
+  inset: 0;
+  /*
+   * z-index 3 是标记类批注层（.anno-layer），文字层是 2。
+   * 涂白必须盖住原文，所以编辑层要在最上面。
+   */
+  z-index: 4;
+  /* ★ 默认完全不吃指针：编辑工具没激活时这一层必须"透明" */
+  pointer-events: none;
+}
+
+.edit-item {
+  position: absolute;
+  box-sizing: border-box;
+  /* 不设边框/背景，外观全部交给内部的 .edit-visual，避免描边被算进尺寸 */
+  outline: none;
+}
+
+/* 只有编辑工具激活时物件才可点选/拖动 */
+.edit-layer.is-interactive .edit-item {
+  pointer-events: auto;
+  cursor: move;
+  /* 触摸拖动改位置时不要触发页面滚动（画矩形同理，见 .is-edit-content） */
+  touch-action: none;
+}
+
+/* 选中：虚线外框 + 四个角手柄（颜色用醒目的主题蓝，和绘图工具区分开） */
+.edit-item.is-selected {
+  outline: 1.5px dashed rgb(90 169 255);
+  outline-offset: 2px;
+}
+
+.edit-item.is-editing {
+  outline: 1.5px dashed rgb(90 169 255);
+  outline-offset: 2px;
+  background: rgb(255 255 255 / 0.86);
+}
+
+/* ---------- 各类物件的外观 ---------- */
+
+.edit-visual {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* 涂白：不透明的纯白块，语义就是"把这里盖住" */
+.edit-visual--whiteout {
+  background: #ffffff;
+}
+
+/* 矩形/椭圆：viewBox 用页面坐标，线宽因此自动跟随缩放 */
+.edit-visual--shape {
+  overflow: visible;
+}
+
+.edit-visual--text {
+  /* 与 anno-export.ts 的 CONTENT_FONT_STACK 必须一致，否则导出会换字体 */
+  font-family:
+    'Microsoft YaHei UI', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* 保留换行与空格：用户在文本框里敲的排版要原样呈现 */
+  white-space: pre-wrap;
+  word-break: break-word;
+  /*
+   * 不裁剪：导出时文字是按宽度折行、不裁高度的（见 anno-export 的取舍），
+   * 这里也让它溢出显示，两边才一致；高度在确认时按内容量测写回。
+   */
+  overflow: visible;
+}
+
+.edit-visual--image {
+  /* 尺寸由外框决定（缩放时拉伸），和导出用的 drawImage 行为一致 */
+  object-fit: fill;
+  pointer-events: none;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+/* ---------- 就地编辑的文本框 ---------- */
+
+.edit-textarea {
+  display: block;
+  width: 100%;
+  /* 至少填满外框；内容多了由 JS 撑高（滚轮不出现，所见即所得） */
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  resize: none;
+  overflow: hidden;
+  font-family:
+    'Microsoft YaHei UI', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* 与 EditLayer 里的 lineHeight / anno-export 的 TEXT_LINE_HEIGHT 一致 */
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.edit-textarea::placeholder {
+  color: rgb(90 100 120 / 0.85);
+}
+
+/* ---------- 四个角的缩放手柄 ---------- */
+
+.edit-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: rgb(90 169 255);
+  border: 1px solid #fff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
+  z-index: 2;
+}
+
+/*
+ * 手柄本体只有 10px，触屏点不准 —— 用 ::after 把**命中区域**扩到 32px，
+ * 视觉上仍是个小方块。负 inset 的伪元素参与命中测试，这是最省事的做法。
+ */
+.edit-handle::after {
+  content: '';
+  position: absolute;
+  inset: -11px;
+}
+
+.edit-handle--nw {
+  left: -6px;
+  top: -6px;
+  cursor: nwse-resize;
+}
+.edit-handle--ne {
+  right: -6px;
+  top: -6px;
+  cursor: nesw-resize;
+}
+.edit-handle--sw {
+  left: -6px;
+  bottom: -6px;
+  cursor: nesw-resize;
+}
+.edit-handle--se {
+  right: -6px;
+  bottom: -6px;
+  cursor: nwse-resize;
+}
+
+/* ============================================================
+ * 二、编辑工具激活时页面的交互形态（editTool === 'none' 时全部不生效）
+ * ============================================================ */
+
+/*
+ * 内容工具（文字/图片/涂白/矩形/椭圆）：文字层**彻底不可选、不吃指针**。
+ * `pointer-events: none` 是关键：拖框时 pointerdown 必须落在 .pdf-page 上，
+ * 否则会被某个 span 截走，图形就画不出来。
+ */
+.viewer-scroll.is-edit-content .textLayer,
+.viewer-scroll.is-edit-content .textLayer :is(span, br) {
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
+}
+
+/* 内容工具下触摸拖动全部交给绘制，浏览器不要抢去滚动页面 */
+.viewer-scroll.is-edit-content {
+  touch-action: none;
+}
+
+/* 选择工具：文字层保持可选中，光标提示"这里能选字" */
+.viewer-scroll.is-edit-select .textLayer {
+  cursor: text;
+}
+
+/*
+ * ★ 选择工具下触摸也由我们自己处理（2026-10-18）。
+ *
+ *   手指要能：长按选词、拖动扩选、一按就拖平移页面。
+ *   这些和浏览器的原生滚动/长按手势会互相抢，所以关掉浏览器的手势，
+ *   平移由 DocumentView.startTouchSelect 自己算 scrollLeft/Top
+ *   （没有惯性 —— 选字场景里惯性只会让选区跑偏）。
+ */
+.viewer-scroll.is-edit-select {
+  touch-action: none;
+}
+
+/* 各工具的光标提示 */
+.viewer-scroll.is-edit-whiteout .pdf-page__canvas,
+.viewer-scroll.is-edit-rect .pdf-page__canvas,
+.viewer-scroll.is-edit-ellipse .pdf-page__canvas {
+  cursor: crosshair;
+}
+.viewer-scroll.is-edit-text .pdf-page__canvas {
+  cursor: text;
+}
+.viewer-scroll.is-edit-image .pdf-page__canvas {
+  cursor: copy;
+}
+
+/* ============================================================
+ * 三、内容编辑的「功能区」—— 已合并进底部工具条
+ *
+ * ★ 2026-10-16 用户要求：选择 / 文字 / 图片 / 涂白 / 矩形 / 椭圆
+ *   唤出的这条工具栏**不再浮在阅读区顶部**，而是并进全局底部工具条
+ *   （见 DrawToolbar 的 .drawbar__editdock）。
+ *
+ *   因此这里从 `position: fixed` 改成「就地在容器里排一行」：
+ *   容器负责定位，本元素只负责自己那行的布局与外观。
+ *   保留 .edit-bar 这个类名与所有 data-* 属性不变 ——
+ *   自动化用例（verify-content-edit / verify-bundle-markers）按它们定位，
+ *   改了等于白改一轮判据。
+ * ============================================================ */
+
+.edit-bar {
+  /* 就地排布：父级 .drawbar__editdock 已经负责居中与宽度 */
+  position: relative;
+  left: auto;
+  right: auto;
+  top: auto;
+  /*
+   * ★ 不要写 `margin-inline: auto` + `width: fit-content`。
+   *   它是 flex 子项，`auto` 外边距会吃掉所有剩余空间，
+   *   把内容整体推到容器右侧之外 —— 实测按钮跑到 x=1669（视口只有 1440），
+   *   而 .drawbar 是 `overflow: auto hidden`，于是按钮被裁掉且**点不到**，
+   *   表现得像「工具按钮失灵」。居中的活交给父级的 justify-content。
+   */
+  margin: 0;
+  width: auto;
+  max-width: 100%;
+  z-index: 1;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 10px;
+
+  background: rgb(28 32 40 / 0.95);
+  border: 1px solid rgb(255 255 255 / 0.1);
+  color: rgb(232 236 244);
+  box-shadow:
+    0 6px 20px rgb(0 0 0 / 0.3),
+    0 2px 5px rgb(0 0 0 / 0.18);
+  font-size: 12px;
+  animation: edit-bar-in 160ms var(--ease, ease);
+}
+
+/*
+ * 底部工具条里的「编辑功能区」容器。
+ *
+ * 它永远是 .drawbar 的第一行（上面），下面一行是工具选择。
+ * 用 flex-basis: 100% 强制独占一行，避免和工具按钮挤在一起。
+ */
+.drawbar__editdock {
+  flex-basis: 100%;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  margin-bottom: 2px;
+}
+
+@keyframes edit-bar-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/*
+ * ★ 浮动选字条必须用自己的入场动画（只动 opacity）。
+ *
+ *   `.edit-selbar` 的定位靠 `transform: translate(-50%, -100%)`，
+ *   而 `edit-bar-in` 会动画 `transform` —— 动画期间它**整体覆盖**了
+ *   那对位移，于是条形在入场的前 120ms 里左移少了一半宽度、下移了一个
+ *   自身高度；隐藏窗口/低帧率下动画还会被拖到几百毫秒，
+ *   表现就是「工具条先出现在错的地方，手指还没到它就跳走了」（点空）。
+ */
+@keyframes edit-selbar-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.edit-bar__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgb(90 169 255 / 0.18);
+  color: rgb(190 220 255);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.edit-bar__group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px;
+  border-radius: 10px;
+  background: rgb(255 255 255 / 0.06);
+}
+
+/* 所有按钮的可点区域都不小于 32×32（触屏一体机的手指标尺） */
+.edit-bar__chip {
+  min-width: 32px;
+  height: 32px;
+  padding: 0 6px;
+  border-radius: 8px;
+  color: rgb(232 236 244);
+  font-size: 12px;
+  transition: background var(--dur-fast, 120ms) var(--ease, ease);
+}
+
+.edit-bar__chip:hover {
+  background: rgb(255 255 255 / 0.12);
+}
+
+.edit-bar__chip.is-active {
+  background: rgb(90 169 255 / 0.9);
+  color: #0b1220;
+  font-weight: 600;
+}
+
+.edit-bar__color {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  position: relative;
+}
+
+/* 色块本体缩到 16px，留出可点区域，视觉上不至于连成一片 */
+.edit-bar__color::after {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  border-radius: 4px;
+  background: var(--edit-color, #fff);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.35);
+}
+
+.edit-bar__color.is-active::after {
+  inset: 6px;
+  box-shadow:
+    0 0 0 2px rgb(90 169 255),
+    inset 0 0 0 1px rgb(255 255 255 / 0.4);
+}
+
+.edit-bar__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: rgb(232 236 244);
+  font-size: 12px;
+  white-space: nowrap;
+  transition: background var(--dur-fast, 120ms) var(--ease, ease);
+}
+
+.edit-bar__btn:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.12);
+}
+
+.edit-bar__btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.edit-bar__btn--primary {
+  background: rgb(90 169 255 / 0.9);
+  color: #0b1220;
+  font-weight: 600;
+}
+
+.edit-bar__btn--primary:hover:not(:disabled) {
+  background: rgb(120 190 255);
+}
+
+.edit-bar__btn--danger:hover:not(:disabled) {
+  background: rgb(229 72 77 / 0.85);
+  color: #fff;
+}
+
+.edit-bar__hint {
+  color: rgb(170 180 196);
+  white-space: nowrap;
+  padding: 0 4px;
+}
+
+/* 「有未导出的编辑」：橙色提示，导出成功后由 store 自动清掉 */
+.edit-bar__dirty {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: rgb(245 166 35 / 0.2);
+  color: rgb(255 208 130);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.edit-bar__progress {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.08);
+  white-space: nowrap;
+}
+
+/* 隐藏的文件选择器：按钮在编辑条上，真正的 input 藏在这里 */
+.edit-file {
+  display: none;
+}
+
+/* ============================================================
+ * 四、选择工具的选区小工具条
+ * ============================================================ */
+
+.edit-selbar {
+  position: fixed;
+  /* anchor 给的是选区上沿中点，往上翻一行再居中 */
+  transform: translate(-50%, -100%);
+  z-index: 1001;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgb(28 30 38 / 0.96);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+  animation: edit-selbar-in 120ms var(--ease, ease);
+}
+
+.edit-selbar__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: rgb(232 236 244);
+  font-size: 12px;
+}
+
+.edit-selbar__btn:hover {
+  background: rgb(255 255 255 / 0.14);
+}
+
+.edit-selbar__btn--plain {
+  padding: 0 6px;
+  color: rgb(180 188 202);
+}
+
+/* ============================================================
+ * 五、右键菜单（删除 / 编辑文字）
+ * ============================================================ */
+
+.edit-menu__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  background: transparent;
+}
+
+.edit-menu {
+  position: fixed;
+  z-index: 1101;
+  min-width: 132px;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgb(28 30 38 / 0.98);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.4);
+}
+
+.edit-menu__item {
+  display: block;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  text-align: left;
+  color: rgb(232 236 244);
+  font-size: 12px;
+}
+
+.edit-menu__item:hover {
+  background: rgb(255 255 255 / 0.12);
+}
+
+.edit-menu__item--danger:hover {
+  background: rgb(229 72 77 / 0.85);
+  color: #fff;
+}
+
+/* ============================================================
+ * 选区工具条：改文字 / 格式 面板
+ *
+ * 工具条本身是**横向 flex 一行**（见 .edit-selbar）。
+ * 加了面板之后要改成纵向：上面一行按钮、下面一块面板，
+ * 面板再宽也不会把工具条撑出屏幕。
+ * 所以用 column 包裹：.edit-selbar 纵向，.edit-selbar__row 横向。
+ * ============================================================ */
+
+.edit-selbar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.edit-selbar__row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* 按钮激活态（改文字/格式面板开着时） */
+.edit-selbar__btn.is-active {
+  background: rgb(90 140 255 / 0.28);
+  color: rgb(255 255 255);
+}
+
+.edit-selbar__btn--primary {
+  background: rgb(70 120 240 / 0.9);
+  color: rgb(255 255 255);
+}
+
+.edit-selbar__btn--primary:hover {
+  background: rgb(90 140 255 / 1);
+}
+
+.edit-selbar__panel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 2px 2px;
+  border-top: 1px solid rgb(255 255 255 / 0.12);
+}
+
+.edit-selbar__panel-label {
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.6);
+  padding: 0 4px 0 2px;
+}
+
+/* ---------- 字号档位 ---------- */
+.edit-selbar__size {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 4px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 6px;
+  background: rgb(255 255 255 / 0.06);
+  color: rgb(235 238 245);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.edit-selbar__size:hover {
+  background: rgb(255 255 255 / 0.16);
+}
+
+/* ---------- 颜色色块 ---------- */
+.edit-selbar__swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid rgb(255 255 255 / 0.35);
+  cursor: pointer;
+  padding: 0;
+}
+
+.edit-selbar__swatch:hover {
+  transform: scale(1.15);
+}
+
+/* ---------- 改文字：多行输入 ---------- */
+.edit-selbar__panel--text {
+  flex-wrap: nowrap;
+}
+
+.edit-selbar__input {
+  /*
+   * 宽度给足但不撑破屏幕：工具条是 translate(-50%) 居中的，
+   * 超过 min(70vw, 420px) 在窄屏上会顶到边缘。
+   */
+  width: min(70vw, 420px);
+  min-height: 34px;
+  max-height: 30vh;
+  padding: 6px 8px;
+  border: 1px solid rgb(255 255 255 / 0.2);
+  border-radius: 6px;
+  background: rgb(12 14 20 / 0.9);
+  color: rgb(240 243 250);
+  font-size: 13px;
+  line-height: 1.35;
+  resize: vertical;
+  /* 输入框里要能正常选字与使用输入法 */
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.edit-selbar__input:focus {
+  outline: none;
+  border-color: rgb(90 140 255 / 0.9);
+}
+
+/* ============================================================
+ * 四、触摸屏（一体机手指）适配
+ *
+ * ★ 2026-10-18：用户在一体机上用「选择」工具，手指点浮动条按钮
+ *   经常点不中 —— 那排按钮按鼠标尺寸做的（min-width 32px / 行高 30px），
+ *   手指的实际落点直径 40px 以上，命中率自然低。
+ *
+ *   这里只放大**触摸设备**（pointer: coarse），鼠标/触控笔保持原样：
+ *   桌面鼠标下按钮变大反而显得笨重。
+ * ============================================================ */
+@media (pointer: coarse) {
+  .edit-selbar__btn {
+    min-width: 46px;
+    min-height: 42px;
+    padding: 0 14px;
+    font-size: 14px;
+  }
+
+  .edit-selbar__btn--primary {
+    padding: 0 16px;
+  }
+
+  /* 面板里的字号/颜色小方块：手指点按的最小尺寸 */
+  .edit-selbar__size {
+    min-width: 42px;
+    min-height: 38px;
+  }
+
+  .edit-selbar__swatch {
+    width: 34px;
+    height: 34px;
+  }
+
+  /* 就地输入框：字号放大，避免手指遮住文字 */
+  .edit-selbar__input {
+    min-height: 46px;
+    font-size: 15px;
+  }
+
+  /* 选中物件四角手柄的可见尺寸（命中区另有 ::after 扩到 32px） */
+  .edit-handle {
+    width: 14px;
+    height: 14px;
+  }
+}

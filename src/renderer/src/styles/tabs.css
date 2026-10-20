@@ -1,0 +1,141 @@
+/*
+ * 标签栏（单窗口多文件）。
+ *
+ * 位置：标题栏之下、工具条之上。高度 34px，和 --titlebar-h(40) / --statusbar-h(30)
+ * 一起固定用掉窗口上下共 104px 的「非阅读区」，所以在 800x600 这类小窗口上
+ * 用媒体查询把标签名收窄，尽量把高度留给页面。
+ *
+ * 颜色全部走主题变量（--bg/--surface/--surface-strong/--border/--text/--muted/--accent），
+ * 米色（sepia）是默认主题，所以这里不写死任何颜色。
+ */
+
+.tabbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 34px;
+  flex: 0 0 auto;
+  padding: 0 8px;
+  background: rgb(var(--bg));
+  border-bottom: 1px solid rgb(var(--border));
+  /* 标签栏整体不可拖拽窗口：里面的每个元素都要能点 */
+  -webkit-app-region: no-drag;
+  user-select: none;
+}
+
+.tabbar__list {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.tabbar__list::-webkit-scrollbar {
+  height: 0;
+}
+
+.tabbar__tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 92px;
+  max-width: 200px;
+  height: 27px;
+  padding: 0 6px 0 10px;
+  border-radius: 8px 8px 0 0;
+  color: rgb(var(--muted));
+  font-size: 12.5px;
+  line-height: 1;
+  cursor: default;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.tabbar__tab:hover {
+  background: rgb(var(--surface-strong));
+  color: rgb(var(--text));
+}
+
+.tabbar__tab.is-active {
+  background: rgb(var(--surface));
+  color: rgb(var(--text));
+  box-shadow: inset 0 2px 0 rgb(var(--accent));
+}
+
+.tabbar__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 有内容编辑还没导出：名字后面点一个小圆点（比改文字更不打扰） */
+.tabbar__dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgb(var(--accent));
+}
+
+.tabbar__close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+
+.tabbar__tab:hover .tabbar__close,
+.tabbar__tab.is-active .tabbar__close {
+  opacity: 0.72;
+}
+
+.tabbar__close:hover {
+  opacity: 1;
+  background: rgb(var(--border));
+}
+
+.tabbar__add {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-bottom: 3px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgb(var(--muted));
+  cursor: pointer;
+}
+
+.tabbar__add:hover {
+  background: rgb(var(--surface-strong));
+  color: rgb(var(--text));
+}
+
+/* 窄窗口：标签只留图标和关闭按钮，名字收到 92px，能塞更多标签 */
+@media (max-width: 900px) {
+  .tabbar__tab {
+    max-width: 132px;
+    padding-left: 8px;
+  }
+}

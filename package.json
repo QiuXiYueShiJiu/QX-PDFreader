@@ -1,0 +1,118 @@
+{
+  "name": "qiuxi-pdf-reader",
+  "version": "1.0.0",
+  "description": "秋夕-PDF阅读器 —— 面向教学一体机的双栏批注式 PDF 阅读工具",
+  "main": "./out/main/index.js",
+  "author": "秋夕月拾旧",
+  "license": "SEE LICENSE IN LICENSE",
+  "private": true,
+  "scripts": {
+    "prebuild": "node scripts/copy-pdf-worker.mjs && node scripts/copy-ocr-assets.mjs",
+    "predev": "node scripts/copy-pdf-worker.mjs && node scripts/copy-ocr-assets.mjs",
+    "build": "electron-vite build",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "patch:dpi": "node scripts/inject-dpi-manifest.mjs",
+    "pack": "npm run build && electron-builder --win --x64 --dir",
+    "dist": "npm run build && electron-builder --win --x64"
+  },
+  "dependencies": {
+    "lucide-react": "^0.469.0",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^4.10.38",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tesseract.js": "^5.1.1",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.17",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11"
+  },
+  "build": {
+    "appId": "com.qiuxiyue.qxpdfreader",
+    "copyright": "Copyright 2026 秋夕月拾旧",
+    "directories": {
+      "output": "dist-installer"
+    },
+    "files": [
+      "out/**/*",
+      "package.json",
+      "!**/*.map",
+      "!**/*.d.ts",
+      "!**/*.md",
+      "!**/README*",
+      "!**/CHANGELOG*",
+      "!**/docs/**",
+      "!**/doc/**",
+      "!**/test/**",
+      "!**/tests/**",
+      "!**/example/**",
+      "!**/examples/**",
+      "!**/.bin/**",
+      "!**/@napi-rs/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "fileAssociations": [
+      {
+        "ext": "pdf",
+        "name": "PDF 文档",
+        "description": "PDF 文档",
+        "role": "Viewer",
+        "icon": "build/pdf-file.ico"
+      }
+    ],
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "秋夕-PDF阅读器",
+      "artifactName": "秋夕-PDF阅读器-1.0.0.1-安装程序.${ext}",
+      "include": "build/installer.nsh"
+    },
+    "afterPack": "scripts/after-pack.mjs",
+    "extraResources": [
+      {
+        "from": "LICENSE",
+        "to": "LICENSE.txt"
+      },
+      {
+        "from": "NOTICE",
+        "to": "NOTICE.txt"
+      },
+      {
+        "from": "SOURCE.txt",
+        "to": "SOURCE.txt"
+      },
+      {
+        "from": "THIRD-PARTY-NOTICES.md",
+        "to": "THIRD-PARTY-NOTICES.md"
+      },
+      {
+        "from": "build/build-info.json",
+        "to": "build-info.json"
+      }
+    ]
+  },
+  "buildVersion": "1.0.0.1",
+  "productName": "秋夕-PDF阅读器"
+}

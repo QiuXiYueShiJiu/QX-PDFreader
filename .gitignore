@@ -1,0 +1,36 @@
+# ── 依赖与构建产物（绝不入库）────────────────────────────────
+node_modules/
+out/
+release/
+dist-installer/
+*.tsbuildinfo
+
+# ── 交付参数：客户/学校相关的部署信息（装到哪、包叫什么）──────
+#   这些值只在**本机**存在；源码里永远只有通用默认值。
+#   scripts/build-setup.mjs 会生成/读取它们。
+build/packaging.json
+build/.packaging-resolved.json
+
+# ── 由模板生成的打包脚本（真源是 build/installer.nsh.in）──────
+build/installer.nsh
+
+# ── 测试与验证的临时产物 ────────────────────────────────────
+test-results/
+*.log
+
+# ── tools 下 C# 辅助程序的编译产物（源码是 desktop-launcher.cs）──
+tools/bin/
+tools/obj/
+tools/.publish/
+tools/.icon-publish/
+
+# ── 内部记录：会话转录、压缩摘要、状态笔记（含本机路径，勿公开）──
+docs/_*
+docs/_scan-tmp/
+
+# ── 编辑器 / 系统 ────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

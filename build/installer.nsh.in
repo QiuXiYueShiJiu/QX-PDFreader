@@ -1,0 +1,446 @@
+; ============================================================
+; 本安装包的品牌与法律声明
+;
+; ★ 这一块由 `scripts/build-setup.mjs` 按**变体**注入：
+;     · 公开版（标准向导版）：只有著作权 / 官网 / 协议
+;     · 专供版（快速安装版）：额外多一条适用范围与技术支持
+;   之所以要注入而不是写死，是因为用户要求
+;   「公开版本安装包不得出现任何单位/学校等隐私信息」，
+;   而专供版必须带上适用范围声明。两份包共用同一个 nsis include，
+;   所以每次打包前重新渲染一次。
+;
+@@LEGAL_DECL@@
+; ============================================================
+; 快捷方式：由本脚本自己创建（v2.1.3）
+;
+; ── 为什么要接管 ────────────────────────────────────────────
+;   用户要求（2026-10-19）：「安装包可以选择创建桌面快捷方式与开始
+;   菜单（开始菜单独立文件夹「秋夕-教学软件」）」。
+;   electron-builder 的 createDesktopShortcut / createStartMenuShortcut
+;   是**全局开关**（永远建 / 永远不建），没有「让用户勾选」这一档。
+;
+;   模板里真正干活的宏（templates/nsis/include/installer.nsh:169/196）
+;   各自被 `!ifndef DO_NOT_CREATE_*` 包着 —— 只要在编译期定义这两个
+;   符号，模板就完全不建快捷方式，改由本文件的 customInstall 按用户
+;   勾选来建。这样向导版可以放一页勾选框，快速版（无界面）走默认全建。
+;
+; ── MENU_FILENAME 的作用 ────────────────────────────────────
+;   common.nsh:103 用它拼 $newStartMenuLink：
+;     !ifdef MENU_FILENAME
+;       StrCpy $newStartMenuLink "$SMPROGRAMS\${MENU_FILENAME}\${SHORTCUT_NAME}.lnk"
+;   所以这里定义成「秋夕-教学软件」，快捷方式就落进独立文件夹。
+;   注意：**不要**同时给 package.json 的 nsis 配 menuCategory，
+;   否则 builder 也会定义同名符号，编译期报重复定义。
+; ============================================================
+
+!define DO_NOT_CREATE_DESKTOP_SHORTCUT
+!define DO_NOT_CREATE_START_MENU_SHORTCUT
+!define MENU_FILENAME "秋夕-教学软件"
+
+; nsDialogs 是 NSIS 自带的控件库（做勾选框要用）。模板在 assistedInstaller
+; 里才 `!include nsDialogs.nsh`，而本文件比它更早被 include，所以这里自己引。
+!include "nsDialogs.nsh"
+
+; 勾选页的控件句柄 + 结果（"1" 建 / "0" 不建）。
+;
+; Var 必须写在用到它的 Function 之前。**必须藏在 !ifndef BUILD_UNINSTALLER
+; 里面**：electron-builder 会把卸载器单独编译一遍（BUILD_UNINSTALLER），
+; 那一遍用不到这些变量，makensis 就报 warning 6001「变量未引用」；而
+; electron-builder 用 -WX 把警告当错误 → 打包直接失败（踩过）。
+; customUnInstall 不读这些变量，所以拦在这里是安全的。
+;
+; 第二层 `!ifndef ONE_CLICK`：快速版（oneClick=true）的模板不会插入
+; customPageAfterChangeDir，页面函数就成了「定义了但没人引用」——
+; makensis warning 6010 同样会被 -WX 变成错误。快速版靠 customInit 的
+; 默认值 "1" 全建，用不到勾选页。
+!ifndef BUILD_UNINSTALLER
+  /* 这两个值快速版（oneClick）也要用：customInit 给默认值、customInstall 建快捷方式，
+     所以不能塞进 !ifndef ONE_CLICK —— 快速版不声明它们时 customInit 的 StrCpy 会报
+     "Usage: StrCpy $(user_var: output)" 并中止编译（2026-10-19 踩过）。 */
+  Var qxDesktopShortcut
+  Var qxStartMenuShortcut
+!ifndef ONE_CLICK
+  /* 勾选页控件句柄只在向导版编译：快速版没有这一页，声明了会被判「从未引用」→ /WX 报警 */
+  Var qxShortcutDesktopCheck
+  Var qxShortcutStartCheck
+
+  /*
+   * 勾选页（只在向导版出现；快速版是 oneClick，不展开下面的宏）。
+   *
+   * 为什么不用 MUI_HEADER_TEXT：MUI2 由模板稍后 include，本文件编译时
+   * 它还不存在，直接调用会 "macro not found"。所以页面里自己放标题文字。
+   */
+  Function qxShortcutPageCreate
+    nsDialogs::Create 1018
+    Pop $R0
+    StrCmp $R0 error 0 +2
+      Abort
+
+    ${NSD_CreateLabel} 0 0 100% 24u "安装完成后要创建哪些快捷方式？（可多选）"
+    Pop $R0
+
+    ${NSD_CreateCheckbox} 0 32u 100% 12u "创建桌面快捷方式"
+    Pop $qxShortcutDesktopCheck
+    ${NSD_SetState} $qxShortcutDesktopCheck ${BST_CHECKED}
+
+    ${NSD_CreateCheckbox} 0 50u 100% 12u "创建开始菜单快捷方式（「秋夕-教学软件」文件夹）"
+    Pop $qxShortcutStartCheck
+    ${NSD_SetState} $qxShortcutStartCheck ${BST_CHECKED}
+
+    nsDialogs::Show
+  FunctionEnd
+
+  Function qxShortcutPageLeave
+    StrCpy $qxDesktopShortcut "0"
+    StrCpy $qxStartMenuShortcut "0"
+
+    ${NSD_GetState} $qxShortcutDesktopCheck $R0
+    StrCmp $R0 ${BST_CHECKED} 0 +2
+      StrCpy $qxDesktopShortcut "1"
+
+    ${NSD_GetState} $qxShortcutStartCheck $R0
+    StrCmp $R0 ${BST_CHECKED} 0 +2
+      StrCpy $qxStartMenuShortcut "1"
+  FunctionEnd
+
+  !macro customPageAfterChangeDir
+    Page custom qxShortcutPageCreate qxShortcutPageLeave
+  !macroend
+!endif ; ONE_CLICK
+!endif ; BUILD_UNINSTALLER
+
+; ============================================================
+; 安装程序自定义脚本（electron-builder 的 nsis include 钩子）
+;
+; ── 目标 ────────────────────────────────────────────────────
+;   默认安装目录 = @@INSTALL_DIR@@
+;
+; ── 查模板源码后确认的机制（这是整件事的关键）──────────────
+;   electron-builder 的 nsis 配置**没有**「指定默认目录」这一项，
+;   默认值由模板 multiUser.nsh 的 setInstallModePerUser 宏硬编码：
+;
+;     StrCpy $0 "$LocalAppData\Programs"
+;     ... SHGetKnownFolderPath(FOLDERID_UserProgramFiles) ...
+;     StrCpy $INSTDIR "$0\${APP_FILENAME}"
+;
+;   ★ 该宏的调用时机在两种模式下**不同**：
+;
+;     · oneClick（快速安装，无目录选择页）
+;       oneClick.nsh:13 的 initMultiUser 会直接
+;       !insertmacro setInstallModePerUser。
+;       而 initMultiUser 在 installer.nsi:70 被调用，
+;       customInit 在 72 行 —— 即 setInstallModePerUser **先**跑，
+;       customInit **后**跑，因此这里设的 $INSTDIR 能生效。✔
+;
+;     · 协助式（assisted，带目录选择页）
+;       initMultiUser 是空宏，真正的 setInstallModePerUser 在
+;       **目录页显示时**才执行（multiUserUi.nsh），位于 customInit
+;       **之后** → customInit 里设的值被覆盖。✘
+;
+;   结论：默认目录只能靠 oneClick 模式可靠地设定。
+;   协助式安装包若要装到指定位置，用命令行 /D=路径。
+;
+; ── 只用最基础的 NSIS 指令（踩过的四个坑）──────────────────
+;   ① 模板里的 ${StrContains} 在本文件里用不了（include 顺序在后），
+;      报 _StrContainsConstructor 错误。
+;   ② 自己写 ${If} 也不行 —— LogicLib 的 include guard 让本文件里的
+;      !include 变成空操作，于是报 "error in script"。
+;   ③ customPageAfterChangeDir 里不能放运行期指令：该宏在页面声明处
+;      展开（顶层），报 "command Push/Call not valid outside
+;      Section or Function"。
+;   ④ 定义了未被引用的 Function，makensis 报
+;      warning 6010: install function "..." not referenced，
+;      而 electron-builder 把警告当错误 → 打包失败。
+;      所以本文件**不定义任何多余函数**。
+; ============================================================
+
+!macro customInit
+  /*
+   * 快捷方式默认全建。
+   *   · 快速版（oneClick）：没有界面，走到这里就是终值；
+   *   · 向导版：勾选页（customPageAfterChangeDir 里的 Page custom）
+   *     会在用户点「下一步」时覆盖；silent（/S）不显示页面，也用这里的值。
+   */
+  StrCpy $qxDesktopShortcut "1"
+  StrCpy $qxStartMenuShortcut "1"
+
+  /*
+   * 默认安装目录（**silent 安装唯一的落点**）。
+   *
+   * silent 模式（`setup.exe /S`）不进入 GUI，`.onGUIInit` 不执行，
+   * 所以只能在这里设 —— 否则静默安装会落回模板默认目录
+   * `%LOCALAPPDATA%\Programs\<APP_FILENAME>`。
+   *
+   * 向导模式这一份会被模板随后的 initMultiUser 覆盖，
+   * 由下面的 customOnGUIInit 再设一次补上。
+   *
+   * 命令行给了 /D= 就尊重；没给就用我们的默认目录。
+   * 检测只用核心指令逐字符扫描 $CMDLINE（理由见下个宏的注释）。
+   */
+!ifdef QX_QUICK_EDITION
+  /* 专供版：目录固定，覆盖一切（同样带上 \${APP_FILENAME} 一层） */
+  StrCpy $INSTDIR "@@INSTALL_DIR@@\${APP_FILENAME}"
+!else
+  StrCpy $R0 "$CMDLINE"
+  StrCpy $R1 "/D="
+  qx_init_scan:
+    StrCpy $R3 $R0 3
+    StrCmp $R3 $R1 qx_init_done
+    StrCmp $R0 "" qx_init_set_default
+    StrCpy $R0 "$R0" "" 1
+    Goto qx_init_scan
+  qx_init_set_default:
+    /*
+     * 与向导路径保持一致：带上 \${APP_FILENAME} 这一层。
+     * 静默安装不经过 instFilesPre，没人帮我们补这一层。
+     */
+    StrCpy $INSTDIR "@@INSTALL_DIR@@\${APP_FILENAME}"
+  qx_init_done:
+!endif
+
+  /*
+   * 迁移：清掉**旧的安装目录**，避免同一个应用存在两份。
+   *
+   * 背景：本版把默认安装位置从 `C:\Program Files\QiuXiPDFReader-legacy` 改成了
+   * `@@INSTALL_DIR@@`（少了个 QX）。老用户机器上可能还留着整个旧目录 ——
+   * 不清会出现三个问题：
+   *   ① 磁盘上两份 180MB 的 exe，用户分不清该点哪个；
+   *   ② 旧目录里的卸载器仍在注册表里，卸载时只删掉一份，另一份成孤儿；
+   *   ③ 旧目录的快捷方式指向旧 exe，点开还是老版本。
+   * 这些路径由 packaging.json 的 legacyInstallDirs 提供，源码里为空。
+   *
+   * 安全前提：新目录与旧目录**不同**（C:\Program Files\QiuXiPDFReader vs
+   * C:\Program Files\QiuXiPDFReader-legacy），所以不会把正在安装的目标删掉。
+   * 这里额外做一次比较，万一将来有人把它们配成同一个也不至于自毁。
+   */
+@@LEGACY_DIR_CLEANUP@@
+
+  /*
+   * 升级自 1.2.x 时的收尾动作（v2.0 改名带来的坑）：
+   *
+   *   老版本进程名是 QXPDFReader.exe / 秋夕月拾旧-PDF阅读器.exe，
+   *   新版本叫 秋夕-PDF阅读器.exe。electron-builder 只会结束**新名字**
+   *   的进程，老进程不会被动 —— 它仍然锁着 $INSTDIR 里的文件，
+   *   而且它还占着同一个 userData 目录的单实例锁（v2.0 特意把
+   *   userData 钉在老的 秋夕月拾旧-PDF阅读器 上，好让设置/最近文件
+   *   /阅读位置延续），结果就是新版本装完启动后立刻自己退出。
+   *   所以在解压文件之前先把老进程结束掉。
+   *
+   * taskkill 对不存在的进程返回非零，属正常，故结果直接丢弃。
+   */
+  nsExec::Exec 'taskkill /IM QXPDFReader.exe /T /F'
+  Pop $0
+  nsExec::Exec 'taskkill /IM 秋夕月拾旧-PDF阅读器.exe /T /F'
+  Pop $0
+  ; 更早的「智慧黑板PDF阅读器」代（1.1.x）也可能还在跑
+  nsExec::Exec 'taskkill /IM 智慧黑板PDF阅读器.exe /T /F'
+  Pop $0
+!macroend
+
+; ============================================================
+; 向导版默认安装目录 —— 用 customPageAfterChangeDir 定稿
+;
+; ── 实测证据（判据）─────────────────────────────────────────
+;   走完向导（下一步 → 安装）之后：
+;     期望 C:\Program Files\QiuXiPDFReader                           → false
+;     实际 %LOCALAPPDATA%\Programs\smartboard-pdf-reader   → true
+;   而静默安装（/S）落点是对的。说明 GUI 路径上 customInit 设的值
+;   被模板覆盖了 —— 因为模板自己也有一套目录初始化。
+;
+; ── 为什么是这两个钩子 ──────────────────────────────────────
+;   翻 node_modules/app-builder-lib/templates/nsis 得到的事实：
+;     · installer.nsi:48   !ifmacrodef preInit              ← 最早
+;     · installer.nsi:70   !insertmacro initMultiUser       ← 模板设默认目录
+;     · installer.nsi:72   !insertmacro customInit          ← 我们（静默路径靠它）
+;     · assistedInstaller.nsh:42 !ifmacrodef customPageAfterChangeDir
+;       ← 目录选择页之后，唯一能改 $INSTDIR 的时机
+;     · 模板**没有** customOnGUIInit 这个钩子（写了也不会执行）
+;
+; ── 怎么不误伤用户手选的目录 ────────────────────────────────
+;   编译期标记 QX_INSTALLDIR_DONE：
+;     preInit 里 !define 上；
+;     customInit 扫到命令行 /D= 时 !undef 掉；
+;     这里 !ifdef 判断 —— 标记还在说明用户没指定，才填默认目录。
+;   全程编译期指令，满足 customPageAfterChangeDir 不能放运行期指令的限制。
+; ============================================================
+
+!macro preInit
+  /*
+   * 最早的时机（installer.nsi:48），也是 .onInit 里唯一早于
+   * initMultiUser 的钩子 —— 所以这里写下的注册表值，
+   * 随后就会被 setInstallModePerUser 读到并当成「上次装的目录」。
+   *
+   * 写的是 HKCU 的 InstallLocation，正是 multiUser.nsh:26 读的那个键：
+   *   ReadRegStr $perUserInstallationFolder HKCU "${INSTALL_REGISTRY_KEY}" InstallLocation
+   *
+   * ★ 为什么要先判断空：如果用户**已经装过**（键里有值），
+   *   那就该沿用他原来的目录（升级场景），不要覆盖成我们的默认值。
+   *   ${INSTALL_REGISTRY_KEY} 由 electron-builder 在编译期定义。
+   */
+  ClearErrors
+  ReadRegStr $R5 HKCU "${INSTALL_REGISTRY_KEY}" InstallLocation
+  StrCmp $R5 "" 0 qx_pre_keep
+    /*
+     * ★ 必须带上 \${APP_FILENAME} 这一层。
+     *   模板的 instFilesPre（assistedInstaller.nsh:32-38）会强制保证
+     *   $INSTDIR 里含 \${APP_FILENAME}，缺了就补一层。
+     *   早先只种 "@@INSTALL_DIR@@"，结果装到
+     *   C:\Program Files\QiuXiPDFReader\smartboard-pdf-reader\ —— 多一层。
+     *   把完整路径种进来，那个判断自然命中，不再追加。
+     *   \${APP_FILENAME} 由 electron-builder 在编译期定义，
+     *   现在等于 build.executableName = QXPDFReader。
+     */
+    WriteRegStr HKCU "${INSTALL_REGISTRY_KEY}" InstallLocation "@@INSTALL_DIR@@\${APP_FILENAME}"
+  qx_pre_keep:
+!macroend
+
+!macro customInstall
+  ; 文件关联由 electron-builder 的 fileAssociations 负责，这里不重复做。
+
+  /*
+   * 清掉老名字留下的东西：
+   *   ① 老 exe：新版本的可执行文件名变了，旧的不会被覆盖，会白占一份体积，
+   *      而且桌面上的旧快捷方式还能点、点开还是老版本 —— 用户会以为改名没生效。
+   *   ② 老快捷方式：指向老 exe，删掉后由安装程序重新创建新名字的。
+   *      （卸载项不用管：appId 没变，安装程序写的是同一个注册表键。）
+   */
+  Delete "$INSTDIR\QXPDFReader.exe"
+  Delete "$INSTDIR\秋夕月拾旧-PDF阅读器.exe"
+  Delete "$INSTDIR\智慧黑板PDF阅读器.exe"
+
+  Delete "$DESKTOP\QXPDFReader.lnk"
+  Delete "$DESKTOP\秋夕月拾旧-PDF阅读器.lnk"
+  Delete "$DESKTOP\智慧黑板PDF阅读器.lnk"
+  Delete "$SMPROGRAMS\QXPDFReader.lnk"
+  Delete "$SMPROGRAMS\秋夕月拾旧-PDF阅读器.lnk"
+  ; 1.1.x 时代留下的开始菜单项，指向早已不存在的 exe，点了没反应
+  Delete "$SMPROGRAMS\智慧黑板PDF阅读器.lnk"
+
+  /*
+   * 按用户勾选创建快捷方式（v2.1.3）。
+   *
+   * 模板的 addStartMenuLink / addDesktopLink 已被前面的
+   * DO_NOT_CREATE_* 关闭，所以这里是唯一的创建点：
+   *   · 向导版：值来自勾选页（Page custom qxShortcutPageCreate）；
+   *   · 快速版 / 静默安装：customInit 里的默认值 "1"（两个都建）。
+   *
+   * 路径自己拼，不依赖模板的 $newDesktopLink / $newStartMenuLink ——
+   * 那两个变量由 setLinkVars 填，填的时机在 installSection 里，
+   * 这里虽然在其后，但少一层隐式依赖更稳。
+   *
+   * WinShell::SetLnkAUMI 是给任务栏/开始菜单固定用的 AppUserModelID，
+   * 模板建快捷方式时也会调，不设的话固定到任务栏后可能识别成两个应用。
+   */
+  StrCmp $qxDesktopShortcut "1" 0 qx_skip_desktop
+    CreateShortCut "$DESKTOP\${SHORTCUT_NAME}.lnk" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" "" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" 0 "" "" ""
+    WinShell::SetLnkAUMI "$DESKTOP\${SHORTCUT_NAME}.lnk" "${APP_ID}"
+  qx_skip_desktop:
+
+  StrCmp $qxStartMenuShortcut "1" 0 qx_skip_startmenu
+    CreateDirectory "$SMPROGRAMS\${MENU_FILENAME}"
+    CreateShortCut "$SMPROGRAMS\${MENU_FILENAME}\${SHORTCUT_NAME}.lnk" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" "" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" 0 "" "" ""
+    WinShell::SetLnkAUMI "$SMPROGRAMS\${MENU_FILENAME}\${SHORTCUT_NAME}.lnk" "${APP_ID}"
+  qx_skip_startmenu:
+
+  /*
+   * PDF 文件图标（v2.1.4）。
+   *
+   * ── 用户报的现象 ───────────────────────────────────────────
+   *   「现在 pdf 文件的图标没了」（2026-10-19，带截图）。重装后
+   *   资源管理器里的 .pdf 变成白纸/空白图标，但双击能正常打开。
+   *
+   * ── 查到的现场（本机 2.1.3.0）─────────────────────────────
+   *   · HKCU\Software\Classes\.pdf        默认值 = PDF 文档   ✔
+   *   · HKCU\Software\Classes\PDF 文档\shell\open\command    ✔
+   *   · HKCU\Software\Classes\PDF 文档\DefaultIcon =
+   *       C:\Program Files\QiuXiPDFReader\qiuxi-pdf-reader\resources\pdf-file.ico
+   *   · resources\pdf-file.ico 存在且正常（8 个尺寸 16~256，用
+   *     ExtractAssociatedIcon 取出来是红色 PDF 页图标）
+   *   也就是说**注册表链路是通的**，缺的只有两点：
+   *     ① DefaultIcon 没带图标索引（标准写法是 "...\pdf-file.ico,0"）；
+   *     ② 装完后没人通知 Shell「关联变了」，图标缓存还是上一次装卸
+   *        的旧条目 —— 反复卸载/重装时最容易留下白图标。
+   *
+   * ── 这里做的三件事 ────────────────────────────────────────
+   *   ① 把 DefaultIcon 重写成带 ,0 的显式路径（图标文件缺失时退回到
+   *      程序自身的图标，至少不是白纸）；
+   *   ② SHChangeNotify(SHCNE_ASSOCCHANGED) 让资源管理器立刻重读关联；
+   *   ③ ie4uinit -show 刷新图标缓存（Win10/11 上这条才真正清缓存）。
+   *
+   * 注：fileAssociations 的注册发生在 installSection.nsh 里、早于
+   * customInstall，所以这里能直接改写它写下的键。ProgID 就是
+   * package.json 里 fileAssociations[0].name（"PDF 文档"）。
+   */
+  IfFileExists "$INSTDIR\resources\pdf-file.ico" 0 qx_icon_fallback
+    WriteRegStr SHCTX "Software\Classes\PDF 文档\DefaultIcon" "" "$INSTDIR\resources\pdf-file.ico,0"
+    Goto qx_icon_notify
+  qx_icon_fallback:
+    WriteRegStr SHCTX "Software\Classes\PDF 文档\DefaultIcon" "" "$INSTDIR\${APP_EXECUTABLE_FILENAME},0"
+  qx_icon_notify:
+
+  /* SHCNE_ASSOCCHANGED = 0x08000000；后三个参数（idlist/路径/名称）全 0 */
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, i 0, i 0)'
+  /* 图标缓存：Win10/11 用 ie4uinit -show 强制重建；失败不影响安装 */
+  nsExec::Exec '"$SYSDIR\ie4uinit.exe" -show'
+  Pop $R0
+!macroend
+
+; ============================================================
+; 卸载：连**用户数据**一起清干净
+;
+; ── 为什么必须自己动手（用户 2026-10-17 报的缺陷）──────────────
+;   用户原话：「卸载不彻底，重装之后还会显示历史记录」。
+;   原因：electron-builder 的默认卸载器**只删安装目录**，不碰 userData；
+;   而本程序的设置 / 最近打开列表 / 每本书的阅读位置全都存在
+;   %APPDATA% 下 —— 于是「卸载 → 重装」后，列表里还挂着上一次的文件名。
+;   对交付场景来说这既是**隐私问题**（把用过什么文件暴露给下一个人），
+;   也会让人误以为卸载没成功。
+;
+; ── 要删哪些目录（两个都要，别只删一个）────────────────────────
+;   ① 秋夕月拾旧-PDF阅读器  ← 真实数据目录。主进程用 app.setPath 把
+;      userData **钉**在这个老名字上（见 src/main/index.ts 的
+;      LEGACY_USER_DATA_NAME），目的是让 1.2.x 老用户的设置能延续。
+;   ② 秋夕-PDF阅读器        ← Electron 启动时按 productName 建的空壳目录
+;      （钉定发生在它之后），里面通常只有缓存。不删会留下一堆空文件夹。
+;
+; ── 为什么用 RMDir /r 而不是 Delete ──────────────────────────
+;   这两个目录里是**多级子目录**（Cache/Code Cache/Local Storage…），
+;   Delete 只能删文件，必须用 RMDir /r 递归删。
+;   加 /REBOOTOK 没用 —— 这些文件不会被占用（进程已在 customInit 阶段被杀）。
+;
+; ── 为什么删不干净也不报错 ──────────────────────────────────
+;   如果卸载时应用还开着，目录会被占用而删不掉。此时不能中断卸载
+;   （那会让用户卡在半卸载状态、更麻烦），所以忽略返回值，
+;   并额外再杀一次进程 —— 这是最后一道保险。
+; ============================================================
+
+!macro customUnInstall
+  ; 再杀一次进程：万一用户是在应用运行时点的卸载，
+  ; 上面 customInit 的 taskkill 不会执行（那是安装路径才走的宏）。
+  nsExec::Exec 'taskkill /IM 秋夕-PDF阅读器.exe /T /F'
+  Pop $0
+
+  ; ① 真实数据目录（设置 / 最近文件 / 阅读位置 / 缓存）
+  RMDir /r "$APPDATA\秋夕月拾旧-PDF阅读器"
+  ; ② Electron 按新 productName 建的空壳目录
+  RMDir /r "$APPDATA\秋夕-PDF阅读器"
+  ; ③ 更早版本可能留下的目录（1.1.x / 1.2.x 时代）
+  RMDir /r "$APPDATA\智慧黑板PDF阅读器"
+  RMDir /r "$LOCALAPPDATA\秋夕月拾旧-PDF阅读器"
+
+  ; ④ 桌面 / 开始菜单里可能残留的快捷方式（老名字 + 新名字）
+  Delete "$DESKTOP\秋夕-PDF阅读器.lnk"
+  Delete "$DESKTOP\秋夕月拾旧-PDF阅读器.lnk"
+  Delete "$DESKTOP\智慧黑板PDF阅读器.lnk"
+  Delete "$DESKTOP\QXPDFReader.lnk"
+  Delete "$SMPROGRAMS\秋夕-PDF阅读器.lnk"
+  Delete "$SMPROGRAMS\秋夕月拾旧-PDF阅读器.lnk"
+  Delete "$SMPROGRAMS\智慧黑板PDF阅读器.lnk"
+  Delete "$SMPROGRAMS\QXPDFReader.lnk"
+
+  ; ⑤ v2.1.3 起开始菜单用独立文件夹（安装时可选建/不建）；
+  ;    先删文件夹里的 .lnk，再 RMDir（不带 /r）—— 顺手清掉空文件夹，
+  ;    但不会误删用户自己往里放的其他东西。
+  Delete "$SMPROGRAMS\秋夕-教学软件\秋夕-PDF阅读器.lnk"
+  RMDir "$SMPROGRAMS\秋夕-教学软件"
+!macroend

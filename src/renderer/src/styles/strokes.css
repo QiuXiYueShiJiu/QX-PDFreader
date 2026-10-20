@@ -1,0 +1,77 @@
+/* ============================================================
+ * 手绘笔迹图层
+ *
+ * 铺满整页，SVG 坐标按 scale 放大后与页面像素一一对应。
+ * 用 SVG 而不是 DOM 元素：折线一次画完，拐角能用 linejoin 做圆角。
+ * ============================================================ */
+
+.stroke-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+
+  /*
+   * 默认不吃事件：平时要保证文字选区、链接、双击等交互照常工作。
+   * 橡皮模式下再逐条打开 polyline 的响应（见下）。
+   */
+  pointer-events: none;
+  overflow: visible;
+  z-index: 2;
+}
+
+.stroke-layer path {
+  /*
+   * 稍微透明一点：笔迹压在正文上时仍然要能看清下面的字。
+   * 0.9 是试出来的 —— 再低会让红笔显得发灰，
+   * 再高则覆盖整行文字时影响阅读。
+   */
+  opacity: 0.9;
+}
+
+/*
+ * 每条笔迹是一个 <g>。
+ * 笔锋靠逐段变宽实现（见 stroke-engine.tsx），
+ * 因此这里不需要给 path 设统一宽度以外的样式。
+ */
+.stroke-layer g {
+  /* 分组本身不响应事件，命中由内部 path 负责 */
+  pointer-events: none;
+}
+
+/* ============================================================
+ * 橡皮模式：只让笔迹接收点击
+ *
+ * 为什么不在常态下也打开：
+ *   笔迹是细线，若常驻接收事件，用户点正文时会经常误命中，
+ *   而且光标会变成手型，干扰阅读。
+ * ============================================================ */
+
+.viewer-scroll.is-erasing .stroke-layer path {
+  pointer-events: stroke;
+  cursor: cell;
+}
+
+/* 橡皮掠过时高亮，明确提示「这一条会被擦掉」 */
+.viewer-scroll.is-erasing .stroke-layer path:hover {
+  stroke: #e5484d;
+}
+
+/* ============================================================
+ * 批注层容器
+ * ============================================================ */
+
+.anno-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  /* 批注本身不接收事件，交互由外层按模式控制 */
+  pointer-events: none;
+}
+
+/* 橡皮模式下让高亮/下划线也能被点中，方便擦除 */
+.viewer-scroll.is-erasing .anno-mark,
+.viewer-scroll.is-erasing .anno-note {
+  pointer-events: auto;
+  cursor: cell;
+}

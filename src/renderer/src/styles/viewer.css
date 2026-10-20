@@ -1,0 +1,2214 @@
+/**
+ * 阅读器布局与正文样式。
+ *
+ * ★ 文本层样式是**必需**的（末尾 textLayer 段）：
+ *   pdf.js 把文字渲染成绝对定位的 span 叠在 canvas 上，靠 transform 缩放。
+ *   CSS 里少了 position/transform-origin 这些声明，选中框会与文字错位。
+ *   这部分样式来自 pdf.js 官方示例，不要随意改动数值。
+ */
+
+/* ============================================================
+ * 整体骨架
+ * ============================================================ */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: rgb(var(--bg));
+  font-size: 0.95rem;
+}
+
+.app__body {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app__viewer {
+  flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+  background: var(--reader-bg);
+  overflow: hidden;
+}
+
+/* ============================================================
+ * 标题栏
+ * ============================================================ */
+
+.titlebar {
+  flex: 0 0 auto;
+  height: var(--titlebar-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  padding-left: 12px;
+  background: rgb(var(--surface));
+  border-bottom: 1px solid rgb(var(--border));
+
+  /* 整条可拖动窗口；按钮区必须 no-drag，否则点不动 */
+  -webkit-app-region: drag;
+}
+
+.titlebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.titlebar__logo {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  background: rgb(var(--accent));
+  color: rgb(var(--accent-fg));
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.titlebar__name {
+  font-weight: 600;
+  white-space: nowrap;
+  color: rgb(var(--text));
+}
+
+.titlebar__subtitle {
+  color: rgb(var(--muted));
+  font-size: 0.86em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 46vw;
+}
+
+.titlebar__subtitle::before {
+  content: '—';
+  margin-right: 8px;
+  opacity: 0.5;
+}
+
+.titlebar__controls {
+  display: flex;
+  -webkit-app-region: no-drag;
+}
+
+/* 触摸屏上按钮要够大 */
+.titlebar__btn {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: var(--titlebar-h);
+  color: rgb(var(--text));
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.titlebar__btn:hover {
+  background: rgb(var(--text) / 0.1);
+}
+
+.titlebar__btn:active {
+  background: rgb(var(--text) / 0.18);
+}
+
+.titlebar__btn--close:hover {
+  background: #d13438;
+  color: #fff;
+}
+
+/* ============================================================
+ * 工具栏
+ * ============================================================ */
+
+.toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  /*
+   * 间距也参与缩放。
+   * 只缩按钮不缩间距的话，窄窗口下省下来的宽度很有限，
+   * 还是会溢出（间距加起来能占几十像素）。
+   */
+  gap: calc(10px * var(--tb-scale, 1));
+
+  height: 46px;
+  padding: 0 10px;
+  background: rgb(var(--surface));
+  border-bottom: 1px solid rgb(var(--border));
+}
+
+/*
+ * 自适应缩放。
+ *
+ * --tb-scale 由 Toolbar.tsx 实测后写入（0.82 ~ 1），
+ * 这里只负责把它施加到按钮的尺寸上。
+ *
+ * 用 transform: scale() 是不行的 —— 那只是视觉上缩小，
+ * 布局占位不变，溢出依旧存在。必须真的改尺寸。
+ */
+.toolbar .icon-btn {
+  width: calc(34px * var(--tb-scale, 1));
+  height: calc(34px * var(--tb-scale, 1));
+}
+
+.toolbar .tb {
+  height: calc(34px * var(--tb-scale, 1));
+  padding: 0 calc(12px * var(--tb-scale, 1));
+  gap: calc(6px * var(--tb-scale, 1));
+}
+
+.toolbar .viewmode {
+  gap: calc(2px * var(--tb-scale, 1));
+}
+
+.toolbar .toolbar__group {
+  gap: calc(4px * var(--tb-scale, 1));
+}
+
+.toolbar .toolbar__sep {
+  margin: 0 calc(6px * var(--tb-scale, 1));
+}
+
+/*
+ * 宽度断点：先收文字，再收按钮。
+ *
+ * 调研结论（SumatraPDF / pdf.js / MuPDF / Okular 四家）：
+ * 桌面阅读器**不靠缩小按钮**解决窄窗口 —— 那会让触屏点不准。
+ * 它们的做法按代价从低到高依次是：
+ *   ① 收掉按钮上的文字（图标本身语义清楚，且 title 提示还在）
+ *   ② 收掉分隔线
+ *   ③ 把次要按钮挪进菜单
+ *
+ * 所以断点顺序就是 ①→②，最后才轮到 JS 那层按实测宽度收按钮。
+ * 先做 CSS 是因为它零成本、且不会因为测量时机抖动。
+ *
+ * 注意：这里用“工具栏自身宽度”的容器查询做不到（Chromium 版本够，
+ * 但要给 .toolbar 加 container-type，而它已是 flex 容器会互相影响），
+ * 用视口宽度足够 —— 工具栏宽度基本就等于视口宽度。
+ */
+@media (max-width: 900px) {
+  /*
+   * 只收「搜索」的文字。
+   * 「打开」留着 —— 找不到文件时它是唯一的入口，
+   * 一个孤零零的图标对不熟悉的老师来说不够醒目。
+   */
+  .toolbar .tb__label {
+    display: none;
+  }
+
+  .toolbar .tb {
+    padding: 0 calc(10px * var(--tb-scale, 1));
+  }
+}
+
+@media (max-width: 700px) {
+  /* 隐藏分隔线：它们只提供视觉分组，宽度紧张时是最该牺牲的 */
+  .toolbar .toolbar__sep {
+    display: none;
+  }
+
+  /* 页码输入框收窄（默认宽度是按 4 位数留的，有点富余） */
+  .toolbar .pagebox__input {
+    width: 34px;
+  }
+}
+
+@media (max-width: 560px) {
+  /* 极窄：连「/ 总页数」也收掉，只留当前页号 */
+  .toolbar .pagebox__total {
+    display: none;
+  }
+}
+
+/* ---------- 溢出菜单 ---------- */
+
+.tb-overflow {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+/* 点击外部关闭用的透明层：盖住整个视口，但不遮挡菜单本身 */
+.tb-overflow__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+}
+
+.tb-overflow__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 901;
+
+  display: flex;
+  flex-direction: column;
+  min-width: 168px;
+  padding: 6px;
+  border-radius: var(--radius);
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--border));
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.22);
+}
+
+.tb-overflow__item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  color: rgb(var(--text));
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.tb-overflow__item:hover:not(:disabled) {
+  background: rgb(var(--text) / 0.1);
+}
+
+.tb-overflow__item:disabled {
+  opacity: 0.44;
+}
+
+.toolbar__group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.toolbar__group--center {
+  flex: 1 1 auto;
+  justify-content: center;
+}
+
+.toolbar__group--end {
+  flex: 0 0 auto;
+}
+
+.toolbar__sep {
+  width: 1px;
+  height: 22px;
+  margin: 0 6px;
+  background: rgb(var(--border));
+  flex: 0 0 auto;
+}
+
+/* 带文字的按钮（打开 / 搜索） */
+.tb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  color: rgb(var(--text));
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.tb:hover {
+  background: rgb(var(--text) / 0.1);
+}
+
+.tb:active {
+  background: rgb(var(--text) / 0.18);
+}
+
+.tb[aria-pressed='true'] {
+  background: rgb(var(--accent) / 0.16);
+  color: rgb(var(--accent));
+}
+
+.tb:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.tb:disabled:hover {
+  background: none;
+}
+
+/* 页码输入 */
+.pagebox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid rgb(var(--border));
+  border-radius: var(--radius-sm);
+  background: rgb(var(--surface-strong));
+}
+
+.pagebox__input {
+  width: 44px;
+  border: none;
+  background: none;
+  color: rgb(var(--text));
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+}
+
+.pagebox__total {
+  color: rgb(var(--muted));
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 缩放下拉 */
+.zoom-select {
+  height: 34px;
+  padding: 0 6px;
+  border: 1px solid rgb(var(--border));
+  border-radius: var(--radius-sm);
+  background: rgb(var(--surface-strong));
+  color: rgb(var(--text));
+  cursor: pointer;
+}
+
+.viewmode {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  background: rgb(var(--text) / 0.06);
+}
+
+/* ============================================================
+ * 侧栏（左右共用）
+ * ============================================================ */
+
+.sidebar,
+.right-panel {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: rgb(var(--surface));
+  overflow: hidden;
+}
+
+.sidebar {
+  border-right: 1px solid rgb(var(--border));
+}
+
+.right-panel {
+  border-left: 1px solid rgb(var(--border));
+}
+
+.sidebar__tabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 2px;
+  padding: 6px;
+  border-bottom: 1px solid rgb(var(--border));
+}
+
+.sidebar__tab {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+
+  padding: 7px 4px;
+  border-radius: var(--radius-sm);
+  color: rgb(var(--muted));
+  font-size: 0.8em;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.sidebar__tab:hover {
+  background: rgb(var(--text) / 0.08);
+}
+
+.sidebar__tab[aria-selected='true'] {
+  background: rgb(var(--accent) / 0.14);
+  color: rgb(var(--accent));
+}
+
+.sidebar__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.sidebar__empty {
+  margin: 0;
+  padding: 18px 14px;
+  color: rgb(var(--muted));
+  font-size: 0.88em;
+  line-height: 1.7;
+}
+
+/* ---------- 缩略图 ---------- */
+
+.thumbs {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px;
+}
+
+.thumb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+
+  padding: 6px;
+  border-radius: var(--radius);
+  border: 2px solid transparent;
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+
+.thumb:hover {
+  background: rgb(var(--text) / 0.07);
+}
+
+.thumb.is-active {
+  border-color: rgb(var(--accent));
+  background: rgb(var(--accent) / 0.1);
+}
+
+.thumb__canvas {
+  display: block;
+  max-width: 100%;
+  border-radius: 3px;
+  box-shadow: 0 1px 5px rgb(0 0 0 / 0.28);
+  background: #fff;
+}
+
+.thumb__label {
+  color: rgb(var(--muted));
+  font-size: 0.78em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 目录 ---------- */
+
+.outline,
+.outline__children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.outline {
+  padding: 6px 0;
+}
+
+.outline__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  padding-right: 8px;
+}
+
+.outline__toggle {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 24px;
+  color: rgb(var(--muted));
+}
+
+.outline__toggle--empty {
+  pointer-events: none;
+}
+
+.outline__toggle svg {
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.outline__toggle svg.is-open {
+  transform: rotate(90deg);
+}
+
+.outline__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 4px;
+  border-radius: 4px;
+  color: rgb(var(--text));
+  text-align: left;
+  font-size: 0.9em;
+  line-height: 1.45;
+
+  /* 目录标题可能很长，最多显示两行 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.outline__label:hover {
+  background: rgb(var(--accent) / 0.12);
+  color: rgb(var(--accent));
+}
+
+/* ---------- 搜索 ---------- */
+
+.search-panel {
+  padding: 10px;
+}
+
+.search-panel__input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgb(var(--border));
+  border-radius: var(--radius-sm);
+  background: rgb(var(--surface-strong));
+  color: rgb(var(--text));
+  outline: none;
+}
+
+.search-panel__input:focus {
+  border-color: rgb(var(--accent));
+}
+
+.search-panel__count {
+  margin: 10px 2px 6px;
+  color: rgb(var(--muted));
+  font-size: 0.84em;
+}
+
+.search-hits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.search-hit {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+
+.search-hit:hover {
+  background: rgb(var(--accent) / 0.12);
+}
+
+.search-hit__page {
+  color: rgb(var(--accent));
+  font-size: 0.78em;
+  font-weight: 600;
+}
+
+.search-hit__snippet {
+  color: rgb(var(--text));
+  font-size: 0.86em;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+/* ============================================================
+ * 正文滚动区
+ * ============================================================ */
+
+.viewer-scroll {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  /*
+   * ★ 永远给滚动条留位置（v2.1.4）。
+   *
+   *   踩坑：浮动工具条 / 批注层一出现，纵向滚动条「突然出现」，
+   *   内容宽度少 11px → 页面尺寸重算 → 文本层重建 →
+   *   用户刚拖出来的选区锚在旧字符节点上，直接塌成 0 字。
+   *   表现就是「选完自己没了 / 选不中」。
+   *
+   *   预留 gutter 之后，滚动条出现与否都不再改变内容宽度，
+   *   顺带消掉翻页时的横向抖动。
+   */
+  scrollbar-gutter: stable;
+  /* 触屏：允许单指滚动与双指缩放页面区域 */
+  touch-action: pan-x pan-y pinch-zoom;
+}
+
+.viewer-pages {
+  /* 定位上下文：手绘预览层需要相对本容器绝对定位 */
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  min-height: 100%;
+}
+
+/*
+ * 一行页面。
+ *
+ * 单页 / 连续模式下每行只含一页，这层就是个透明的纵向盒子；
+ * 双页模式下含两页，靠 flex 让它们并排且等高。
+ *
+ * 为什么坚持包一层而不是把两页直接放进 .viewer-pages：
+ *   .viewer-pages 是 column 方向，两页直接进去会变成上下排列。
+ *   包一层行容器之后，行的方向与列的方向互相独立，改动最小。
+ */
+.viewer-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
+/* 双页模式下两页等高 —— align-items 由 flex-start 换成 stretch 会让
+   .pdf-page 撑满行高，但它的高度是内联样式写死的，所以实际取二者较大者 */
+.viewer-row--pair {
+  align-items: flex-start;
+}
+
+.pdf-page {
+  position: relative;
+  flex: 0 0 auto;
+  background: #fff;
+  border-radius: 3px;
+  box-shadow: 0 2px 12px rgb(0 0 0 / 0.32);
+  overflow: hidden;
+}
+
+/*
+ * ★ 底图的显示尺寸由 CSS 撑满容器，**不再由 JS 写内联像素**。
+ *
+ *   踩坑记录（缩放卡顿的根因）：
+ *   原先 JS 在 layout effect 里同时写两样东西 ——
+ *     canvas.style.width/height（显示尺寸）
+ *     canvas.width/height      （位图分辨率）
+ *   于是每次缩放都等于「重设位图尺寸」，而重设尺寸必然清空画布，
+ *   逼着我们每一档缩放都整页重渲染一次。拖动滑块一秒产生几十次
+ *   缩放变化，就变成几十次整页光栅化，主线程直接堵死。
+ *
+ *   PDF.js 官方 viewer 从来不这么做：它的 canvas 恒为容器 100%，
+ *   页面 DOM 尺寸另由 --scale-factor 驱动（见 web/pdf_viewer.css:80-99）。
+ *   缩放路径上完全不动位图，所以既不会卡也不会白屏。
+ *
+ *   分开之后：
+ *     显示尺寸 —— CSS 负责，缩放时由合成器拉伸，几乎零成本；
+ *     位图分辨率 —— 只在真正重画时改一次（见 PdfPage 的渲染 effect）。
+ */
+.pdf-page__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+
+  /*
+   * ★ 默认透明 —— 这一条专门治「冷启动第一页是黑板」。
+   *
+   *   新建的 <canvas> 元素尺寸是 300×150 且像素全零。
+   *   画布默认 2D 上下文是带 alpha 的，那 300×150 本该是**透明**的；
+   *   可我们的渲染代码用的是 `getContext('2d', { alpha: false })`，
+   *   一旦某处拿到过那个上下文，这颗画布的像素就会被当成
+   *   不透明黑 —— 于是「页面还没画好」在屏幕上表现为一块黑板。
+   *
+   *   注意：原子替换（离屏画好才 replaceWith）保护的是**换上去之后**，
+   *   换上去之前 DOM 里只有 React 挂的那张初始空画布，
+   *   没有任何旧画面可留。所以这一层必须靠透明 + 白底兜住。
+   *
+   *   真正画好时由渲染代码打上 is-painted，恢复不透明，
+   *   让那笔白色底子遮住下面的容器背景。
+   */
+  opacity: 0;
+  transition: opacity 120ms var(--ease);
+}
+
+.pdf-page__cwrap .pdf-page__canvas.is-painted {
+  opacity: 1;
+}
+
+/*
+ * 未加载时的骨架屏。
+ *
+ * ★ 底色必须是白的（原先用的 #f0f2f5 → #e2e6ec 灰比纸还暗）。
+ *
+ *   四家桌面阅读器一致：**页面本体一律纯白（模拟一张纸）**，
+ *   灰色只用在页面之外的画布底色上 ——
+ *   pdf.js `--page-margin: #f9f9fa`、SumatraPDF 浅色主题浅灰、
+ *   MuPDF `glClearColor(0.3,0.3,0.3)`，没有任何一家把未渲染的
+ *   页面本身画成灰。
+ *
+ *   原因很实在：灰骨架比纸暗，页面一画好就「啪」地亮一下，
+ *   反而比什么都不显示更刺眼。用白色的话，加载完成是平滑的，
+ *   用户只觉得「内容浮现出来」。
+ *
+ *   动效保留（那点流光用来表达「在加载」），只是把颜色改成
+ *   几乎看不见的浅灰白，避免又变成「比纸暗」。
+ */
+.pdf-page__skeleton {
+  position: absolute;
+  inset: 0;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.pdf-page__skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, #ffffff 30%, #f7f8fa 50%, #ffffff 70%);
+  background-size: 220% 100%;
+  animation: skeleton 1.3s linear infinite;
+}
+
+@keyframes skeleton {
+  from {
+    background-position: 130% 0;
+  }
+  to {
+    background-position: -30% 0;
+  }
+}
+
+/* ============================================================
+ * pdf.js 文本层（必需，数值来自官方示例）
+ * ============================================================ */
+
+.textLayer {
+  position: absolute;
+  text-align: initial;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  /* 文字本身透明，只显示选中高亮 */
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  /* 让浏览器知道这里可以选中文字（见下方 span 那条的必要说明） */
+  -webkit-user-select: text;
+  user-select: text;
+  z-index: 2;
+  /*
+   * ★★ `--scale-factor` 必须定义，否则**选中范围会严重错位**
+   *    （用户报的「选一串文字却选中一大串」就是它）。
+   *
+   *    pdf.js 的 TextLayer 把每个 span 的样式写成
+   *        fontSize      = calc(<PDF 字号对应的 px> * var(--scale-factor))
+   *        letterSpacing = calc(<advance 宽度> * var(--scale-factor) - 1ch)
+   *    也就是 span 的**字号与宽度**都靠这个变量换算。
+   *
+   *    我们的约定是「文本层容器按 CSS 像素布局、长度值 1:1 写」，
+   *    所以正确取值就是 1。
+   *
+   *    此前项目里从未定义它（CSS 全文搜不到），于是整条 calc() 失效、
+   *    字号回退到容器默认的约 16px。缩放到 177% 时真实字形已在 20px 以上，
+   *    两者对不上 → span 的宽度与实际字形偏差很大 →
+   *    选中高亮按错误的 span 尺寸铺开，盖住整行甚至跨行，
+   *    看起来就是「一选就选了一大串」。
+   *
+   *    pdf.js 官方 viewer 的 web/pdf_viewer.css 同样依赖这个变量，
+   *    只是它由页面容器统一提供；我们是自己搭的渲染管线，要在这里显式给上。
+   */
+  --scale-factor: 1;
+}
+
+.textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  /*
+   * ★★ 字符 span 必须**显式**再开一次 user-select。
+   *
+   *    踩过的坑（用户报「选择一串文字有可能选一大串 / 有时候选不中」）：
+   *    应用根 `.app`（styles/base.css:100）为了「触屏禁止长按选中造成的
+   *    蓝色高亮」设了 `user-select: none`。而 `user-select` 是**继承**属性，
+   *    子元素要覆盖它必须自己显式声明 —— 只在上面的 `.textLayer` 上写
+   *    `text` 不够，因为真正被拖选中的是这些 span。
+   *
+   *    实测（隐藏实例里读命中点的祖先链）：
+   *      span → textLayer → pdf-page → viewer-pages → viewer-scroll
+   *      → app__viewer → app__body，每一层都是 userSelect: none。
+   *    于是鼠标拖拽选不中，而脚本用 Range 直接建选区却能成功（82 字符），
+   *    表现为「时灵时不灵」。
+   *
+   *    base.css 那句注释原话是「文本选择在阅读区单独开启」，
+   *    所以正确做法正是在这里显式开启。
+   */
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* 选中高亮：用半透明蓝，跨深浅主题都看得清 */
+/* ============================================================
+ * OCR 文字层（扫描件，v2.1.3）
+ *
+ * 与 pdf.js 的文字层同构：透明文字叠在页面上，只提供「可选中的字符」。
+ * ★ 与 .textLayer 的关键差别：这里的字号是 JS 按识别框高度算出的**绝对值**，
+ *   不参与 --scale-factor 换算（tesseract 只给 bbox，没有原字号可继承）。
+ * ============================================================ */
+.pdf-page__ocr {
+  position: absolute;
+  inset: 0;
+  z-index: 2; /* 与 .textLayer 同层：画布之上、标记类批注之下 */
+  overflow: hidden;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.pdf-page__ocr span {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  overflow: hidden;
+  /* 真正被拖选中的是 span 自己，必须显式声明（祖先的 none 会继承下来） */
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.pdf-page__ocr ::selection {
+  background: rgb(64 140 255 / 0.42);
+}
+
+/* 识别进行中的提示条：识别一页要几秒，没有反馈用户会以为按钮坏了 */
+.ocr-busy {
+  position: fixed;
+  left: 50%;
+  bottom: 88px;
+  transform: translateX(-50%);
+  z-index: 950;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgb(20 22 28 / 0.82);
+  color: #fff;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+.textLayer ::selection {
+  background: rgb(64 140 255 / 0.42);
+}
+
+.textLayer .highlight {
+  margin: -1px;
+  padding: 1px;
+  background-color: rgb(255 214 0 / 0.45);
+  border-radius: 3px;
+}
+
+.textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: -1;
+  cursor: default;
+  user-select: none;
+}
+
+/* ============================================================
+ * 状态栏
+ * ============================================================ */
+
+.statusbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+
+  height: var(--statusbar-h);
+  padding: 0 12px;
+  background: rgb(var(--surface));
+  border-top: 1px solid rgb(var(--border));
+  color: rgb(var(--muted));
+  font-size: 0.82em;
+  font-variant-numeric: tabular-nums;
+}
+
+.statusbar__file {
+  color: rgb(var(--text));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 46vw;
+}
+
+.statusbar__spacer {
+  flex: 1 1 auto;
+}
+
+.statusbar__loading {
+  color: rgb(var(--accent));
+}
+
+.statusbar__item {
+  white-space: nowrap;
+}
+
+/* ============================================================
+ * 空状态
+ * ============================================================ */
+
+.empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 30px;
+  text-align: center;
+  overflow-y: auto;
+}
+
+.empty__title {
+  margin: 0;
+  font-size: 1.5em;
+  font-weight: 600;
+  color: rgb(var(--text));
+}
+
+.empty__text {
+  margin: 0;
+  color: rgb(var(--muted));
+}
+
+.empty__hint {
+  margin: 6px 0 0;
+  color: rgb(var(--muted));
+  font-size: 0.84em;
+  opacity: 0.85;
+}
+
+.empty__recent {
+  width: min(560px, 92%);
+  margin-top: 10px;
+  max-height: 42vh;
+  overflow-y: auto;
+}
+
+.text-btn {
+  padding: 3px 8px;
+  border-radius: 5px;
+  color: rgb(var(--accent));
+  font-weight: 600;
+}
+
+.text-btn:hover {
+  background: rgb(var(--accent) / 0.14);
+}
+
+/* ============================================================
+ * 提示层
+ * ============================================================ */
+
+.drop-hint {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(var(--accent) / 0.18);
+  border: 3px dashed rgb(var(--accent));
+  color: rgb(var(--text));
+  font-size: 1.5em;
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 900;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--statusbar-h) + 18px);
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.78);
+  color: #fff;
+  font-size: 0.9em;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 950;
+  animation: toast-in var(--dur) var(--ease);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.errorbar {
+  position: fixed;
+  left: 50%;
+  top: calc(var(--titlebar-h) + 58px);
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+
+  max-width: min(720px, 88vw);
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: #b3261e;
+  color: #fff;
+  box-shadow: 0 8px 26px rgb(0 0 0 / 0.36);
+  z-index: 960;
+}
+
+.errorbar .text-btn {
+  color: #fff;
+}
+
+.errorbar .text-btn:hover {
+  background: rgb(255 255 255 / 0.2);
+}
+
+/* ============================================================
+ * 文档信息
+ * ============================================================ */
+
+.docinfo {
+  padding: 10px 12px 16px;
+}
+
+.docinfo__list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.docinfo__row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.docinfo__row dt {
+  color: rgb(var(--muted));
+  font-size: 0.78em;
+}
+
+.docinfo__row dd {
+  margin: 0;
+  color: rgb(var(--text));
+  font-size: 0.9em;
+  word-break: break-all;
+}
+
+/* 长内容最多两行，避免一栏被挤爆 */
+.docinfo__row dd.is-wrap {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.docinfo__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgb(var(--border));
+}
+
+/* ============================================================
+ * 批注列表（右侧栏）
+ *
+ * 效仿鸿合 π6 的批注列表：工具条 → 按页分组 → 一张张卡片。
+ * 颜色一律走 base.css 的令牌，三套主题（light / dark / sepia）自动成立，
+ * 这里不重复定义主题色，免得两处各自演化后与外壳不一致。
+ * 只有 --danger 带 fallback：它定义在 components.css 里，
+ * 给个兜底值，万一以后导入顺序变了也不会变成「看不出是红的」。
+ *
+ * 命名空间用 .annotations-*：本文件上面的 `.anno-*`（.anno-layer / .anno-mark /
+ * .anno-toolbar …）是「正文覆盖层 + 浮动工具条」的命名空间，
+ * 侧栏列表挤进同一个前缀会互相串样式（例如 .anno-toolbar 已经被浮动工具条占走）。
+ * ============================================================ */
+
+.annotations {
+  /* 原来的 4px 内边距下放给各块自己：工具条要有自己的边距，
+     吸顶的页码标题则必须贴住滚动区顶边，否则上方会漏出一条缝。 */
+  padding: 0;
+}
+
+/* ---------- 工具条：条数 / 类型筛选 / 清空 ---------- */
+
+.annotations-toolbar {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgb(var(--border));
+}
+
+.annotations-toolbar__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 26px;
+}
+
+.annotations-toolbar__count {
+  color: rgb(var(--muted));
+  font-size: 0.82em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 清空：平时低调；进入二次确认后换成醒目色 —— 不可撤销的操作不该和普通按钮长得一样 */
+.annotations-clear {
+  flex: 0 0 auto;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: rgb(var(--muted));
+  font-size: 0.8em;
+  white-space: nowrap;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+
+.annotations-clear:hover {
+  color: rgb(var(--danger, 209 58 58));
+  background: rgb(var(--danger, 209 58 58) / 0.1);
+}
+
+.annotations-clear.is-armed {
+  border-color: rgb(var(--danger, 209 58 58) / 0.6);
+  background: rgb(var(--danger, 209 58 58) / 0.14);
+  color: rgb(var(--danger, 209 58 58));
+  font-weight: 600;
+}
+
+/* ---------- 类型筛选小标签 ---------- */
+
+.annotations-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.annotations-chip {
+  min-height: 24px;
+  padding: 0 9px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 999px;
+  background: rgb(var(--surface-strong));
+  color: rgb(var(--muted));
+  font-size: 0.78em;
+  white-space: nowrap;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+
+.annotations-chip:hover {
+  border-color: rgb(var(--accent) / 0.5);
+  color: rgb(var(--accent));
+}
+
+.annotations-chip[aria-pressed='true'] {
+  border-color: rgb(var(--accent));
+  background: rgb(var(--accent) / 0.16);
+  color: rgb(var(--accent));
+  font-weight: 600;
+}
+
+/* ---------- 按页分组 ---------- */
+
+/* 所有分组都留出 3px 左边框的位置，当前页只是把它点亮：
+   切换页面时列表不会整体左右跳一下。 */
+.annotations-group {
+  border-left: 3px solid transparent;
+}
+
+.annotations-group.is-current {
+  border-left-color: rgb(var(--accent));
+  background: rgb(var(--accent) / 0.06);
+}
+
+/* 页码标题吸顶，长列表翻到一半也知道自己在看第几页。
+   背景必须不透明，否则卡片会从标题底下透出来。 */
+.annotations-group__head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  padding: 5px 10px;
+  background: rgb(var(--surface));
+  border-bottom: 1px solid rgb(var(--border));
+  color: rgb(var(--text));
+  font-size: 0.78em;
+  font-weight: 600;
+}
+
+/* 当前页的吸顶标题也要有底色，但吸顶背景一旦半透明就会透出下面的卡片，
+   所以在不透明底色上再叠一层极淡的主色 —— 叠加结果依然是不透明的。 */
+.annotations-group.is-current .annotations-group__head {
+  background:
+    linear-gradient(rgb(var(--accent) / 0.12), rgb(var(--accent) / 0.12)),
+    rgb(var(--surface));
+  color: rgb(var(--accent));
+}
+
+.annotations-group__count {
+  color: rgb(var(--muted));
+  font-size: 0.92em;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.annotations-list {
+  list-style: none;
+  margin: 0;
+  padding: 7px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ---------- 批注卡片 ---------- */
+
+.annotations-card {
+  position: relative;
+  display: flex;
+  gap: 8px;
+  padding: 8px 8px 6px 10px;
+  border-radius: var(--radius-sm);
+  background: rgb(var(--surface-strong));
+  /* 整张卡片可点即跳页；键盘入口是里面的 .annotations-card__body 按钮 */
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.annotations-card:hover {
+  /* 用文字色的极低透明度：浅色/深色/米色三套主题都能得到「轻微底色变化」 */
+  background: rgb(var(--text) / 0.07);
+}
+
+/* 4px 色条 = 该批注的颜色，扫一眼就知道这条标记用的什么色 */
+.annotations-card__bar {
+  flex: 0 0 auto;
+  width: 4px;
+  align-self: stretch;
+  border-radius: 2px;
+}
+
+.annotations-card__main {
+  flex: 1 1 auto;
+  /* 没有 min-width: 0，flex 子项会被长 quote 撑破侧栏 */
+  min-width: 0;
+}
+
+.annotations-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+}
+
+.annotations-card__type {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  /* 给右上角悬停出现的删除按钮让位，免得第一行被压住 */
+  padding-right: 26px;
+  color: rgb(var(--muted));
+  font-size: 0.76em;
+}
+
+.annotations-card__type svg {
+  flex: 0 0 auto;
+}
+
+/* 被标注的原文：最多 3 行，超出省略号。
+   用引号而不是斜体来区分 —— 中文没有真斜体，浏览器强行倾斜会把笔画糊掉。 */
+.annotations-card__quote {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: rgb(var(--text));
+  font-size: 0.88em;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.annotations-card__quote::before {
+  content: '“';
+}
+
+.annotations-card__quote::after {
+  content: '”';
+}
+
+/* 便签落在页面空白处，没有原文可引：占位文字不加引号 */
+.annotations-card__quote--empty {
+  color: rgb(var(--muted));
+}
+
+.annotations-card__quote--empty::before,
+.annotations-card__quote--empty::after {
+  content: none;
+}
+
+.annotations-card__note {
+  margin-top: 6px;
+}
+
+/* 只读备注：左边一道细线，与上面的原文引用区分开；点一下才变成 textarea */
+.annotations-card__note-btn {
+  display: block;
+  width: 100%;
+  padding: 3px 7px;
+  border-left: 2px solid rgb(var(--border));
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: rgb(var(--text));
+  font-size: 0.84em;
+  line-height: 1.55;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.annotations-card__note-btn:hover {
+  background: rgb(var(--text) / 0.06);
+}
+
+.annotations-card__note-empty {
+  color: rgb(var(--muted));
+}
+
+/* 备注输入框：至少两行由 min-height 兜底，更高由组件量 scrollHeight 撑开；
+   max-height 与组件里的 NOTE_MAX_H 保持一致，改一处要一起改。 */
+.annotations-card__editor {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-height: 3.4em;
+  max-height: 180px;
+  padding: 5px 7px;
+  border: 1px solid rgb(var(--accent) / 0.6);
+  border-radius: var(--radius-sm);
+  background: rgb(var(--surface));
+  color: rgb(var(--text));
+  font-size: 0.84em;
+  line-height: 1.55;
+  resize: none; /* 侧栏只有 268px 宽，手工拖拽只会撑破布局 */
+  overflow-y: auto;
+  outline: none;
+}
+
+.annotations-card__editor::placeholder {
+  color: rgb(var(--muted));
+}
+
+.annotations-card__foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.annotations-card__time {
+  color: rgb(var(--muted));
+  font-size: 0.74em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 删除按钮：悬停或卡片内有焦点时才露出来，列表才不会被垃圾桶图标刷屏 */
+.annotations-card__del {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: rgb(var(--muted));
+  opacity: 0;
+  transition:
+    opacity var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.annotations-card:hover .annotations-card__del,
+.annotations-card:focus-within .annotations-card__del {
+  opacity: 1;
+}
+
+.annotations-card__del:hover {
+  background: rgb(var(--danger, 209 58 58) / 0.14);
+  color: rgb(var(--danger, 209 58 58));
+}
+
+/* 触摸屏没有 hover：教室一体机上必须常显，否则删除按钮没人找得到 */
+@media (hover: none) {
+  .annotations-card__del {
+    opacity: 1;
+  }
+}
+
+/* ---------- 空状态 ---------- */
+
+.annotations-empty {
+  padding: 16px 14px;
+  color: rgb(var(--muted));
+}
+
+.annotations-empty__title {
+  margin: 0 0 6px;
+  color: rgb(var(--text));
+  font-size: 0.92em;
+  font-weight: 600;
+}
+
+.annotations-empty__hint {
+  margin: 0;
+  font-size: 0.84em;
+  line-height: 1.7;
+}
+
+.annotations-empty__reset {
+  margin-top: 8px;
+}
+
+/* ---------- 页签上的条数徽标 ---------- */
+
+.sidebar__tab-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sidebar__tab-badge {
+  min-width: 1.4em;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgb(var(--accent));
+  color: rgb(var(--accent-fg, 255 255 255));
+  font-size: 0.9em;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  text-align: center;
+}
+
+/* 无障碍：跟随系统的「减弱动态效果」，与 components.css 的处理一致 */
+@media (prefers-reduced-motion: reduce) {
+  .annotations-card,
+  .annotations-card__del,
+  .annotations-card__note-btn,
+  .annotations-chip,
+  .annotations-clear {
+    transition: none;
+  }
+}
+
+/* ============================================================
+ * 批注覆盖层（画在页面之上）
+ *
+ * 设计要点：
+ *   整个层 pointer-events: none —— 阅读时「选中文字」远比「点标注」重要，
+ *   标注的操作统一走右侧栏列表，避免正文区域出现莫名其妙的点击热区。
+ * ============================================================ */
+
+.anno-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.anno-layer__probe {
+  display: none;
+}
+
+/* 单段标记的公共样式 */
+.anno-mark {
+  position: absolute;
+  border-radius: 2px;
+}
+
+/* 高亮：半透明色块压在文字下方（z-index 低于文本层） */
+.anno-mark--highlight {
+  background: var(--anno-color);
+  opacity: 0.38;
+  /* 混合模式让高亮与文字底色自然融合，深色主题下也不会糊成一片 */
+  mix-blend-mode: multiply;
+}
+
+/* 下划线：贴住矩形底边的一条线 */
+.anno-mark--underline {
+  background: none;
+  border-bottom: 2px solid var(--anno-color);
+  border-radius: 0;
+}
+
+/* 删除线：水平中线 */
+.anno-mark--strikeout {
+  background: none;
+  border-radius: 0;
+}
+
+.anno-mark--strikeout::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 0;
+  border-top: 2px solid var(--anno-color);
+}
+
+/* 便签：右上角一个小图标 */
+.anno-note {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px 3px 3px 8px;
+  background: var(--anno-color);
+  color: rgb(30 26 10);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.3);
+}
+
+/* ============================================================
+ * 选中文字后的浮动工具条
+ * ============================================================ */
+
+.anno-toolbar {
+  position: fixed;
+  /* 定位基准是「选区上方居中」，因此要用 translate 把自身中心对上去 */
+  transform: translate(-50%, -100%);
+  z-index: 1000;
+
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+
+  border-radius: var(--radius);
+  background: rgb(28 30 38 / 0.96);
+  color: #eef2f8;
+  box-shadow: 0 8px 26px rgb(0 0 0 / 0.42);
+  backdrop-filter: blur(10px);
+}
+
+/* 小尖角指向选区，让用户明确它属于哪段文字 */
+.anno-toolbar::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  background: rgb(28 30 38 / 0.96);
+  transform: rotate(45deg);
+  border-radius: 0 0 2px 0;
+}
+
+.anno-toolbar__types {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.anno-toolbar__btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.anno-toolbar__btn:hover {
+  background: rgb(255 255 255 / 0.16);
+}
+
+.anno-toolbar__btn:active {
+  background: rgb(255 255 255 / 0.24);
+}
+
+.anno-toolbar__sep {
+  width: 1px;
+  height: 22px;
+  background: rgb(255 255 255 / 0.2);
+}
+
+.anno-toolbar__colors {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 2px;
+}
+
+/* 颜色圆点：选中态用白色描边圈出 */
+.anno-color {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--anno-color);
+  border: 2px solid transparent;
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.anno-color:hover {
+  transform: scale(1.15);
+}
+
+.anno-color.is-active {
+  border-color: #fff;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.4);
+}
+
+/* ============================================================
+ * 便签编辑弹窗
+ * ============================================================ */
+
+.anno-note-editor {
+  position: fixed;
+  transform: translate(-50%, 0);
+  z-index: 1000;
+  width: 260px;
+  padding: 8px;
+
+  border-radius: var(--radius);
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--border));
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.34);
+}
+
+.anno-note-editor__input {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid rgb(var(--border));
+  border-radius: var(--radius-sm);
+  background: rgb(var(--surface-strong));
+  color: rgb(var(--text));
+  font-size: 0.9em;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+}
+
+.anno-note-editor__input:focus {
+  border-color: rgb(var(--accent));
+}
+
+.anno-note-editor__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.text-btn--primary {
+  background: rgb(var(--accent));
+  color: rgb(var(--accent-fg));
+}
+
+.text-btn--primary:hover {
+  background: rgb(var(--accent));
+  filter: brightness(1.08);
+}
+
+/* ============================================================
+ * 手绘层
+ * ============================================================ */
+
+.draw-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+
+/*
+ * 手绘实时预览层。
+ *
+ * 覆盖整个 .viewer-pages（而不是滚动视口）—— 笔迹坐标相对某一页计算，
+ * 页面在滚动内容里是纵向排列的，若覆盖滚动视口会让第 2 页之后的预览整体上移。
+ * 尺寸设为 1×1 并 overflow: visible，让 SVG 子元素按绝对坐标自由绘制。
+ */
+.draw-preview {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+  z-index: 5;
+  overflow: visible;
+}
+
+/* 手绘模式下光标改成十字，明确当前是绘制状态 */
+.viewer-scroll.is-drawing {
+  cursor: crosshair;
+}
+
+/* ============================================================
+ * 画笔工具（工具栏内联展开）
+ * ============================================================ */
+
+.draw-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 10px;
+  margin-left: 4px;
+  border-radius: var(--radius-sm);
+  background: rgb(var(--text) / 0.06);
+}
+
+.draw-tools__colors {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.draw-tools__width {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.draw-tools__width input[type='range'] {
+  width: 78px;
+  accent-color: rgb(var(--accent));
+}
+
+.draw-tools__width-value {
+  min-width: 34px;
+  color: rgb(var(--muted));
+  font-size: 0.82em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
+ * 触屏手势支持
+ *
+ * touch-action 必须显式声明，否则浏览器的手势识别会与我们的
+ * 自定义双指缩放冲突（浏览器会尝试缩放整个视觉视口）。
+ *   pan-x pan-y —— 保留单指滚动
+ *   不加 pinch-zoom —— 捏合交给我们自己处理
+ * ============================================================ */
+
+.viewer-scroll {
+  touch-action: pan-x pan-y;
+  /* 触屏上避免长按弹出系统菜单/选中放大镜 */
+  -webkit-touch-callout: none;
+}
+
+/* 手绘模式：手指用于画线，禁止滚动 */
+.viewer-scroll.is-drawing {
+  touch-action: none;
+}
+
+/*
+ * 橡皮模式：手指用于擦除，同样禁止滚动。
+ *
+ * ★ 必须显式声明，否则浏览器会把「按住拖动」当成滚动：
+ *   一旦它接管手势就会给我们的 pointerdown 发 pointercancel，
+ *   结果是「多指同时擦」在真机上根本擦不动（合成事件测不出来，
+ *   所以这个坑只在真机上暴露）。
+ *   滚动仍可用滚轮、方向键与滚动条；退出橡皮模式恢复单指滚动。
+ */
+.viewer-scroll.is-erasing {
+  touch-action: none;
+}
+
+/* ============================================================
+ * 漫游模式：拖动平移页面
+ *
+ * 触摸屏上单指拖动本来就是原生滚动（上面那条 pan-x pan-y），
+ * 这里补的是**鼠标 / 触控笔**的手感：
+ *   grab  —— 悬停时「可以抓住页面拖动」
+ *   grabbing —— 拖动中（见 .is-panning）
+ * 文字层上的 cursor: text 优先级更高（.textLayer span 自带），
+ * 于是「在文字上是选字光标、在空白处是抓手」自动区分开了。
+ * ============================================================ */
+
+.viewer-scroll.is-roaming {
+  cursor: grab;
+}
+
+.viewer-scroll.is-roaming.is-panning,
+.viewer-scroll.is-roaming.is-panning * {
+  cursor: grabbing;
+}
+
+/* 触屏设备上把所有可点区域放大到 44px 以上（手指最小可靠点击尺寸） */
+@media (hover: none) and (pointer: coarse) {
+  .icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .tb {
+    height: 44px;
+    padding: 0 14px;
+  }
+
+  .pagebox {
+    height: 44px;
+  }
+
+  .zoom-select {
+    height: 44px;
+  }
+
+  .sidebar__tab {
+    padding: 10px 4px;
+  }
+
+  .thumb {
+    padding: 8px;
+  }
+
+  /* 悬停才出现的按钮在触屏上要常显，否则永远点不到 */
+  .annotations-card__remove {
+    opacity: 1;
+  }
+}
+
+/* ============================================================
+ * 关于（著作权声明）
+ *
+ * 归属信息要显眼：作者名用主色加粗，字号比说明文字大一号。
+ * 三套主题下都保证对比度 —— 用令牌而不是写死颜色。
+ * ============================================================ */
+
+.sb-about {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 2px 0;
+}
+
+.sb-about__name {
+  margin: 0;
+  color: rgb(var(--text));
+  font-size: 1.02em;
+  font-weight: 600;
+}
+
+.sb-about__version {
+  margin: 0;
+  color: rgb(var(--muted));
+  font-size: 0.86em;
+  font-variant-numeric: tabular-nums;
+}
+
+.sb-about__author {
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid rgb(var(--border));
+  color: rgb(var(--text));
+  font-size: 0.94em;
+}
+
+.sb-about__author strong {
+  color: rgb(var(--accent));
+  font-weight: 700;
+  /* 作者名稍微加宽字距，视觉上更像署名 */
+  letter-spacing: 0.02em;
+}
+
+.sb-about__rights {
+  margin: 0;
+  color: rgb(var(--muted));
+  font-size: 0.82em;
+}
+
+/* ============================================================
+ * 右侧栏：单页签布局 + 定位文件按钮
+ *
+ * 原来有「文档信息 / 批注」两个页签，砍掉文档信息后页签区
+ * 不需要平分宽度，因此用 --single 改成「左标题 + 右按钮」的两端布局。
+ * ============================================================ */
+
+.sidebar__tabs--single {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: default;
+}
+
+.sidebar__tabs--single .sidebar__tab {
+  flex: 0 1 auto;
+  cursor: default;
+}
+
+/* 页签不可点击时去掉悬停反馈，免得以为能点 */
+.sidebar__tabs--single .sidebar__tab:hover {
+  background: none;
+}
+
+.sidebar__locate {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+
+  width: 30px;
+  height: 30px;
+  margin-right: 6px;
+  border-radius: var(--radius-sm);
+
+  color: rgb(var(--muted));
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.sidebar__locate:hover {
+  background: rgb(var(--text) / 0.09);
+  color: rgb(var(--text));
+}
+
+.sidebar__locate:active {
+  background: rgb(var(--text) / 0.16);
+}
+
+.sidebar__locate:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.sidebar__locate:disabled:hover {
+  background: none;
+  color: rgb(var(--muted));
+}
+
+/* 触屏上放大到 44px */
+@media (hover: none) and (pointer: coarse) {
+  .sidebar__locate {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* ============================================================
+ * 橡皮模式：光标提示
+ *
+ * 触屏上没有光标，但一体机常接鼠标；给个明确的十字/擦除提示
+ * 能避免用户在橡皮模式下手绘时以为软件坏了。
+ * ============================================================ */
+
+.viewer-scroll.is-erasing {
+  cursor: cell;
+}
+
+.viewer-scroll.is-erasing .anno-mark,
+.viewer-scroll.is-erasing .anno-note {
+  /* 橡皮模式下让批注可见度提高，方便瞄准要擦的那条 */
+  opacity: 0.85;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.viewer-scroll.is-erasing .anno-mark:hover,
+.viewer-scroll.is-erasing .anno-note:hover {
+  opacity: 1;
+}
+
+/* ============================================================
+ * PDF 画布容器
+ *
+ * 作用：缩放时把**上一帧的画面**作为背景贴在这里，
+ * 于是画布被清空的那一瞬间透出来的是旧内容，而不是页面底色 ——
+ * 这就是「消除缩放白屏」的关键。
+ *
+ * 为什么用背景图而不是把内容填回画布：
+ *   背景由合成器绘制，不参与 canvas 的重绘时序，
+ *   因此不依赖任何时序假设，比「抓快照再填回」稳得多
+ *   （后者实测仍有大量空白帧漏出）。
+ * ============================================================ */
+
+.pdf-page__cwrap {
+  position: relative;
+  /*
+   * ★ 白底兜底：还没画出任何东西时，露出来的必须是纸的颜色。
+   *
+   *   画布是 alpha:false 的，被改尺寸或被清空后呈现的是**纯黑**，
+   *   所以「没内容」在这一层天然长成黑页。容器背景排在画布下面，
+   *   给它一个白色，最坏情况就从「黑屏」降级成「白纸」。
+   *
+   *   这一条不能省：上一帧快照只在渲染过之后才存在，
+   *   首次打开文档、或某页从未渲染成功时，background-image 是空的，
+   *   底下没有别的颜色可露。
+   */
+  background-color: #fff;
+  /* 背景按容器尺寸铺满：尺寸变化时旧画面被拉伸，形成连续过渡 */
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  background-position: center;
+  /* 旧画面只是过渡用，不要让它的边缘锯齿干扰观感 */
+  image-rendering: auto;
+}
+
+.pdf-page__cwrap .pdf-page__canvas {
+  display: block;
+  position: relative;
+  z-index: 1;
+}
+
+/* 渲染期间隐藏画布，露出容器背景上的「上一帧」画面。
+ *
+ * 背景由合成器绘制，不受 canvas 重绘时序影响，
+ * 因此缩放过渡期间用户看到的始终是画面（被拉伸的旧内容）而非空白 ——
+ * 这就是消除白屏的关键一环。
+ *
+ * 用 opacity 而不是 visibility/display：
+ *   画布仍在布局流里，尺寸与位置不变，避免切换时跳动。
+ */
+.pdf-page__cwrap[data-rendering='1'] .pdf-page__canvas {
+  opacity: 0;
+}
+
+/* ============================================================
+ * 橡皮光标：跟随指针的暗色圆圈
+ *
+ * 作用：直观表示「会擦到多大范围」。
+ * 没有它的话，用户不知道橡皮的实际大小，只能试探性地擦 ——
+ * 尤其在放大后（橡皮半径要换算到页面坐标）更容易误判。
+ *
+ * 用暗色半透明填充 + 亮边：
+ *   纯黑会完全挡住底下的内容，
+ *   半透明 + 描边既能看清范围，又不挡住要擦的东西。
+ * ============================================================ */
+
+.eraser-cursor {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 850; /* 高于页面内容，低于工具条(40 是 z-index 值但层级在 app 内) */
+
+  border-radius: 50%;
+  background: rgb(20 22 28 / 0.34);
+  border: 1.5px solid rgb(255 255 255 / 0.78);
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.35),
+    inset 0 0 8px rgb(0 0 0 / 0.2);
+
+  /* 首帧在屏幕左上角，先隐藏，等指针移动到位再显示 */
+  opacity: 0;
+
+  /* 圆圈自己不吃事件，否则会挡住橡皮的 pointerdown */
+  pointer-events: none;
+
+  /* 只过渡透明度，位置必须零延迟跟随 */
+  transition: opacity 120ms var(--ease);
+  will-change: transform;
+}
+
+/* 橡皮模式隐藏系统光标，只留圆圈 —— 两者同时出现会视觉打架 */
+.viewer-scroll.is-erasing,
+.viewer-scroll.is-erasing * {
+  cursor: none;
+}
+
+/* 绘制模式用十字光标，便于瞄准落笔点 */
+.viewer-scroll.is-drawing {
+  cursor: crosshair;
+}
+
+/* ============================================================
+ * 关于区：使用单位 / 技术支持
+ *
+ * 与上面的著作权信息用一条细分隔线分开：
+ *   著作权回答「谁做的」，使用单位回答「谁在用」，
+ *   两者性质不同，混排会让人误以为使用单位是版权方。
+ * ============================================================ */
+
+.sb-about__meta {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border, rgb(0 0 0 / 0.08));
+}
+
+.sb-about__org,
+.sb-about__support {
+  margin: 2px 0;
+  font-size: 12.5px;
+  color: var(--text-muted, #5a6270);
+}
+
+.sb-about__org strong,
+.sb-about__support strong {
+  /* 关键信息用主色强调，一眼能找到 */
+  color: var(--accent, #2f7cf6);
+  font-weight: 600;
+}
+
+/* ============================================================
+ * 页面占位预览（低分辨率缩略图）
+ *
+ * 作用：主画布渲染完成前，用它盖住那张全黑的空画布。
+ * 详见 DocumentView 里 PageGhost 的注释。
+ *
+ * 层级：在主画布之上（主画布 z-index: 1），
+ * 但渲染完成后 React 会把这个元素整个移除，不需要额外做淡出。
+ * ============================================================ */
+
+.pdf-page__ghost {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+
+  /* 高于 .pdf-page__cwrap 里的主画布（z-index: 1） */
+  z-index: 3;
+
+  /* 低分辨率图拉伸后会有锯齿，交给浏览器平滑 */
+  image-rendering: auto;
+
+  /* 只是一层占位，不能挡住手绘与选字 */
+  pointer-events: none;
+
+  transition: opacity 120ms var(--ease);
+}

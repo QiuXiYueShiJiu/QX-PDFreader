@@ -1,0 +1,177 @@
+/* ============================================================
+ * 课堂辅助遮罩（黑屏 / 聚光灯 / 放大镜）
+ *
+ * 来自鸿合 π6 的「教辅工具」，实测确认的三个课堂常用功能。
+ * 全屏覆盖，所以层级要高于一切 UI（含绘图工具条与侧栏）。
+ *
+ * ★ 2026-10-16 触屏适配：
+ *   原实现只认 pointermove + 滚轮，一体机上等于「光圈不动、也没法调大小」。
+ *   现在支持单指拖动 / 双指捏合 / 外缘圆点，因此这里必须：
+ *     · `touch-action: none` —— 否则浏览器会把「按住拖动」当成页面滚动
+ *       并下发 pointercancel，光圈拖一下就断（与 .viewer-scroll.is-erasing
+ *       那条修复同一个道理）。
+ *     · 退出按钮挪到屏幕**最下方居中**（用户要求）。
+ * ============================================================ */
+
+.screen-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 900; /* 高于 drawbar(40) 与标题栏，低于设置弹窗 */
+
+  /* 遮罩本身不吃事件，指针要能继续移动以驱动光圈跟随 */
+  pointer-events: none;
+
+  /*
+   * ★ 关键：遮罩覆盖的是整屏，若不禁用浏览器手势，
+   *   「单指按住拖动」会被解释成滚动/下拉刷新，直接打断拖动。
+   */
+  touch-action: none;
+  overscroll-behavior: none;
+}
+
+.screen-mask__canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  touch-action: none;
+}
+
+/* ---------- 顶部提示条（只显示模式与提示） ---------- */
+
+.screen-mask__hint {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  padding: 8px 16px;
+  border-radius: 999px;
+
+  /*
+   * 提示条本身不吃事件：它只是提示，不该把底下的拖动拦掉。
+   * （退出按钮已经搬到下面那条，这里没有可点的东西了。）
+   */
+  pointer-events: none;
+
+  background: rgb(28 32 40 / 0.92);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.4);
+
+  animation: mask-hint-in 200ms var(--ease);
+}
+
+@keyframes mask-hint-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+.screen-mask__label {
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.screen-mask__tip {
+  color: rgb(190 198 210);
+  font-size: 12px;
+}
+
+/* ============================================================
+ * 底部退出条：屏幕最下方居中
+ *
+ * 用户明确要求「退出功能的按钮放最下面」：
+ *   一体机屏幕大，顶部往往够不着，底部是手最容易到的位置；
+ *   而且遮罩生效时用户最想先退出，入口固定在最下方能形成肌肉记忆。
+ *
+ * 这一条是遮罩里**唯一**吃事件的地方，所以：
+ *   · pointer-events: auto
+ *   · 按钮按下时 stopPropagation，避免被当成「拖动光圈」的起点
+ * ============================================================ */
+
+.screen-mask__bottom {
+  position: absolute;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  pointer-events: auto;
+  animation: mask-exit-in 220ms var(--ease);
+}
+
+@keyframes mask-exit-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+.screen-mask__exit {
+  /* 大点击区：一体机是手指操作，32px 高太小、容易点空 */
+  min-width: 148px;
+  height: 44px;
+  padding: 0 22px;
+  border-radius: 999px;
+
+  background: rgb(229 72 77 / 0.92);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+
+  box-shadow: 0 8px 26px rgb(0 0 0 / 0.45);
+  touch-action: manipulation; /* 去掉 300ms 点击延迟与双击缩放 */
+
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.screen-mask__exit:hover {
+  background: rgb(229 72 77 / 1);
+}
+
+.screen-mask__exit:active {
+  transform: scale(0.96);
+}
+
+/*
+ * 触屏上再放大一点：空格键/Esc 都用不上时，
+ * 这个按钮就是唯一出口，宁可大一点。
+ */
+@media (hover: none) and (pointer: coarse) {
+  .screen-mask__bottom {
+    bottom: 34px;
+  }
+
+  .screen-mask__exit {
+    height: 52px;
+    min-width: 176px;
+    font-size: 15px;
+  }
+
+  /* 触屏没有滚轮，提示改成手势说明（文案在组件里） */
+  .screen-mask__hint {
+    padding: 10px 18px;
+    max-width: calc(100vw - 48px);
+  }
+
+  .screen-mask__tip {
+    font-size: 11px;
+  }
+}

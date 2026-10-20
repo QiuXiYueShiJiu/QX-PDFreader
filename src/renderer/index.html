@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="sepia">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      CSP 说明：
+        · script-src 'self'          只跑本地打包的脚本
+        · style-src 允许 inline       主题色与缩放需要内联注入 CSS 变量
+        · img-src 允许 blob:          pdf.js 把页面渲染成 canvas 后转 blob 预览
+        · connect-src 允许 pdf-file: 通过自定义协议按 Range 分块读取本地 PDF
+        · worker-src 允许 blob:       pdf.js 的 worker 由打包产物创建
+        · script-src 的 'wasm-unsafe-eval'：OCR（tesseract.js）要实例化 WebAssembly，
+          只放开「编译 wasm」这一个能力，不等于放开 eval —— 不加它识别会被 CSP 拦住
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' pdf-file: blob: data:; worker-src 'self' blob:"
+    />
+    <title>秋夕-PDF阅读器</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
