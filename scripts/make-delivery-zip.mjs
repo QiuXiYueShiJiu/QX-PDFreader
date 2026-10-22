@@ -5,7 +5,7 @@
  *
  * 结构（与历次交付包一致）：
  *   秋夕-PDF阅读器-<版本>-交付包\
- *     ├─ 安装包\            两个安装包
+ *     ├─ 安装包\            标准版 / 快速版 / 特供版（特供版不得公开分发）
  *     ├─ src\ tools\ scripts\ docs\ build\tests\ out\
  *     └─ 根文档 + package.json / package-lock.json / 配置 / 授权文件
  *
@@ -85,12 +85,15 @@ for (const d of DIRS) {
   copyTree(p, join(stage, d))
 }
 
-/* 安装包：跟随 package.json 的 build.directories.output（单一来源），
- * 允许用 PDF_RELEASE_DIR 覆盖；不硬编码任何本机绝对路径。 */
-const releaseDir = resolve(root, process.env.PDF_RELEASE_DIR
-  || pkg.build?.directories?.output || 'dist-installer')
+/* 安装包 */
+const releaseDir = 'dist-installer'
 mkdirSync(join(stage, '安装包'), { recursive: true })
-for (const f of [`秋夕-PDF阅读器-${buildVersion}-安装程序.exe`, 'PDF阅读器-示例单位快速安装.exe']) {
+for (const f of [
+  `秋夕-PDF阅读器-${buildVersion}-安装程序.exe`,
+  'PDF阅读器-示例单位快速安装.exe',
+  /* 特供版：带单位声明与内置令牌，只随内部交付走，绝不上公开仓库 */
+  `秋夕-PDF阅读器-${buildVersion}-特供版安装程序.exe`
+]) {
   const p = join(releaseDir, f)
   if (!existsSync(p)) {
     console.log(`  [warn] 缺安装包：${f}`)

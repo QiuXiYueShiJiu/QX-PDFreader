@@ -49,7 +49,11 @@ export default defineConfig({
     plugins: [react()],
     build: {
       rollupOptions: {
-        input: { index: resolve('src/renderer/index.html') }
+        input: {
+          index: resolve('src/renderer/index.html'),
+          /* 打印专用入口：隐藏窗口加载它，把 PDF 画成可打印的纯净页面 */
+          print: resolve('src/renderer/print.html')
+        }
       }
     }
   }

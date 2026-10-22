@@ -14,8 +14,13 @@ export type SidebarTab = 'thumbnails' | 'outline' | 'search'
 /** 右侧栏页签 */
 export type RightTab = 'info' | 'annotations'
 
-/** 主题模式 */
-export type ThemeMode = 'light' | 'dark' | 'sepia'
+/**
+ * 主题模式。
+ *
+ * metro = Metro UI（Windows 10 开始菜单 / 磁贴那一套）：
+ *   平直色块、直角、Segoe UI、单一强调色，不用阴影和圆角。
+ */
+export type ThemeMode = 'light' | 'dark' | 'sepia' | 'metro'
 
 /** 阅读器设置（持久化） */
 export interface ReaderSettings {
@@ -52,6 +57,8 @@ export interface ReaderSettings {
    * 设置页里的「检查更新」按钮不受这个开关影响。
    */
   updateAutoCheck: boolean
+  /** 公开版更新通道偏好（特供版忽略） */
+  updateChannel: 'auto' | 'github' | 'mirror'
 }
 
 /** 一条最近打开的记录 */

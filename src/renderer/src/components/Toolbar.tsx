@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
+  Briefcase,
   ChevronLeft,
   ChevronRight,
   Columns2,
@@ -59,6 +60,7 @@ export function Toolbar(): JSX.Element {
   const viewMode = useViewer((s) => s.viewMode)
   const showSidebar = useViewer((s) => s.showSidebar)
 const requestOcr = useViewer((s) => s.requestOcr)
+  const setShowTools = useViewer((s) => s.setShowTools)
   const showSearch = useViewer((s) => s.showSearch)
   const hasDoc = useViewer((s) => s.filePath !== '')
 
@@ -406,6 +408,21 @@ const requestOcr = useViewer((s) => s.requestOcr)
           aria-label="设置"
         >
           <Settings size={16} />
+        </button>
+
+        {/*
+          PDF 工具箱：点开先显示工具列表，再选具体工具。
+          与「设置」同属右侧抽屉，互斥打开。
+        */}
+        <button
+          className="icon-btn"
+          data-tb-id="tools"
+          style={isHidden('tools') ? { display: 'none' } : undefined}
+          onClick={() => setShowTools(true)}
+          title="PDF 工具箱（点开查看全部工具）"
+          aria-label="PDF 工具箱"
+        >
+          <Briefcase size={16} />
         </button>
 
         {/*

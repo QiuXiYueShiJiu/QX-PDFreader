@@ -32,6 +32,7 @@ import { RecentFiles } from './components/RecentFiles'
 import { LeftRail } from './components/LeftRail'
 import { RightRail } from './components/RightRail'
 import { DrawToolbar } from './components/DrawToolbar'
+import { ToolsPanel } from './components/ToolsPanel'
 import { ScreenMask } from './components/ScreenMask'
 import { DisclaimerToast } from './components/DisclaimerToast'
 import { UpdateToast } from './components/UpdateToast'
@@ -45,11 +46,13 @@ export default function App(): JSX.Element {
   const fileName = useViewer((s) => s.fileName)
   const showSidebar = useViewer((s) => s.showSidebar)
   const showSettings = useViewer((s) => s.showSettings)
+  const showTools = useViewer((s) => s.showTools)
   const toast = useViewer((s) => s.toast)
   const error = useViewer((s) => s.error)
   const recent = useViewer((s) => s.recent)
 
   const setShowSettings = useViewer((s) => s.setShowSettings)
+  const setShowTools = useViewer((s) => s.setShowTools)
   const setError = useViewer((s) => s.setError)
   const openFile = useViewer((s) => s.openFile)
   const patchSettings = useViewer((s) => s.patchSettings)
@@ -269,6 +272,11 @@ export default function App(): JSX.Element {
          */
         if (s.drawMode || s.eraserMode) {
           s.setRoam()
+          e.preventDefault()
+          return
+        }
+        if (s.showTools) {
+          s.setShowTools(false)
           e.preventDefault()
           return
         }
@@ -506,6 +514,12 @@ export default function App(): JSX.Element {
       {/* 版本更新：右下角浮层，自动下载、下完再问装不装 */}
       <UpdateToast />
 
+
+      {/*
+        PDF 工具箱（合并 / 拆分 / 水印 / 压缩 / 加解密 / 图片互转 / Office→PDF）。
+        与设置面板互斥由 store 的 setShowTools / setShowSettings 保证。
+      */}
+      {showTools ? <ToolsPanel onClose={() => setShowTools(false)} /> : null}
       {showSettings ? (
         <SettingsPanel
           settings={settings}

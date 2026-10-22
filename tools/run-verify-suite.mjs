@@ -78,6 +78,7 @@ const DEFAULT_SUITE = [
   'verify-ocr.mjs', // 扫描页 OCR：识别当前页画布 / 文字层可选中 / 选中后可进改文字（tesseract 资源与 CSP 的回归）
   'verify-teaching.mjs',
   'verify-update.mjs', // 更新：设置页入口/自动开关/浮层出现与收起/拒绝越权地址/ready 双按钮（离线，不连真站）
+  'verify-tools.mjs', // PDF 工具箱：面板入口 + 水印/元数据两条真链路 + 高级 API 齐全（离线）
   'verify-content-edit.mjs', // 内容编辑入口冒烟：工具接线 / 画-选-删链路 / 文字层让位 / 漫游态不误建物件
   'verify-export-ipc.mjs', // 导出为新 PDF 的 IPC（带 targetPath 不弹框）：落盘、可解析、拒绝覆盖源文件
   'verify-no-foreground.mjs', // 前台不被改动：第二实例转交文件时不许把隐藏窗口拽到前台

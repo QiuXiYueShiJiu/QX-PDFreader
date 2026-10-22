@@ -17,16 +17,16 @@ import {
   BookOpenCheck,
   Eye,
   Keyboard,
+  RefreshCw,
   Maximize2,
   MonitorSmartphone,
   PanelLeft,
   Palette,
   Info,
-  RefreshCw,
   X
 } from 'lucide-react'
-import type { ReaderSettings, ThemeMode } from '@shared/types'
 import { useViewer } from '../store'
+import type { ReaderSettings, ThemeMode } from '@shared/types'
 
 /** 缩放预设：用 as const 保留字面量类型，减少 as 断言 */
 const ZOOM_PRESETS = [
@@ -42,10 +42,16 @@ const UI_SCALE_STEP = 0.05
 
 
 /** 主题选项：swatch 用该主题的真实底色，做到所见即所得 */
-const THEME_OPTIONS: ReadonlyArray<{ value: ThemeMode; label: string; swatch: string }> = [
-  { value: 'light', label: '浅色', swatch: '#f3f4f7' },
-  { value: 'dark', label: '深色', swatch: '#1a1d24' },
-  { value: 'sepia', label: '米色', swatch: '#ece0c8' }
+const THEME_OPTIONS: ReadonlyArray<{ value: ThemeMode; label: string; swatch: string; tip: string }> = [
+  { value: 'light', label: '浅色', swatch: '#f3f4f7', tip: '明亮白底，适合光线充足的教室' },
+  { value: 'dark', label: '深色', swatch: '#1a1d24', tip: '关灯上课不刺眼' },
+  { value: 'sepia', label: '米色', swatch: '#ece0c8', tip: '纸质米黄，长时间阅读更放松' },
+  {
+    value: 'metro',
+    label: 'Metro',
+    swatch: '#0078d4',
+    tip: 'Windows 10 风格：直角磁贴、Segoe UI、单一强调色'
+  }
 ]
 
 /**
@@ -243,7 +249,9 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
             <div className="sb-field">
               <div className="sb-field-text">
                 <span className="sb-field-label">主题</span>
-                <span className="sb-field-hint">切换整体明暗风格，深色适合关灯上课，米色偏纸质、眼睛更放松</span>
+                <span className="sb-field-hint">
+                  切换整体明暗风格：深色适合关灯上课，米色偏纸质更护眼，Metro 是 Windows 10 的磁贴风格
+                </span>
               </div>
               <div className="sb-seg" role="group" aria-label="主题">
                 {THEME_OPTIONS.map((option) => (
@@ -252,6 +260,7 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
                     type="button"
                     className="sb-seg-btn"
                     aria-pressed={settings.theme === option.value}
+                    title={option.tip}
                     onClick={() => onChange({ theme: option.value })}
                   >
                     <i className="sb-swatch" style={{ background: option.swatch }} aria-hidden="true" />
@@ -421,6 +430,7 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
             </div>
           </section>
 
+          {/* ---------------- 关于 ---------------- */}
           {/* ---------------- 更新 ---------------- */}
           <section className="sb-card" aria-labelledby={`${idPrefix}-sec-update`}>
             <h3 className="sb-card-title" id={`${idPrefix}-sec-update`}>
@@ -458,9 +468,41 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
             <p className="sb-field-hint">
               自动检查是静默的：只有查到新版本才会在右下角提示并开始下载，下载完由你决定什么时候装。
             </p>
+
+            {/* 通道偏好：只有公开版能选；特供版固定走服务器令牌通道 */}
+            <div className="sb-field">
+              <span className="sb-field-label">更新来源</span>
+              <div className="sb-seg" role="radiogroup" aria-label="更新来源" data-update-channel="1">
+                {(
+                  [
+                    ['auto', '自动', '两条都查，取版本更高的（同版本优先镜像站）'],
+                    ['mirror', '镜像站', '只查镜像站，国内最快'],
+                    ['github', 'GitHub', '只查 GitHub Releases']
+                  ] as const
+                ).map(([value, label, tip]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={settings.updateChannel === value}
+                    /* 与面板里其它分段控件保持同一套样式钩子（.sb-seg-btn[aria-pressed]） */
+                    aria-pressed={settings.updateChannel === value}
+                    data-update-channel-option={value}
+                    className="sb-seg-btn"
+                    title={tip}
+                    onClick={() => onChange({ updateChannel: value })}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="sb-field-hint">
+                特供版没有这个选项 —— 它只从指定服务器取更新，走内置令牌校验。
+              </p>
+            </div>
+
           </section>
 
-          {/* ---------------- 关于 ---------------- */}
           <section className="sb-card" aria-labelledby={`${idPrefix}-sec-about`}>
             <h3 className="sb-card-title" id={`${idPrefix}-sec-about`}>
               <Info size={15} aria-hidden="true" />

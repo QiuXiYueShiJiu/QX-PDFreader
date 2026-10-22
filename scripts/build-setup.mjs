@@ -41,7 +41,9 @@ const root = resolve(here, '..')
 const VARIANT = (() => {
   const arg = process.argv.find((a) => a.startsWith('--variant='))
   const v = arg ? arg.slice('--variant='.length) : 'standard'
-  return v === 'quick' ? 'quick' : 'standard'
+  if (v === 'quick') return 'quick'
+  if (v === 'special') return 'special'
+  return 'standard'
 })()
 
 /**
@@ -142,6 +144,15 @@ const legal = {
     org: cfg.legal?.quick?.org ?? '',
     usageScope: cfg.legal?.quick?.usageScope ?? '',
     support: cfg.legal?.quick?.support ?? ''
+  },
+  /*
+   * 特供版：只给签约单位部署，更新走「内置令牌 + 服务器清单」通道。
+   * 声明可以单独配（cfg.legal.special），没配就复用 quick 的。
+   */
+  special: {
+    org: cfg.legal?.special?.org ?? cfg.legal?.quick?.org ?? '',
+    usageScope: cfg.legal?.special?.usageScope ?? cfg.legal?.quick?.usageScope ?? '',
+    support: cfg.legal?.special?.support ?? cfg.legal?.quick?.support ?? ''
   }
 }
 
@@ -230,7 +241,12 @@ pkg.build ??= {}
 pkg.build.nsis ??= {}
 
 const artifact = cfg.artifactName ?? DEFAULT_ARTIFACT
-pkg.build.nsis.artifactName = artifact.replace('${buildVersion}', pkg.buildVersion ?? pkg.version)
+/*
+ * 特供版单独一个产物名：同一个输出目录里三份安装包必须能一眼区分，
+ * 否则「特供版静默装」和「公开标准版」只差一个目录，发错就是事故。
+ */
+const specialArtifact = cfg.specialArtifactName ?? '秋夕-PDF阅读器-${buildVersion}-特供版安装程序.${ext}'
+pkg.build.nsis.artifactName = (VARIANT === 'special' ? specialArtifact : artifact).replace('${buildVersion}', pkg.buildVersion ?? pkg.version)
 
 writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')
 console.log(`  [setup] 标准版产物名 = ${pkg.build.nsis.artifactName}`)
@@ -243,7 +259,13 @@ console.log(`  [setup] 快速版产物名 = ${quick}`)
 writeFileSync(
   join(root, 'build', '.packaging-resolved.json'),
   `${JSON.stringify(
-    { installDir, artifactName: pkg.build.nsis.artifactName, quickArtifactName: quick, legal },
+    {
+    installDir,
+    artifactName: pkg.build.nsis.artifactName,
+    quickArtifactName: quick,
+    specialArtifactName: specialArtifact.replace('${buildVersion}', pkg.buildVersion ?? pkg.version),
+    legal
+  },
     null,
     2
   )}\n`,
@@ -269,7 +291,14 @@ const buildInfo = {
   variant: VARIANT,
   org: legal[VARIANT].org,
   usageScope: legal[VARIANT].usageScope,
-  support: legal[VARIANT].support
+  support: legal[VARIANT].support,
+  /*
+   * 更新通道：public 走 GitHub + 镜像站双通道；special 只走服务器清单，
+   * 且必须带内置令牌（运行时由主进程加在请求头里，不进源码、不进日志）。
+   */
+  channel: VARIANT === 'special' ? 'special' : 'public',
+  specialToken:
+    VARIANT === 'special' ? String(cfg.specialToken ?? process.env.QX_SPECIAL_TOKEN ?? '') : ''
 }
 writeFileSync(
   join(root, 'build', 'build-info.json'),

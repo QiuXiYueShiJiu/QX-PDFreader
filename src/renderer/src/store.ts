@@ -30,11 +30,14 @@ export interface UpdateInfo {
   newer: boolean
   current: string
   latest: string
+  /** 结果来自哪条通道：github / mirror / special */
+  source?: 'github' | 'mirror' | 'special'
   page?: string
   notes?: string
   publishedAt?: string
-  asset?: { name: string; size: number; url: string }
+  asset?: { name: string; size: number; url: string; sha256?: string; token?: string; source?: string }
   error?: string
+  others?: Array<{ source: 'github' | 'mirror' | 'special'; latest: string }>
 }
 
 export interface UpdateProgress {
@@ -181,6 +184,13 @@ interface ViewerState {
   showSidebar: boolean
   showRightPanel: boolean
   showSettings: boolean
+  /**
+   * PDF 工具箱面板是否打开。
+   *
+   * 与 showSettings 分开：两者都是右侧抽屉，但内容完全不同，
+   * 同时打开会互相遮挡；App 里保证「开其中一个就关掉另一个」。
+   */
+  showTools: boolean
   /**
    * 启动声明是否已在**本次启动**里被关掉。
    *
@@ -342,6 +352,8 @@ interface ViewerState {
   toggleSidebar: () => void
   toggleRightPanel: () => void
   setShowSettings: (v: boolean) => void
+  /** 打开 / 关闭 PDF 工具箱（与设置面板互斥，见 App） */
+  setShowTools: (v: boolean) => void
   /** 关掉本次启动的声明浮层（不写持久化） */
   dismissDisclaimer: () => void
 
@@ -513,6 +525,7 @@ export const useViewer = create<ViewerState>((set, get) => ({
   showSidebar: DEFAULT_SETTINGS.showSidebar,
   showRightPanel: DEFAULT_SETTINGS.showRightPanel,
   showSettings: false,
+  showTools: false,
   disclaimerDismissed: false,
   updateInfo: null,
   updateProgress: { received: 0, total: 0, fraction: 0 },
@@ -793,7 +806,10 @@ export const useViewer = create<ViewerState>((set, get) => ({
     void get().patchSettings({ showRightPanel: next })
   },
 
-  setShowSettings: (v) => set({ showSettings: v }),
+  setShowSettings: (v) => set(v ? { showSettings: true, showTools: false } : { showSettings: false }),
+
+  /* 工具箱与设置面板互斥：两个都是右侧抽屉，同时开会互相遮挡 */
+  setShowTools: (v) => set(v ? { showTools: true, showSettings: false } : { showTools: false }),
 
   dismissDisclaimer: () => set({ disclaimerDismissed: true }),
 

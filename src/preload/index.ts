@@ -12,6 +12,41 @@
 
 import { contextBridge, ipcRenderer } from 'electron'
 import type { Annotation, OpenResult, ReaderSettings, RecentFile } from '@shared/types'
+import type {
+  CompressPayload,
+  DecryptPayload,
+  EncryptPayload,
+  ImagesToPdfPayload,
+  MergePayload,
+  OfficeConverterInfo,
+  OfficeToPdfPayload,
+  SaveImagesPayload,
+  SplitPayload,
+  ToolResult,
+  WatermarkPayload
+} from '@shared/pdf-tools'
+import type {
+  AttachmentInfo,
+  AttachmentsPayload,
+  BatesPayload,
+  BatchPayload,
+  BookmarksPayload,
+  ComparePdfPayload,
+  ExportExcelPayload,
+  ExportWordPayload,
+  FormsCreatePayload,
+  FormsFillPayload,
+  FormsQueryPayload,
+  FormsQueryResult,
+  HeaderFooterPayload,
+  MetadataPayload,
+  PagesApplyPayload,
+  PdfAPayload,
+  PrintPayload,
+  RedactPayload,
+  SaveBinaryPayload,
+  SignPayload
+} from '@shared/pdf-advanced'
 
 function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   return ipcRenderer.invoke(channel, ...args) as Promise<T>
@@ -29,6 +64,12 @@ export interface UpdateAsset {
   name: string
   size: number
   url: string
+  /** 特供版清单里的校验值 */
+  sha256?: string
+  /** 特供版下载要带的令牌 */
+  token?: string
+  /** 来源通道（github / mirror / special） */
+  source?: string
 }
 
 export interface UpdateCheckResult {
@@ -36,6 +77,10 @@ export interface UpdateCheckResult {
   newer: boolean
   current: string
   latest: string
+  /** 这条结果来自哪条通道 */
+  source?: 'github' | 'mirror' | 'special'
+  /** 另一条通道的版本（都查到时） */
+  others?: Array<{ source: 'github' | 'mirror' | 'special'; latest: string }>
   page?: string
   notes?: string
   publishedAt?: string
@@ -277,6 +322,48 @@ const api = {
       ipcRenderer.on('app:update-progress', listener)
       return () => ipcRenderer.removeListener('app:update-progress', listener)
     }
+  },
+
+  /* ---------- PDF 工具箱 ---------- */
+  tools: {
+    merge: (payload: MergePayload) => invoke<ToolResult>('tools:merge', payload),
+    split: (payload: SplitPayload) => invoke<ToolResult>('tools:split', payload),
+    watermark: (payload: WatermarkPayload) => invoke<ToolResult>('tools:watermark', payload),
+    compress: (payload: CompressPayload) => invoke<ToolResult>('tools:compress', payload),
+    encrypt: (payload: EncryptPayload) => invoke<ToolResult>('tools:encrypt', payload),
+    decrypt: (payload: DecryptPayload) => invoke<ToolResult>('tools:decrypt', payload),
+    saveImages: (payload: SaveImagesPayload) => invoke<ToolResult>('tools:save-images', payload),
+    imagesToPdf: (payload: ImagesToPdfPayload) => invoke<ToolResult>('tools:images-to-pdf', payload),
+    officeToPdf: (payload: OfficeToPdfPayload) => invoke<ToolResult>('tools:office-to-pdf', payload),
+    pickPdfs: () => invoke<string[]>('tools:pick-pdfs'),
+    pickImages: () => invoke<string[]>('tools:pick-images'),
+    pickOffice: () => invoke<string[]>('tools:pick-office'),
+    pickFolder: () => invoke<string | null>('tools:pick-folder'),
+    converterInfo: () => invoke<OfficeConverterInfo[]>('tools:converter-info')
+  },
+
+  /* ---------- 文档编辑（进阶） ---------- */
+  advanced: {
+    pages: (payload: PagesApplyPayload) => invoke<ToolResult>('adv:pages', payload),
+    headerFooter: (payload: HeaderFooterPayload) => invoke<ToolResult>('adv:header-footer', payload),
+    bates: (payload: BatesPayload) => invoke<ToolResult>('adv:bates', payload),
+    metadata: (payload: MetadataPayload) => invoke<ToolResult>('adv:metadata', payload),
+    bookmarks: (payload: BookmarksPayload) => invoke<ToolResult>('adv:bookmarks', payload),
+    attachments: (payload: AttachmentsPayload) =>
+      invoke<ToolResult & { attachments?: AttachmentInfo[] }>('adv:attachments', payload),
+    formsQuery: (payload: FormsQueryPayload) => invoke<FormsQueryResult>('adv:forms-query', payload),
+    formsFill: (payload: FormsFillPayload) => invoke<ToolResult>('adv:forms-fill', payload),
+    formsCreate: (payload: FormsCreatePayload) => invoke<ToolResult>('adv:form-create', payload),
+    sign: (payload: SignPayload) => invoke<ToolResult>('adv:sign', payload),
+    print: (payload: PrintPayload) => invoke<ToolResult>('adv:print', payload),
+    pdfa: (payload: PdfAPayload) => invoke<ToolResult>('adv:pdfa', payload),
+    redact: (payload: RedactPayload) => invoke<ToolResult>('adv:redact', payload),
+    exportWord: (payload: ExportWordPayload) => invoke<ToolResult>('adv:export-word', payload),
+    exportExcel: (payload: ExportExcelPayload) => invoke<ToolResult>('adv:export-excel', payload),
+    comparePdf: (payload: ComparePdfPayload) => invoke<ToolResult>('adv:compare-pdf', payload),
+    saveBinary: (payload: SaveBinaryPayload) => invoke<ToolResult>('adv:save-binary', payload),
+    batch: (payload: BatchPayload) => invoke<ToolResult>('adv:batch', payload),
+    pickFiles: () => invoke<string[]>('adv:pick-files')
   }
 }
 

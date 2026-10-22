@@ -141,6 +141,35 @@ run(
   '打包 快速版'
 )
 
+/* ---------- ③b 特供版（一键静默 · 内置令牌通道） ---------- */
+/*
+ * 只在显式传 --with-special 时打：特供版要带单位声明与内置令牌，
+ * 平时做公开包不该把它顺手产出来（容易发错文件）。
+ */
+const WITH_SPECIAL = process.argv.includes('--with-special')
+const SPECIAL_NAME = String(resolved.specialArtifactName ?? '秋夕-PDF阅读器-${buildVersion}-特供版安装程序.${ext}')
+  .replace('.${ext}', '')
+if (WITH_SPECIAL) {
+  renderVariant('special')
+  run(
+    'npx.cmd',
+    [
+      'electron-builder',
+      '--win',
+      '--x64',
+      '--config.nsis.oneClick=true',
+      '--config.nsis.perMachine=false',
+      '--config.nsis.allowToChangeInstallationDirectory=false',
+      // 特供版装完不自动启动：单位部署时批量装完再统一开
+      '--config.nsis.runAfterFinish=false',
+      '--config.nsis.include=build/installer.nsh',
+      // 产物名：`${ext}` 是 electron-builder 的占位符，这里要原样传给它
+      `--config.nsis.artifactName=${SPECIAL_NAME}.\${ext}`
+    ],
+    '打包 特供版'
+  )
+}
+
 /* ---------- ④ 收尾：把工作区还原成「公开版声明」 ---------- */
 /*
  * 打包完立刻还原。否则工作区会停在专供版状态，

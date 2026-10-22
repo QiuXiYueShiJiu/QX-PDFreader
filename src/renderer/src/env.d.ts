@@ -6,6 +6,41 @@
  */
 
 import type { Annotation, ReaderSettings, RecentFile } from '@shared/types'
+import type {
+  CompressPayload,
+  DecryptPayload,
+  EncryptPayload,
+  ImagesToPdfPayload,
+  MergePayload,
+  OfficeConverterInfo,
+  OfficeToPdfPayload,
+  SaveImagesPayload,
+  SplitPayload,
+  ToolResult,
+  WatermarkPayload
+} from '@shared/pdf-tools'
+import type {
+  AttachmentInfo,
+  AttachmentsPayload,
+  BatesPayload,
+  BatchPayload,
+  BookmarksPayload,
+  ComparePdfPayload,
+  ExportExcelPayload,
+  ExportWordPayload,
+  FormsFillPayload,
+  FormsCreatePayload,
+  FormsQueryPayload,
+  FormsQueryResult,
+  HeaderFooterPayload,
+  MetadataPayload,
+  PagesApplyPayload,
+  PdfAPayload,
+  PrintPayload,
+  RedactPayload,
+  SaveBinaryPayload,
+  SignPayload
+} from '@shared/pdf-advanced'
 import type { OpenPayload } from '../../preload/index'
 
 export interface OpenResult {
@@ -109,6 +144,53 @@ export interface PdfAppApi {
     info: () => Promise<{ 启用: boolean; 日志: string; 标记: string }>
   }
   /**
+   * PDF 工具箱。
+   *
+   * 类型来源是 shared/pdf-tools.ts —— 主进程、preload、渲染层共用同一份
+   * 参数/结果定义。这里只声明方法签名，实体实现在 preload。
+   */
+  tools: {
+    merge: (payload: MergePayload) => Promise<ToolResult>
+    split: (payload: SplitPayload) => Promise<ToolResult>
+    watermark: (payload: WatermarkPayload) => Promise<ToolResult>
+    compress: (payload: CompressPayload) => Promise<ToolResult>
+    encrypt: (payload: EncryptPayload) => Promise<ToolResult>
+    decrypt: (payload: DecryptPayload) => Promise<ToolResult>
+    saveImages: (payload: SaveImagesPayload) => Promise<ToolResult>
+    imagesToPdf: (payload: ImagesToPdfPayload) => Promise<ToolResult>
+    officeToPdf: (payload: OfficeToPdfPayload) => Promise<ToolResult>
+    pickPdfs: () => Promise<string[]>
+    pickImages: () => Promise<string[]>
+    pickOffice: () => Promise<string[]>
+    pickFolder: () => Promise<string | null>
+    converterInfo: () => Promise<OfficeConverterInfo[]>
+  }
+  /**
+   * 文档编辑（Acrobat 级能力）。
+   * 类型与参数说明见 shared/pdf-advanced.ts。
+   */
+  advanced: {
+    pages: (payload: PagesApplyPayload) => Promise<ToolResult>
+    headerFooter: (payload: HeaderFooterPayload) => Promise<ToolResult>
+    bates: (payload: BatesPayload) => Promise<ToolResult>
+    metadata: (payload: MetadataPayload) => Promise<ToolResult>
+    bookmarks: (payload: BookmarksPayload) => Promise<ToolResult>
+    attachments: (payload: AttachmentsPayload) => Promise<ToolResult & { attachments?: AttachmentInfo[] }>
+    formsQuery: (payload: FormsQueryPayload) => Promise<FormsQueryResult>
+    formsFill: (payload: FormsFillPayload) => Promise<ToolResult>
+    formsCreate: (payload: FormsCreatePayload) => Promise<ToolResult>
+    sign: (payload: SignPayload) => Promise<ToolResult>
+    print: (payload: PrintPayload) => Promise<ToolResult>
+    pdfa: (payload: PdfAPayload) => Promise<ToolResult>
+    redact: (payload: RedactPayload) => Promise<ToolResult>
+    exportWord: (payload: ExportWordPayload) => Promise<ToolResult>
+    exportExcel: (payload: ExportExcelPayload) => Promise<ToolResult>
+    comparePdf: (payload: ComparePdfPayload) => Promise<ToolResult>
+    saveBinary: (payload: SaveBinaryPayload) => Promise<ToolResult>
+    batch: (payload: BatchPayload) => Promise<ToolResult>
+    pickFiles: () => Promise<string[]>
+  }
+  /**
    * 版本更新。
    *
    * ★ 网络请求全部在主进程（渲染层 CSP 不放外网），这里只是壳。
@@ -138,13 +220,14 @@ export interface UpdateInfoLike {
   newer: boolean
   current: string
   latest: string
+  source?: 'github' | 'mirror' | 'special'
+  others?: Array<{ source: 'github' | 'mirror' | 'special'; latest: string }>
   page?: string
   notes?: string
   publishedAt?: string
   asset?: { name: string; size: number; url: string }
   error?: string
 }
-
 declare global {
   interface Window {
     pdfApp: PdfAppApi

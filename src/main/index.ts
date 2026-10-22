@@ -31,6 +31,8 @@ import {
 } from './settings'
 import type { Annotation, OpenResult } from '@shared/types'
 import { checkForUpdate, currentVersion, downloadUpdate, installUpdate } from './updater'
+import { registerPdfAdvancedIpc } from './pdf-advanced'
+import { registerPdfToolsIpc } from './pdf-tools'
 
 /**
  * ★ 必须在模块加载时立刻声明特权协议，位置不能挪到文件底部。
@@ -902,7 +904,7 @@ function registerIpc(): void {
     if (getSettings().updateAutoCheck === false) return
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 4000))
     if (!mainWindow || mainWindow.isDestroyed()) return
-    const result = await checkForUpdate(6000)
+    const result = await checkForUpdate(6000, getSettings().updateChannel ?? 'auto')
     if (!result.ok || !result.newer) return
     if (!mainWindow || mainWindow.isDestroyed()) return
     mainWindow.webContents.send('app:update-available', result)
@@ -1177,9 +1179,9 @@ function registerIpc(): void {
    * 断网/镜像挂了都只是「查不到」，界面据此显示一句话即可。
    */
   ipcMain.handle('app:update-check', async () => {
-    const result = await checkForUpdate()
+    const result = await checkForUpdate(undefined, getSettings().updateChannel ?? 'auto')
     console.log(
-      `[update] 检查完成：本地 ${result.current}，远端 ${result.latest}` +
+      `[update] 检查完成（${result.source ?? '未知通道'}）：本地 ${result.current}，远端 ${result.latest}` +
         (result.newer ? '（有新版本）' : result.ok ? '（已是最新）' : `（${result.error}）`)
     )
     return result
@@ -1193,12 +1195,26 @@ function registerIpc(): void {
    * 下载是长任务（约 100 MB），这里不设超时 —— 由用户取消或断网结束。
    */
   ipcMain.handle('app:update-download', async (event, asset: unknown) => {
-    const item = asset as { name?: string; size?: number; url?: string }
+    const item = asset as {
+      name?: string
+      size?: number
+      url?: string
+      sha256?: string
+      token?: string
+      source?: string
+    }
     if (!item || typeof item.url !== 'string' || typeof item.name !== 'string') {
       return { ok: false, error: '下载信息不完整' }
     }
     const result = await downloadUpdate(
-      { name: item.name, size: Number(item.size ?? 0), url: item.url },
+      {
+        name: item.name,
+        size: Number(item.size ?? 0),
+        url: item.url,
+        sha256: item.sha256,
+        token: item.token,
+        source: item.source as never
+      },
       (p) => {
         if (event.sender.isDestroyed()) return
         event.sender.send('app:update-progress', p)
@@ -1218,6 +1234,21 @@ function registerIpc(): void {
     void shell.openExternal(target)
     return true
   })
+
+  /*
+   * ---------- PDF 工具箱 ----------
+   * 合并 / 拆分 / 水印 / 压缩 / 加解密 / 图片互转 / Office→PDF。
+   * 实现集中在 src/main/pdf-tools.ts；这里只把「当前窗口」的取值函数交过去。
+   */
+  registerPdfToolsIpc(() => mainWindow)
+
+  /*
+   * ---------- 文档编辑（进阶） ----------
+   * 页面整理 / 页眉页脚 / 贝茨编号 / 元数据 / 书签 / 附件 / 表单 / 签名 /
+   * PDF/A / 安全遮盖 / 导出 Word、Excel / 对比 / 打印。
+   * 实现集中在 src/main/pdf-advanced.ts。
+   */
+  registerPdfAdvancedIpc(() => mainWindow)
 
   /**
    * 标签页切换时同步窗口标题。

@@ -12,6 +12,7 @@
  */
 
 import {
+  Briefcase,
   ChevronLeft,
   ChevronRight,
   CircleDot,
@@ -95,6 +96,7 @@ export function RightRail(): JSX.Element {
   const setZoom = useViewer((s) => s.setZoom)
   const rotate = useViewer((s) => s.rotate)
   const setShowSettings = useViewer((s) => s.setShowSettings)
+  const setShowTools = useViewer((s) => s.setShowTools)
   // 课堂辅助遮罩（黑屏 / 聚光灯 / 放大镜）
   const maskMode = useViewer((s) => s.maskMode)
   const setMaskMode = useViewer((s) => s.setMaskMode)
@@ -206,6 +208,12 @@ export function RightRail(): JSX.Element {
           disabled={!hasDoc}
           onClick={() => rotate(90)}
           title="顺时针旋转 90°（Ctrl+R）"
+        />
+        <RailButton
+          icon={<Briefcase size={20} />}
+          label="工具箱"
+          onClick={() => setShowTools(true)}
+          title="PDF 工具箱：点开查看全部工具"
         />
         <RailButton
           icon={<Settings size={20} />}

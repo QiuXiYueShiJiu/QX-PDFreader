@@ -100,7 +100,19 @@ export function UpdateToast(): JSX.Element | null {
       <p className="update-toast__title">
         发现新版本 <span className="update-toast__version">v{updateInfo.latest}</span>
       </p>
-      <p className="update-toast__sub">当前 v{updateInfo.current}</p>
+      <p className="update-toast__sub">
+        当前 v{updateInfo.current}
+        {updateInfo.source ? (
+          <span className="update-toast__source" data-update-source={updateInfo.source}>
+            {' · '}
+            {updateInfo.source === 'github'
+              ? '来自 GitHub'
+              : updateInfo.source === 'special'
+                ? '来自特供服务器'
+                : '来自镜像站'}
+          </span>
+        ) : null}
+      </p>
 
       {updateStage === 'downloading' && (
         <>

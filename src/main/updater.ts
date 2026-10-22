@@ -2,57 +2,106 @@
 // Copyright 2026 秋夕月拾旧
 
 /**
- * 版本更新检查（走镜像站的 release 汇总接口）。
+ * 版本更新检查（双通道 + 特供版令牌通道）。
+ *
+ * ── 三条通道 ──────────────────────────────────────────────────
+ *   1. GitHub Releases API（公开版主通道，全球可用，国内可能慢）
+ *      GET https://api.github.com/repos/QiuXiYueShiJiu/QX-PDFreader/releases/latest
+ *   2. 镜像站 `api.php`（公开版备用通道，站点爬 GitHub，国内快）
+ *      GET https://xn--6rso4u4lc86ad09c.top/contact/api.php
+ *      资源：/contact/asset.php?repo=<full_name>&f=assets/<tag>/<文件名>&dl=1
+ *      ★ 必须是 `assets/<tag>/<文件名>`，裸文件名 404（踩过）
+ *   3. 特供版专用接口（只有 `variant=special` 的包才会用）
+ *      GET /contact/special-update.php?v=<当前版本>   头 X-QX-Token: <内置令牌>
+ *      返回 { ok, latest:{version,tag,notes,published_at,page,asset:{name,size,sha256,url}} }
+ *      下载走 special-asset.php（同样带令牌），客户端下完校验 SHA256。
  *
  * ── 为什么在主进程 ────────────────────────────────────────────
- *   渲染层的 CSP 是 `connect-src 'self' pdf-file: blob: data:`，
- *   只允许读本地 PDF；改成放开外网域名等于给渲染层开了个出网口子。
- *   放到主进程还能顺带绕开 CORS（镜像站的 api.php 不带 ACAO 头）。
- *
- * ── 数据来源 ──────────────────────────────────────────────────
- *   GET https://xn--6rso4u4lc86ad09c.top/contact/api.php
- *   返回 JSON：{ ok, repos: [ { full_name, release: {
- *     tag, name, prerelease, published_at, html_url, body,
- *     assets: [ { name, size, local } ] } } ] }
- *   资源地址：/contact/asset.php?repo=<full_name>&f=<文件名>&dl=1
+ *   渲染层 CSP 是 `connect-src 'self' pdf-file: blob: data:`，
+ *   放开外网等于给渲染层开出网口子；主进程还能绕开 CORS。
  *
  * ── 失败策略 ──────────────────────────────────────────────────
- *   检查更新是「锦上添花」，任何异常都必须安静收场：
- *   断网、镜像挂了、返回格式变了 —— 一律返回 ok:false + 原因，
- *   界面上只在用户主动点「检查更新」时才提示失败，自动检查完全静默。
+ *   检查更新是锦上添花：断网、镜像挂了、格式变了 —— 一律 ok:false + 原因。
+ *   公开版两条通道**并行**查，取版本号更高的那个；同版本时按用户偏好
+ *   （设置里的 updateChannel，默认 auto→镜像站优先，因为国内更快）。
+ *   特供版失败**不回落**到公开通道，避免把特供用户引到公开版。
  */
 
 import { app, net, shell } from 'electron'
-import { createWriteStream, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { createReadStream, createWriteStream, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 const MIRROR_ORIGIN = 'https://xn--6rso4u4lc86ad09c.top'
-const API_URL = `${MIRROR_ORIGIN}/contact/api.php`
+const MIRROR_CONTACT = `${MIRROR_ORIGIN}/contact/`
+const API_URL = `${MIRROR_CONTACT}api.php`
+const SPECIAL_URL = `${MIRROR_CONTACT}special-update.php`
+const GITHUB_API = 'https://api.github.com/repos/QiuXiYueShiJiu/QX-PDFreader/releases/latest'
 const REPO = 'QiuXiYueShiJiu/QX-PDFreader'
 const TIMEOUT_MS = 12_000
+
+export type UpdateSource = 'github' | 'mirror' | 'special'
+export type UpdateChannel = 'auto' | 'github' | 'mirror'
 
 export interface UpdateAsset {
   name: string
   size: number
   url: string
+  /** 特供版清单里给的校验值（公开通道一般没有） */
+  sha256?: string
+  /** 下载时需要带的令牌（特供版） */
+  token?: string
+  source?: UpdateSource
 }
 
 export interface UpdateCheckResult {
   ok: boolean
-  /** 是否有比本地更高的版本 */
   newer: boolean
-  /** 本地版本（buildVersion 优先） */
   current: string
-  /** 远端最新版本（去掉前导 v） */
   latest: string
-  /** release 页面，供「查看详情」 */
+  /** 这条结果来自哪条通道 */
+  source?: UpdateSource
   page?: string
-  /** release 说明（正文） */
   notes?: string
   publishedAt?: string
   asset?: UpdateAsset
-  /** ok=false 时的原因 */
   error?: string
+  /** 其他通道的版本（调试/展示用，例如两边都查到时） */
+  others?: Array<{ source: UpdateSource; latest: string }>
+}
+
+/** 打包时注入的运行时声明（resources/build-info.json） */
+interface BuildInfo {
+  variant?: string
+  channel?: 'public' | 'special'
+  specialToken?: string
+}
+
+export function readBuildInfo(): BuildInfo {
+  const candidates = [
+    join(process.resourcesPath ?? '', 'build-info.json'),
+    join(app.getAppPath(), 'build', 'build-info.json'),
+    join(process.cwd(), 'build', 'build-info.json')
+  ]
+  for (const p of candidates) {
+    try {
+      const info = JSON.parse(readFileSync(p, 'utf8')) as BuildInfo
+      if (info && typeof info === 'object') return info
+    } catch {
+      /* 继续试下一个 */
+    }
+  }
+  return {}
+}
+
+/** 特供版：内置令牌 + 专用通道 */
+export function isSpecialBuild(): boolean {
+  const info = readBuildInfo()
+  return info.channel === 'special' || info.variant === 'special'
+}
+
+function specialToken(): string {
+  return readBuildInfo().specialToken ?? ''
 }
 
 /** 把 'v1.0.0.1' / '1.0.0' 拆成数字数组，非数字段落按 0 处理 */
@@ -81,7 +130,7 @@ export function isNewer(a: string, b: string): boolean {
   return false
 }
 
-/** 本地版本号：打包时写入 package.json 的 buildVersion（如 1.0.1.0） */
+/** 本地版本号：打包时写入 package.json 的 buildVersion（如 1.0.2.0） */
 export function currentVersion(): string {
   try {
     const pkg = JSON.parse(readFileSync(join(app.getAppPath(), 'package.json'), 'utf8')) as {
@@ -93,6 +142,10 @@ export function currentVersion(): string {
     return app.getVersion()
   }
 }
+
+/* ============================================================
+ * 通道一：镜像站 api.php
+ * ============================================================ */
 
 interface MirrorRepo {
   full_name?: string
@@ -107,42 +160,31 @@ interface MirrorRepo {
   } | null
 }
 
-function pickAsset(
+function pickMirrorAsset(
   assets: Array<{ name?: string; size?: number }> | undefined,
   version: string,
   tag: string
 ): UpdateAsset | undefined {
   if (!Array.isArray(assets)) return undefined
-  // 只认安装包：优先带版本号的 exe，其次任意 exe（跳过校验文件/绿色版）
   const exes = assets.filter((a) => typeof a.name === 'string' && /\.exe$/i.test(a.name))
   if (exes.length === 0) return undefined
   const named = exes.find((a) => a.name!.includes(version)) ?? exes[0]
   const name = named.name as string
   /*
    * ★ 镜像站的资源路径是 `assets/<tag>/<文件名>`，不是裸文件名。
-   *
-   * 站点自己的 JS 就是这么拼的（contact 页面里的 assetUrl()），
-   * 传裸文件名会 404 —— 这个坑踩过一次，别改回去。
+   * 站点 JS 的 assetUrl() 就是这么拼的，传裸文件名会 404（别改回去）。
    */
   const local = `assets/${tag}/${name}`
   return {
     name,
     size: Number(named.size ?? 0),
-    url: `${MIRROR_ORIGIN}/contact/asset.php?repo=${encodeURIComponent(REPO)}&f=${encodeURIComponent(
-      local
-    )}&dl=1`
+    url: `${MIRROR_CONTACT}asset.php?repo=${encodeURIComponent(REPO)}&f=${encodeURIComponent(local)}&dl=1`,
+    source: 'mirror'
   }
 }
 
-/**
- * 查一次最新版本。
- *
- * @param timeoutMs 允许调用方缩短（自动检查用 6s，手动检查用默认 12s）
- */
-export async function checkForUpdate(timeoutMs = TIMEOUT_MS): Promise<UpdateCheckResult> {
-  const current = currentVersion()
-  const base: UpdateCheckResult = { ok: false, newer: false, current, latest: current }
-
+async function checkMirror(timeoutMs: number, current: string): Promise<UpdateCheckResult> {
+  const base: UpdateCheckResult = { ok: false, newer: false, current, latest: current, source: 'mirror' }
   const ac = new AbortController()
   const timer = setTimeout(() => ac.abort(), timeoutMs)
   try {
@@ -160,12 +202,13 @@ export async function checkForUpdate(timeoutMs = TIMEOUT_MS): Promise<UpdateChec
 
     const latest = String(release.tag).replace(/^v/i, '')
     const newer = isNewer(latest, current)
-    const asset = newer ? pickAsset(release.assets, latest, String(release.tag)) : undefined
+    const asset = newer ? pickMirrorAsset(release.assets, latest, String(release.tag)) : undefined
     return {
       ok: true,
       newer,
       current,
       latest,
+      source: 'mirror',
       page: release.html_url ?? '',
       notes: release.body ?? '',
       publishedAt: release.published_at ?? '',
@@ -177,6 +220,212 @@ export async function checkForUpdate(timeoutMs = TIMEOUT_MS): Promise<UpdateChec
   } finally {
     clearTimeout(timer)
   }
+}
+
+/* ============================================================
+ * 通道二：GitHub Releases API
+ * ============================================================ */
+
+interface GithubRelease {
+  tag_name?: string
+  name?: string
+  prerelease?: boolean
+  draft?: boolean
+  published_at?: string
+  html_url?: string
+  body?: string
+  assets?: Array<{ name?: string; size?: number; browser_download_url?: string }>
+}
+
+function pickGithubAsset(
+  assets: Array<{ name?: string; size?: number; browser_download_url?: string }> | undefined,
+  version: string
+): UpdateAsset | undefined {
+  if (!Array.isArray(assets)) return undefined
+  const exes = assets.filter(
+    (a) => typeof a.name === 'string' && /\.exe$/i.test(a.name) && typeof a.browser_download_url === 'string'
+  )
+  if (exes.length === 0) return undefined
+  const named = exes.find((a) => a.name!.includes(version)) ?? exes[0]
+  return {
+    name: named.name as string,
+    size: Number(named.size ?? 0),
+    url: named.browser_download_url as string,
+    source: 'github'
+  }
+}
+
+async function checkGithub(timeoutMs: number, current: string): Promise<UpdateCheckResult> {
+  const base: UpdateCheckResult = { ok: false, newer: false, current, latest: current, source: 'github' }
+  const ac = new AbortController()
+  const timer = setTimeout(() => ac.abort(), timeoutMs)
+  try {
+    const res = await net.fetch(GITHUB_API, {
+      signal: ac.signal,
+      headers: {
+        accept: 'application/vnd.github+json',
+        'user-agent': 'qiuxi-pdf-reader-updater',
+        'cache-control': 'no-cache'
+      }
+    })
+    if (!res.ok) return { ...base, error: `GitHub 返回 HTTP ${res.status}` }
+    const release = (await res.json()) as GithubRelease
+    if (!release?.tag_name) return { ...base, error: 'GitHub 没有可用的 release' }
+    if (release.draft || release.prerelease) return { ...base, error: '最新 release 是预发布版，已跳过' }
+
+    const latest = String(release.tag_name).replace(/^v/i, '')
+    const newer = isNewer(latest, current)
+    const asset = newer ? pickGithubAsset(release.assets, latest) : undefined
+    return {
+      ok: true,
+      newer,
+      current,
+      latest,
+      source: 'github',
+      page: release.html_url ?? '',
+      notes: release.body ?? '',
+      publishedAt: release.published_at ?? '',
+      asset
+    }
+  } catch (error) {
+    const aborted = error instanceof Error && error.name === 'AbortError'
+    return { ...base, error: aborted ? '连接 GitHub 超时' : '连接 GitHub 失败（可能被墙或没有网络）' }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/* ============================================================
+ * 通道三：特供版（内置令牌）
+ * ============================================================ */
+
+interface SpecialPayload {
+  ok?: boolean
+  error?: string
+  org?: string
+  latest?: {
+    version?: string
+    tag?: string
+    notes?: string
+    published_at?: string
+    page?: string
+    asset?: { name?: string; size?: number; sha256?: string; url?: string }
+  } | null
+}
+
+async function checkSpecial(timeoutMs: number, current: string): Promise<UpdateCheckResult> {
+  const base: UpdateCheckResult = { ok: false, newer: false, current, latest: current, source: 'special' }
+  const token = specialToken()
+  if (!token) return { ...base, error: '特供版缺少内置令牌（构建时没有注入）' }
+
+  const ac = new AbortController()
+  const timer = setTimeout(() => ac.abort(), timeoutMs)
+  try {
+    const res = await net.fetch(`${SPECIAL_URL}?v=${encodeURIComponent(current)}`, {
+      signal: ac.signal,
+      headers: {
+        accept: 'application/json',
+        'cache-control': 'no-cache',
+        'X-QX-Token': token
+      }
+    })
+    if (res.status === 401) return { ...base, error: '特供令牌无效或已被吊销' }
+    if (!res.ok) return { ...base, error: `特供服务器返回 HTTP ${res.status}` }
+    const data = (await res.json()) as SpecialPayload
+    if (!data.ok) return { ...base, error: data.error ?? '特供服务器返回失败' }
+    if (!data.latest) return { ...base, error: '特供服务器上还没有发布版本' }
+
+    const latestInfo = data.latest
+    const latest = String(latestInfo.version ?? '').replace(/^v/i, '')
+    if (!latest) return { ...base, error: '特供清单缺少版本号' }
+    const newer = isNewer(latest, current)
+    let asset: UpdateAsset | undefined
+    if (newer && latestInfo.asset?.name) {
+      const rel = String(latestInfo.asset.url ?? '')
+      const url = rel ? new URL(rel, MIRROR_CONTACT).href : ''
+      asset = {
+        name: String(latestInfo.asset.name),
+        size: Number(latestInfo.asset.size ?? 0),
+        url,
+        sha256: latestInfo.asset.sha256 ? String(latestInfo.asset.sha256).toLowerCase() : undefined,
+        token,
+        source: 'special'
+      }
+    }
+    return {
+      ok: true,
+      newer,
+      current,
+      latest,
+      source: 'special',
+      page: latestInfo.page ?? '',
+      notes: latestInfo.notes ?? '',
+      publishedAt: latestInfo.published_at ?? '',
+      asset
+    }
+  } catch (error) {
+    const aborted = error instanceof Error && error.name === 'AbortError'
+    return { ...base, error: aborted ? '连接特供服务器超时' : '连接特供服务器失败（可能没有网络）' }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/* ============================================================
+ * 汇总：并行查公开通道，按版本挑最高的
+ * ============================================================ */
+
+/** 从多条结果里挑版本最高的；同版本按偏好（auto → 镜像站优先） */
+export function pickBest(results: UpdateCheckResult[], prefer: UpdateChannel): UpdateCheckResult | undefined {
+  const ok = results.filter((r) => r.ok)
+  if (ok.length === 0) return undefined
+  const rank = (r: UpdateCheckResult): number =>
+    prefer === 'github' ? (r.source === 'github' ? 2 : 1) : prefer === 'mirror' ? (r.source === 'mirror' ? 2 : 1) : r.source === 'mirror' ? 2 : 1
+
+  return [...ok].sort((a, b) => {
+    if (isNewer(a.latest, b.latest)) return -1
+    if (isNewer(b.latest, a.latest)) return 1
+    return rank(b) - rank(a)
+  })[0]
+}
+
+/**
+ * 查一次最新版本。
+ *
+ * @param timeoutMs 允许调用方缩短（自动检查用 6s，手动检查用默认 12s）
+ * @param prefer    公开版的通道偏好（特供版忽略它）
+ */
+export async function checkForUpdate(
+  timeoutMs = TIMEOUT_MS,
+  prefer: UpdateChannel = 'auto'
+): Promise<UpdateCheckResult> {
+  const current = currentVersion()
+
+  // 特供版：只走令牌通道，失败不回落
+  if (isSpecialBuild()) {
+    return checkSpecial(timeoutMs, current)
+  }
+
+  const tasks: Array<Promise<UpdateCheckResult>> = []
+  if (prefer !== 'mirror') tasks.push(checkGithub(timeoutMs, current))
+  if (prefer !== 'github') tasks.push(checkMirror(timeoutMs, current))
+
+  const settled = await Promise.all(tasks)
+  const best = pickBest(settled, prefer)
+  if (!best) {
+    const reasons = settled.map((r) => r.error).filter(Boolean)
+    return {
+      ok: false,
+      newer: false,
+      current,
+      latest: current,
+      error: reasons[0] ?? '连接更新服务器失败'
+    }
+  }
+  const others = settled
+    .filter((r) => r !== best && r.ok)
+    .map((r) => ({ source: r.source as UpdateSource, latest: r.latest }))
+  return { ...best, others }
 }
 
 /* ============================================================
@@ -201,25 +450,50 @@ function updateDir(): string {
   return dir
 }
 
+/** 允许下载的站点：镜像站自己 + GitHub 的 release 资源域名 */
+function isAllowedUrl(url: string): boolean {
+  return (
+    url.startsWith(`${MIRROR_ORIGIN}/`) ||
+    url.startsWith('https://github.com/') ||
+    url.startsWith('https://objects.githubusercontent.com/') ||
+    url.startsWith('https://release-assets.githubusercontent.com/') ||
+    url.startsWith('https://api.github.com/')
+  )
+}
+
+function sha256Of(file: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256')
+    const stream = createReadStream(file)
+    stream.on('error', reject)
+    stream.on('data', (chunk) => hash.update(chunk))
+    stream.on('end', () => resolve(hash.digest('hex')))
+  })
+}
+
 /**
  * 下载安装包，返回本地路径。
  *
- * 只允许下载检查结果里给出的那个 asset：调用方传进来的 URL 必须
- * 以镜像站域名开头，避免这条 IPC 被当成「任意地址下载器」。
+ * 只允许下载检查结果里给出的那个 asset：URL 必须在允许的站点下，
+ * 避免这条 IPC 被当成「任意地址下载器」。
+ * 特供版带 `sha256` 时会校验，不匹配直接删文件。
  */
 export async function downloadUpdate(
   asset: UpdateAsset,
   onProgress: (p: DownloadProgress) => void
 ): Promise<{ ok: boolean; path?: string; error?: string }> {
-  if (!asset?.url?.startsWith(`${MIRROR_ORIGIN}/`)) {
-    return { ok: false, error: '下载地址不在镜像站域名下，已拒绝' }
+  if (!asset?.url || !isAllowedUrl(asset.url)) {
+    return { ok: false, error: '下载地址不在允许的域名下，已拒绝' }
   }
   if (downloading) return { ok: false, error: '已经有一个下载任务在进行' }
   downloading = true
 
   const target = join(updateDir(), asset.name.replace(/[\\/:*?"<>|]/g, '_'))
   try {
-    const res = await net.fetch(asset.url)
+    const headers: Record<string, string> = {}
+    if (asset.token) headers['X-QX-Token'] = asset.token
+    if (asset.source === 'github') headers['accept'] = 'application/octet-stream'
+    const res = await net.fetch(asset.url, { headers })
     if (!res.ok) return { ok: false, error: `下载失败：HTTP ${res.status}` }
     const total = Number(res.headers.get('content-length') ?? 0) || asset.size || 0
 
@@ -232,35 +506,41 @@ export async function downloadUpdate(
         out.end(buf)
       })
       onProgress({ received: buf.byteLength, total: buf.byteLength, fraction: 1 })
-      return { ok: true, path: target }
-    }
-
-    const reader = res.body.getReader()
-    const out = createWriteStream(target)
-    const done = new Promise<void>((resolvePromise, reject) => {
-      out.on('error', reject)
-      out.on('close', () => resolvePromise())
-    })
-    let received = 0
-    for (;;) {
-      const { done: finished, value } = await reader.read()
-      if (finished) break
-      if (!value) continue
-      received += value.byteLength
-      out.write(Buffer.from(value))
-      onProgress({
-        received,
-        total,
-        fraction: total > 0 ? Math.min(1, received / total) : -1
+    } else {
+      const reader = res.body.getReader()
+      const out = createWriteStream(target)
+      const done = new Promise<void>((resolvePromise, reject) => {
+        out.on('error', reject)
+        out.on('close', () => resolvePromise())
       })
+      let received = 0
+      for (;;) {
+        const { done: finished, value } = await reader.read()
+        if (finished) break
+        if (!value) continue
+        received += value.byteLength
+        out.write(Buffer.from(value))
+        onProgress({
+          received,
+          total,
+          fraction: total > 0 ? Math.min(1, received / total) : -1
+        })
+      }
+      out.end()
+      await done
     }
-    out.end()
-    await done
 
     const size = statSync(target).size
     if (total > 0 && size < total * 0.98) {
       rmSync(target, { force: true })
       return { ok: false, error: `下载不完整（${size}/${total} 字节）` }
+    }
+    if (asset.sha256) {
+      const actual = await sha256Of(target)
+      if (actual !== asset.sha256.toLowerCase()) {
+        rmSync(target, { force: true })
+        return { ok: false, error: `安装包校验失败（期望 ${asset.sha256.slice(0, 12)}…，实际 ${actual.slice(0, 12)}…）` }
+      }
     }
     return { ok: true, path: target }
   } catch (error) {

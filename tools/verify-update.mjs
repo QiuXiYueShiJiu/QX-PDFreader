@@ -72,6 +72,41 @@ const main = async () => {
   )
   check('自动检查开关渲染出来了', hasSwitch === true, `switch=${hasSwitch}`)
 
+  // ①b 更新来源选择（普通版：自动 / 镜像站 / GitHub）
+  const channels = evl(`(() => {
+    const root = document.querySelector('[data-update-channel]')
+    if (!root) return null
+    return {
+      options: [...root.querySelectorAll('[data-update-channel-option]')].map((b) => b.getAttribute('data-update-channel-option')),
+      pressed: [...root.querySelectorAll('[data-update-channel-option]')].filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.getAttribute('data-update-channel-option')),
+      now: window.__store.getState().settings.updateChannel
+    }
+  })()`)
+  check(
+    '设置页提供「自动 / 镜像站 / GitHub」三个更新来源',
+    Boolean(channels) && ['auto', 'mirror', 'github'].every((v) => channels.options.includes(v)),
+    JSON.stringify(channels)
+  )
+  check(
+    '更新来源默认选「自动」且高亮一致',
+    Boolean(channels) && channels.now === 'auto' && channels.pressed.join(',') === 'auto',
+    JSON.stringify(channels)
+  )
+  evl(`(() => {
+    const btn = document.querySelector('[data-update-channel-option="github"]')
+    if (btn) btn.click()
+    return true
+  })()`)
+  await sleep(250)
+  const afterPick = evl('window.__store.getState().settings.updateChannel')
+  check('点「GitHub」后设置里真的切到这个通道', afterPick === 'github', `updateChannel=${afterPick}`)
+  evl(`(() => {
+    const btn = document.querySelector('[data-update-channel-option="auto"]')
+    if (btn) btn.click()
+    return true
+  })()`)
+  await sleep(200)
+
   evl('window.__store.getState().setShowSettings(false), true')
   await sleep(250)
 
@@ -83,6 +118,7 @@ const main = async () => {
       current: '1.0.1.0',
       latest: '1.0.2.0',
       page: 'https://example.invalid/release',
+      source: 'github',
       asset: { name: 'fake-setup.exe', size: 1024, url: '${FAKE_URL}' }
     })
     return true
@@ -96,6 +132,7 @@ const main = async () => {
   }
   check('注入新版本后右下角浮层出现', Boolean(toast), String(toast ?? '').slice(0, 60))
   check('浮层里写明了新版本号', String(toast ?? '').includes('v1.0.2.0'), String(toast ?? '').slice(0, 60))
+  check('浮层标出了结果来自哪条通道', String(toast ?? '').includes('GitHub'), String(toast ?? '').slice(0, 80))
 
   // ③ 非镜像站地址会被主进程拒绝 → error 态
   let stage = ''

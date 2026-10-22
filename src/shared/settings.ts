@@ -1,9 +1,24 @@
 // SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 // Copyright 2026 秋夕月拾旧
 
-import type { ReaderSettings } from './types'
+import type { ReaderSettings, ThemeMode } from './types'
 
 export const SETTINGS_VERSION = 1
+
+/**
+ * 允许的主题值。
+ *
+ * 单独列出来而不是只靠 TS 类型：settings.json 是磁盘上的用户数据，
+ * 里面可能是任意脏值（手改、旧版本、半截写入）。类型在运行时不存在，
+ * 不校验就会把 "metor" 这种拼错值一路带进 CSS（html[data-theme='metor']
+ * 匹配不到任何主题 → 界面直接变成无样式默认值）。
+ */
+export const THEME_MODES: readonly ThemeMode[] = ['light', 'dark', 'sepia', 'metro']
+
+/** 把任意值收窄成合法主题；不合法就退回默认主题 */
+export function normalizeTheme(value: unknown, fallback: ThemeMode): ThemeMode {
+  return THEME_MODES.includes(value as ThemeMode) ? (value as ThemeMode) : fallback
+}
 
 /**
  * 默认设置。
@@ -46,7 +61,13 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   /* 启动声明默认显示：第一次用的人需要知道「免费 / 早期版本 / 到哪反馈」 */
   disclaimerHidden: false,
   /* 启动时静默查一次新版本：查到才提示，查不到什么都不显示 */
-  updateAutoCheck: true
+  updateAutoCheck: true,
+  /*
+   * 公开版的更新通道偏好：auto = 两条通道并行、取版本最高的（同版本镜像站优先）；
+   * github / mirror = 只用那一条（GitHub 被墙或镜像站抽风时手动兜底）。
+   * 特供版忽略这个字段（它只走内置令牌通道）。
+   */
+  updateChannel: 'auto'
 }
 
 export function cloneDefaults(): ReaderSettings {
@@ -60,7 +81,7 @@ export function mergeSettings(raw: unknown): ReaderSettings {
   const input = raw as Partial<ReaderSettings>
   return {
     version: SETTINGS_VERSION,
-    theme: input.theme ?? base.theme,
+    theme: normalizeTheme(input.theme, base.theme),
     pageBackground: input.pageBackground ?? base.pageBackground,
     defaultZoom: input.defaultZoom ?? base.defaultZoom,
     restoreLastPosition:
@@ -73,7 +94,12 @@ export function mergeSettings(raw: unknown): ReaderSettings {
       typeof input.enableShortcuts === 'boolean' ? input.enableShortcuts : base.enableShortcuts,
     disclaimerHidden:
       typeof input.disclaimerHidden === 'boolean' ? input.disclaimerHidden : base.disclaimerHidden,
+    /* 静默自动检查更新：默认开，用户可以关掉 */
     updateAutoCheck:
-      typeof input.updateAutoCheck === 'boolean' ? input.updateAutoCheck : base.updateAutoCheck
+      typeof input.updateAutoCheck === 'boolean' ? input.updateAutoCheck : base.updateAutoCheck,
+    updateChannel:
+      input.updateChannel === 'github' || input.updateChannel === 'mirror' || input.updateChannel === 'auto'
+        ? input.updateChannel
+        : base.updateChannel
   }
 }

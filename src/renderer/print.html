@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' pdf-file: blob: data:; worker-src 'self' blob:"
+    />
+    <title>打印预览</title>
+    <style>
+      /* ============================================================
+       * 打印专用页面样式
+       *
+       * 每页一个 .print-page，尺寸用 mm（与 paperSize 一致），
+       * 这样 Chromium 打印时是 1:1 铺满，不会被二次缩放。
+       * ========================================================== */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #ffffff;
+      }
+
+      #pages {
+        display: block;
+      }
+
+      .print-page {
+        display: block;
+        margin: 0 auto;
+        overflow: hidden;
+        page-break-after: always;
+        break-after: page;
+      }
+
+      .print-page:last-child {
+        page-break-after: auto;
+        break-after: auto;
+      }
+
+      .print-page canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
+      #status {
+        padding: 24px;
+        font: 14px 'Microsoft YaHei', sans-serif;
+        color: #666;
+      }
+
+      @page {
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="status"></div>
+    <div id="pages"></div>
+    <script type="module" src="/src/print.ts"></script>
+  </body>
+</html>
