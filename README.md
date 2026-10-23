@@ -10,7 +10,7 @@
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4" />
   <img alt="electron" src="https://img.shields.io/badge/Electron-33-47848F" />
   <img alt="react" src="https://img.shields.io/badge/React-18-61DAFB" />
-  <img alt="version" src="https://img.shields.io/badge/version-1.0.3.0-2E7D32" />
+  <img alt="version" src="https://img.shields.io/badge/version-1.0.5.2-2E7D32" />
   <img alt="license" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-orange" />
 </p>
 
@@ -42,7 +42,7 @@
 | 全文搜索 | `Ctrl + F`，结果按页列出并高亮，点一条直接跳过去 |
 | 多标签 | 一次打开多份文档，标签可拖动排序，关闭前提示未导出编辑 |
 | 旋转 | 90° 循环旋转，画布与文字层同步 |
-| 主题 | **亮色 / 暗色 / 护眼（米黄）/ Metro（扁平蓝）** 四档，阅读区底色可单独调 |
+| 主题 | **8 档**：亮色 / 暖灰 / 米黄护眼 / 护眼绿 / 深色 / 深夜蓝 / 高对比 / Metro（直角扁平） |
 | 记忆 | 记住上次阅读位置、最近文件、界面缩放 |
 | 自动更新 | 静默检查 **GitHub Releases 与镜像站（并行取较新者）**，查到即提示并自动下载，装不装由你决定；设置页可只用 GitHub / 只用镜像站，也能手动检查 |
 
@@ -99,7 +99,7 @@
 
 ## 界面与功能截图
 
-> 截图均取自标准版（1.0.3.0），隐藏窗口 + 1500×1000 视口，未做任何后期修改。
+> 截图均取自标准版（1.0.5.2），隐藏窗口 + 1800×1125 视口，未做任何后期修改。
 
 ### 阅读与导航
 
@@ -137,7 +137,7 @@
 
 ### 设置与更新
 
-| 设置 · 外观（四档主题 + 阅读区底色 + 界面缩放） | 设置 · 阅读（缩放 / 位置 / 快捷键） |
+| 设置 · 外观（8 档主题 + 阅读区底色 + 背景图 + 界面缩放） | 设置 · 阅读（缩放 / 位置 / 快捷键） |
 |---|---|
 | ![设置外观](docs/screenshots/15-settings-appearance.png) | ![设置阅读](docs/screenshots/16-settings-reading.png) |
 
@@ -145,7 +145,7 @@
 |---|---|
 | ![更新](docs/screenshots/17-update.png) | ![声明](docs/screenshots/18-disclaimer.png) |
 
-### 四档主题
+### 主题
 
 | 亮色（默认） | 暗色 |
 |---|---|
@@ -155,17 +155,64 @@
 |---|---|
 | ![护眼](docs/screenshots/20-theme-sepia.png) | ![Metro](docs/screenshots/21-theme-metro.png) |
 
+| 深夜蓝 | 护眼绿 |
+|---|---|
+| ![深夜](docs/screenshots/22-theme-night.png) | ![护眼绿](docs/screenshots/23-theme-forest.png) |
+
+| 暖灰 | 高对比 |
+|---|---|
+| ![暖灰](docs/screenshots/24-theme-warm.png) | ![高对比](docs/screenshots/25-theme-contrast.png) |
+
+| 自定义图片背景（可调压暗与模糊） | 设置 · 外观（8 档主题一次看全） |
+|---|---|
+| ![背景图](docs/screenshots/26-background.png) | ![主题面板](docs/screenshots/27-themes-panel.png) |
+
+## 插件市场（主题扩展包）
+
+除了内置的 8 档主题，还可以从**插件市场**装第三方配色。市场只下发颜色令牌，不下发代码。
+
+**两个源，同一份 schema**：优先镜像站 `contact/plugins.php`，失败自动回落到
+`raw.githubusercontent.com/QiuXiYueShiJiu/QX-PDFreader/main/plugins/index.json`。
+只在**打开市场面板时**拉一次清单（10 分钟缓存），不随启动联网。
+
+| 收录 | 作者 | 说明 |
+|---|---|---|
+| 青岚 `qinglan` | 秋夕月拾旧 | 青绿冷调护眼配色，低饱和低对比 |
+
+包格式（`plugins/<id>.json`，颜色写 `R G B` 或 `#hex`）：
+
+```json
+{
+  "id": "qinglan",
+  "name": "青岚",
+  "version": "1.0.0",
+  "author": "秋夕月拾旧",
+  "desc": "一句话说明，120 字以内",
+  "theme": {
+    "accent": "#2f7d6d", "bg": "#eef5f2", "surface": "#f8fbfa",
+    "text": "#20302c", "muted": "#5d746e", "border": "#cfe0da",
+    "readerBg": "#e7f0ec"
+  }
+}
+```
+
+提交一个主题包：① 加 `plugins/<id>.json`；② 在 `plugins/index.json` 的 `items` 里加同一条
+（颜色归一成 `R G B`）；③ `count` +1；④ 提 PR。合并后客户端下次打开市场即可看到。
+
+校验规则：七色齐全、`R G B` 每段 0–255、`id`/`name` 非空、`desc` ≤ 120 字；
+任一条不合法会被服务器与客户端**双向丢弃**（面板里不会出现半个坏包）。
+
 ---
 
 ## 下载与安装
 
 到本仓库的 **Releases** 页面下载：
 
-- 文件名：`秋夕-PDF阅读器-1.0.3.0-安装程序.exe`
+- 文件名：`秋夕-PDF阅读器-1.0.5.2-安装程序.exe`
 - 双击安装，可自选安装目录；
 - 「选择附加任务」页可分别勾选**桌面快捷方式**与**开始菜单快捷方式**（默认都勾，开始菜单统一放在「秋夕-教学软件」文件夹）；
-- 静默安装（批量部署）：`秋夕-PDF阅读器-1.0.3.0-安装程序.exe /S`
-- 校验：同一 Release 附有 `SHA256SUMS.txt`，可用 `certutil -hashfile 秋夕-PDF阅读器-1.0.3.0-安装程序.exe SHA256` 对比。
+- 静默安装（批量部署）：`秋夕-PDF阅读器-1.0.5.2-安装程序.exe /S`
+- 校验：同一 Release 附有 `SHA256SUMS.txt`，可用 `certutil -hashfile 秋夕-PDF阅读器-1.0.5.2-安装程序.exe SHA256` 对比。
 
 系统要求：Windows 10 / 11（x64）。安装包未做代码签名，首次运行若出现 SmartScreen 提示，选择「更多信息 → 仍要运行」。
 
@@ -202,61 +249,8 @@
 
 - **文档不上传**：PDF 的打开、渲染、批注、OCR 全在本机完成；
 - **不收集**：没有账号、没有埋点、没有崩溃上报；
-- **联网只有两类，都可关**：① 启动后（设置里可关）与设置页手动的「检查更新」，只取版本信息；② 打开「插件市场」面板时拉一次主题清单（先镜像站、失败再回落 GitHub raw）。两类请求都不带文档内容、账号或机器标识；
+- **联网只有两类，都可关**：① 启动后（设置里可关）与设置页手动的「检查更新」，只取 GitHub Releases 与本项目镜像站的版本信息；② 打开插件市场面板时拉一次主题清单（10 分钟缓存，先镜像站、失败回落 GitHub raw）。两类请求都不带文档内容、账号或机器标识；
 - **数据位置**：最近文件、阅读位置、批注、设置都在 `%APPDATA%\秋夕月拾旧-PDF阅读器`，删掉即恢复初始状态。
-
----
-
-## 插件市场
-
-主题不只是内置的那几档：市场里的每个包只包含**颜色令牌**，客户端不接受任何代码，所以第三方包最多改变配色，不能执行任何东西。
-
-在客户端里点「插件市场」即可浏览与一键启用。条目来源于两个同构的源，客户端先试镜像站、失败再回落 GitHub：
-
-| 源 | 地址 |
-|---|---|
-| 镜像站（首选） | `https://<站点域名>/contact/plugins.php` |
-| GitHub（回落） | `https://raw.githubusercontent.com/QiuXiYueShiJiu/QX-PDFreader/main/plugins/index.json` |
-
-### 收录了什么
-
-| id | 名称 | 作者 | 说明 |
-|---|---|---|---|
-| `qinglan` | 青岚 | 秋夕月拾旧 | 青绿冷调的护眼配色：低饱和、低对比，长晚自习看久了眼睛不酸 |
-
-完整清单见 [`plugins/index.json`](plugins/index.json)，人读版见 [docs/plugins.md](docs/plugins.md)。
-
-### 提交一个主题包
-
-1. Fork 本仓库；
-2. 新建 `plugins/<id>.json`，按下面的 schema 写颜色；
-3. 在 `plugins/index.json` 的 `items` 里加一条同构条目，并把 `count` 加一；
-4. 提 PR，说明配色意图与适用场景。
-
-```json
-{
-  "id": "qinglan",
-  "name": "青岚",
-  "version": "1.0.0",
-  "author": "秋夕月拾旧",
-  "desc": "一句话说明，≤ 120 字",
-  "theme": {
-    "accent": "#2f7d6d",
-    "bg": "#eef5f2",
-    "surface": "#f8fbfa",
-    "text": "#20302c",
-    "muted": "#5d746e",
-    "border": "#cfe0da",
-    "readerBg": "#e7f0ec"
-  }
-}
-```
-
-规则（不符合的条目客户端会跳过）：
-
-- 颜色只能是 `R G B` 三段 0–255 的数字，或 `#rrggbb`；七个键 `accent` `bg` `surface` `text` `muted` `border` `readerBg` 缺一不可；
-- `desc` ≤ 120 字，`name` ≤ 40 字，`id` 用小写字母与连字符；
-- 不放脚本、可执行文件、外链图片与任何令牌——市场只下发配色。
 
 ---
 
