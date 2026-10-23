@@ -10,7 +10,7 @@
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4" />
   <img alt="electron" src="https://img.shields.io/badge/Electron-33-47848F" />
   <img alt="react" src="https://img.shields.io/badge/React-18-61DAFB" />
-  <img alt="version" src="https://img.shields.io/badge/version-1.0.6.1-2E7D32" />
+  <img alt="version" src="https://img.shields.io/badge/version-1.0.6.2-2E7D32" />
   <img alt="license" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-orange" />
 </p>
 
@@ -106,7 +106,7 @@
 
 ## 界面与功能截图
 
-> 截图均取自标准版（1.0.6.1），隐藏窗口 + 1800×1125 视口，未做任何后期修改。
+> 截图均取自标准版（1.0.6.2），隐藏窗口 + 1800×1125 视口，未做任何后期修改。
 
 ### 阅读与导航
 
@@ -144,33 +144,35 @@
 
 ### 设置与更新
 
-| 设置 · 外观（9 档主题 + 阅读区底色 + 背景图 + 界面缩放） | 设置 · 阅读（缩放 / 位置 / 快捷键） |
+| 设置 · 外观（3 个主题包 + 9 档配色 + 强调色 + 背景图 + 界面缩放） | 设置 · 阅读（缩放 / 位置 / 快捷键） |
 |---|---|
-| ![设置外观](docs/screenshots/15-settings-appearance.png) | ![设置阅读](docs/screenshots/16-settings-reading.png) |
+| ![设置外观](docs/screenshots/18-settings-appearance.png) | ![设置阅读](docs/screenshots/19-settings-reading.png) |
 
 | 发现新版本（自动下载后可一键安装） | 启动声明浮层 |
 |---|---|
-| ![更新](docs/screenshots/17-update.png) | ![声明](docs/screenshots/18-disclaimer.png) |
+| ![更新](docs/screenshots/20-update.png) | ![声明](docs/screenshots/21-disclaimer.png) |
+
+### 课堂遮罩（触屏可拖）
+
+| 聚光灯（光圈内保持亮度） | 黑屏（讲评时全屏压暗） |
+|---|---|
+| ![聚光灯](docs/screenshots/15-spotlight.png) | ![黑屏](docs/screenshots/16-blackboard.png) |
+
+| 放大镜（洞内跟随放大） | 画笔手写（三色压感笔迹） |
+|---|---|
+| ![放大镜](docs/screenshots/17-magnifier.png) | ![画笔](docs/screenshots/07-pen.png) |
 
 ### 主题
 
-| 亮色（默认） | 暗色 |
+| 暗色 | 米黄护眼（默认） |
 |---|---|
-| ![亮色](docs/screenshots/01-main.png) | ![暗色](docs/screenshots/19-theme-dark.png) |
+| ![暗色](docs/screenshots/22-theme-dark.png) | ![护眼](docs/screenshots/23-theme-sepia.png) |
 
-| 护眼（米黄） | Metro（扁平蓝） |
+| Metro（直角扁平） | 液态玻璃（半透明磨砂 + 可调圆角/模糊） |
 |---|---|
-| ![护眼](docs/screenshots/20-theme-sepia.png) | ![Metro](docs/screenshots/21-theme-metro.png) |
+| ![Metro](docs/screenshots/24-theme-metro.png) | ![液态玻璃](docs/screenshots/25-theme-glass.png) |
 
-| 深夜蓝 | 护眼绿 |
-|---|---|
-| ![深夜](docs/screenshots/22-theme-night.png) | ![护眼绿](docs/screenshots/23-theme-forest.png) |
-
-| 暖灰 | 高对比 |
-|---|---|
-| ![暖灰](docs/screenshots/24-theme-warm.png) | ![高对比](docs/screenshots/25-theme-contrast.png) |
-
-| 自定义图片背景（可调压暗与模糊） | 设置 · 外观（9 档配色一次看全） |
+| 自定义图片背景（可调压暗与模糊） | 设置 · 外观（三个主题包与九档配色一次看全） |
 |---|---|
 | ![背景图](docs/screenshots/26-background.png) | ![主题面板](docs/screenshots/27-themes-panel.png) |
 
@@ -215,11 +217,11 @@
 
 到本仓库的 **Releases** 页面下载：
 
-- 文件名：`秋夕-PDF阅读器-1.0.6.1-安装程序.exe`
+- 文件名：`秋夕-PDF阅读器-1.0.6.2-安装程序.exe`
 - 双击安装，可自选安装目录；
 - 「选择附加任务」页可分别勾选**桌面快捷方式**与**开始菜单快捷方式**（默认都勾，开始菜单统一放在「秋夕-教学软件」文件夹）；
-- 静默安装（批量部署）：`秋夕-PDF阅读器-1.0.6.1-安装程序.exe /S`
-- 校验：同一 Release 附有 `SHA256SUMS.txt`，可用 `certutil -hashfile 秋夕-PDF阅读器-1.0.6.1-安装程序.exe SHA256` 对比。
+- 静默安装（批量部署）：`秋夕-PDF阅读器-1.0.6.2-安装程序.exe /S`
+- 校验：同一 Release 附有 `SHA256SUMS.txt`，可用 `certutil -hashfile 秋夕-PDF阅读器-1.0.6.2-安装程序.exe SHA256` 对比。
 
 系统要求：Windows 10 / 11（x64）。安装包未做代码签名，首次运行若出现 SmartScreen 提示，选择「更多信息 → 仍要运行」。
 
