@@ -202,8 +202,61 @@
 
 - **文档不上传**：PDF 的打开、渲染、批注、OCR 全在本机完成；
 - **不收集**：没有账号、没有埋点、没有崩溃上报；
-- **唯一联网行为**：启动后（可在设置里关闭）与设置页手动触发的「检查更新」，只请求 GitHub Releases 与本项目镜像站的版本信息，不上传任何文件或标识；
+- **联网只有两类，都可关**：① 启动后（设置里可关）与设置页手动的「检查更新」，只取版本信息；② 打开「插件市场」面板时拉一次主题清单（先镜像站、失败再回落 GitHub raw）。两类请求都不带文档内容、账号或机器标识；
 - **数据位置**：最近文件、阅读位置、批注、设置都在 `%APPDATA%\秋夕月拾旧-PDF阅读器`，删掉即恢复初始状态。
+
+---
+
+## 插件市场
+
+主题不只是内置的那几档：市场里的每个包只包含**颜色令牌**，客户端不接受任何代码，所以第三方包最多改变配色，不能执行任何东西。
+
+在客户端里点「插件市场」即可浏览与一键启用。条目来源于两个同构的源，客户端先试镜像站、失败再回落 GitHub：
+
+| 源 | 地址 |
+|---|---|
+| 镜像站（首选） | `https://<站点域名>/contact/plugins.php` |
+| GitHub（回落） | `https://raw.githubusercontent.com/QiuXiYueShiJiu/QX-PDFreader/main/plugins/index.json` |
+
+### 收录了什么
+
+| id | 名称 | 作者 | 说明 |
+|---|---|---|---|
+| `qinglan` | 青岚 | 秋夕月拾旧 | 青绿冷调的护眼配色：低饱和、低对比，长晚自习看久了眼睛不酸 |
+
+完整清单见 [`plugins/index.json`](plugins/index.json)，人读版见 [docs/plugins.md](docs/plugins.md)。
+
+### 提交一个主题包
+
+1. Fork 本仓库；
+2. 新建 `plugins/<id>.json`，按下面的 schema 写颜色；
+3. 在 `plugins/index.json` 的 `items` 里加一条同构条目，并把 `count` 加一；
+4. 提 PR，说明配色意图与适用场景。
+
+```json
+{
+  "id": "qinglan",
+  "name": "青岚",
+  "version": "1.0.0",
+  "author": "秋夕月拾旧",
+  "desc": "一句话说明，≤ 120 字",
+  "theme": {
+    "accent": "#2f7d6d",
+    "bg": "#eef5f2",
+    "surface": "#f8fbfa",
+    "text": "#20302c",
+    "muted": "#5d746e",
+    "border": "#cfe0da",
+    "readerBg": "#e7f0ec"
+  }
+}
+```
+
+规则（不符合的条目客户端会跳过）：
+
+- 颜色只能是 `R G B` 三段 0–255 的数字，或 `#rrggbb`；七个键 `accent` `bg` `surface` `text` `muted` `border` `readerBg` 缺一不可；
+- `desc` ≤ 120 字，`name` ≤ 40 字，`id` 用小写字母与连字符；
+- 不放脚本、可执行文件、外链图片与任何令牌——市场只下发配色。
 
 ---
 
