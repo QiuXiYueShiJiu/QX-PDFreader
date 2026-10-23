@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "id": "hupo",
+  "name": "琥珀",
+  "version": "1.0.0",
+  "author": "秋夕月拾旧",
+  "desc": "暖琥珀底 + 焦糖强调，像旧书纸，晚间阅读比纯白柔和",
+  "theme": {
+    "accent": "#b5651d",
+    "bg": "#f7efe2",
+    "surface": "#fdf8f0",
+    "text": "#3a2f24",
+    "muted": "#7a6a58",
+    "border": "#e2d4c0",
+    "readerBg": "#f2e8d8"
+  }
+}

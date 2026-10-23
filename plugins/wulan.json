@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "id": "wulan",
+  "name": "雾蓝",
+  "version": "1.0.0",
+  "author": "秋夕月拾旧",
+  "desc": "雾灰蓝底 + 靛蓝强调，投影时画面不刺眼，适合长时间讲评",
+  "theme": {
+    "accent": "#4c6ef5",
+    "bg": "#eef2f9",
+    "surface": "#ffffff",
+    "text": "#1b2436",
+    "muted": "#5d6b85",
+    "border": "#d3dcec",
+    "readerBg": "#e7edf7"
+  }
+}
