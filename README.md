@@ -10,7 +10,7 @@
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4" />
   <img alt="electron" src="https://img.shields.io/badge/Electron-33-47848F" />
   <img alt="react" src="https://img.shields.io/badge/React-18-61DAFB" />
-  <img alt="version" src="https://img.shields.io/badge/version-1.0.6.0-2E7D32" />
+  <img alt="version" src="https://img.shields.io/badge/version-1.0.6.1-2E7D32" />
   <img alt="license" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-orange" />
 </p>
 
@@ -42,7 +42,7 @@
 | 全文搜索 | `Ctrl + F`，结果按页列出并高亮，点一条直接跳过去 |
 | 多标签 | 一次打开多份文档，标签可拖动排序，关闭前提示未导出编辑 |
 | 旋转 | 90° 循环旋转，画布与文字层同步 |
-| 主题 | **3 个主题包、9 档配色**：默认包（亮色 / 暖灰 / 米黄护眼 / 护眼绿 / 深色 / 深夜蓝 / 高对比）、Metro（直角扁平）、**液态玻璃**（半透明磨砂 + 可调圆角与模糊） |
+| 主题 | **3 个主题包、9 档配色**：默认包（亮色 / 暖灰 / 米黄护眼 / 护眼绿 / 深色 / 深夜蓝 / 高对比）、Metro（直角扁平）、**液态玻璃**（半透明磨砂 + 可调圆角与模糊）。三个包共用一组强调色预设（8 色）+ 取色器，主色随时可换 |
 | 记忆 | 记住上次阅读位置、最近文件、界面缩放 |
 | 自动更新 | 静默检查 **GitHub Releases 与镜像站（并行取较新者）**，查到即提示并自动下载，装不装由你决定；设置页可只用 GitHub / 只用镜像站，也能手动检查 |
 
@@ -106,7 +106,7 @@
 
 ## 界面与功能截图
 
-> 截图均取自标准版（1.0.6.0），隐藏窗口 + 1800×1125 视口，未做任何后期修改。
+> 截图均取自标准版（1.0.6.1），隐藏窗口 + 1800×1125 视口，未做任何后期修改。
 
 ### 阅读与导航
 
@@ -215,11 +215,11 @@
 
 到本仓库的 **Releases** 页面下载：
 
-- 文件名：`秋夕-PDF阅读器-1.0.6.0-安装程序.exe`
+- 文件名：`秋夕-PDF阅读器-1.0.6.1-安装程序.exe`
 - 双击安装，可自选安装目录；
 - 「选择附加任务」页可分别勾选**桌面快捷方式**与**开始菜单快捷方式**（默认都勾，开始菜单统一放在「秋夕-教学软件」文件夹）；
-- 静默安装（批量部署）：`秋夕-PDF阅读器-1.0.6.0-安装程序.exe /S`
-- 校验：同一 Release 附有 `SHA256SUMS.txt`，可用 `certutil -hashfile 秋夕-PDF阅读器-1.0.6.0-安装程序.exe SHA256` 对比。
+- 静默安装（批量部署）：`秋夕-PDF阅读器-1.0.6.1-安装程序.exe /S`
+- 校验：同一 Release 附有 `SHA256SUMS.txt`，可用 `certutil -hashfile 秋夕-PDF阅读器-1.0.6.1-安装程序.exe SHA256` 对比。
 
 系统要求：Windows 10 / 11（x64）。安装包未做代码签名，首次运行若出现 SmartScreen 提示，选择「更多信息 → 仍要运行」。
 
