@@ -20,14 +20,72 @@ export type RightTab = 'info' | 'annotations'
  * metro = Metro UI（Windows 10 开始菜单 / 磁贴那一套）：
  *   平直色块、直角、Segoe UI、单一强调色，不用阴影和圆角。
  */
-export type ThemeMode = 'light' | 'dark' | 'sepia' | 'metro'
+export type ThemeMode =
+  | 'light'
+  | 'dark'
+  | 'sepia'
+  | 'metro'
+  | 'glass'
+  | 'night'
+  | 'forest'
+  | 'warm'
+  | 'contrast'
+  /** 2026-10-24 新增四档：纸墨 / 午夜蓝 / 青梅 / 柔光 */
+  | 'paper'
+  | 'midnight'
+  | 'plum'
+  | 'glow'
+  /** 插件市场装的主题包：具体校验值存在 settings.customThemes 里 */
+  | 'custom'
+
+/**
+ * 界面布局。
+ *
+ * normal 是原来的紧凑工具条；office 是 Office 2019 式的功能区（Ribbon）：
+ * 更高的条带、图标在上文字在下、直角、强调色下划线。布局只管结构，
+ * 配色仍然由 theme 决定 —— 两者互不影响，可以任意组合。
+ */
+export type ThemeLayout = 'normal' | 'office'
+
+/** 主题包：来自插件市场的可安装主题（校验值与内置主题同构） */
+export interface CustomTheme {
+  id: string
+  name: string
+  /** 主色，用于卡片与按钮 */
+  accent: string
+  /** 各区域 RGB 三元组字符串，例如 242 244 248 */
+  bg: string
+  surface: string
+  text: string
+  muted: string
+  border: string
+  readerBg: string
+}
 
 /** 阅读器设置（持久化） */
 export interface ReaderSettings {
   version: number
   theme: ThemeMode
+  /** 布局：紧凑工具条 / Office 2019 功能区；与配色解耦 */
+  themeLayout: ThemeLayout
   /** 阅读区底色，与主题独立，便于护眼 */
   pageBackground: string
+  /** 阅读区背景图片的绝对路径（空串表示不用图片） */
+  readerImage: string
+  /** 背景图的压暗程度 0~0.85 */
+  readerImageDim: number
+  /** 背景图的模糊半径 0~24px */
+  readerImageBlur: number
+  /** 液态玻璃主题包：圆角半径（px，0~24） */
+  glassRadius: number
+  /** 液态玻璃主题包：背景模糊（px，0~30） */
+  glassBlur: number
+  /** 强调色覆盖（空串表示跟随主题）。十六进制 #rrggbb */
+  accentColor: string
+  /** 插件市场装的主题包 */
+  customThemes: CustomTheme[]
+  /** 当前正在使用的主题包 id（theme='custom' 时生效） */
+  customThemeId: string
   /** 默认缩放：'fit-width' | 'fit-page' | 'actual' | 数字 */
   defaultZoom: 'fit-width' | 'fit-page' | 'actual' | number
   /** 每次打开是否恢复上次阅读位置 */
@@ -57,7 +115,7 @@ export interface ReaderSettings {
    * 设置页里的「检查更新」按钮不受这个开关影响。
    */
   updateAutoCheck: boolean
-  /** 公开版更新通道偏好（特供版忽略） */
+  /** 公开版更新通道偏好（静默部署版忽略） */
   updateChannel: 'auto' | 'github' | 'mirror'
 }
 
@@ -244,4 +302,6 @@ export interface OpenResult {
   error?: string
   /** 文件绝对路径 */
   path?: string
+  /** 标签上显示的名字（图片转 PDF 时保留原文件名） */
+  title?: string
 }

@@ -14,12 +14,13 @@
  * 单实例：文件关联双击时需要把新文件交给已运行实例打开，而不是开新窗口。
  */
 
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, screen, shell } from 'electron'
-import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, net, protocol, screen, shell } from 'electron'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { writeFile } from 'node:fs/promises'
-import { basename, extname, join, normalize, resolve } from 'node:path'
+import { basename, dirname, extname, join, normalize, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { PDFDocument } from 'pdf-lib'
+import { PDFDocument, rgb as pdfRgb } from 'pdf-lib'
 import { diagEnabled, diagLine, diagLogPath, diagMarkerPath, initDiagLog } from './diag-log'
 import {
   getSettings,
@@ -33,6 +34,11 @@ import type { Annotation, OpenResult } from '@shared/types'
 import { checkForUpdate, currentVersion, downloadUpdate, installUpdate } from './updater'
 import { registerPdfAdvancedIpc } from './pdf-advanced'
 import { registerPdfToolsIpc } from './pdf-tools'
+import { isThumbFresh, saveThumb, thumbPath } from './thumbs'
+import { ensureShellThumb } from './shell-thumb'
+
+/* 关联的图片格式：打开时先转一页 PDF，之后缩放/批注/OCR 都能用 */
+const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']
 
 /**
  * ★ 必须在模块加载时立刻声明特权协议，位置不能挪到文件底部。
@@ -161,13 +167,45 @@ let allowClose = false
 
 
 /**
+ * ★ 缩略图模式（`--render-thumb <pdf> [<out.png>]`）。
+ *
+ * ── 为什么要有它 ──────────────────────────────────────────────
+ *   资源管理器要显示 PDF 缩略图，必须有一个注册到 shell 的 COM 提供器
+ *   （IThumbnailProvider）。而渲染 PDF 是本程序的事（pdf.js），C# 这侧不重复造轮子：
+ *   提供器只做三件事 —— 查缓存、唤起本程序渲染一页、把 PNG 交回 explorer。
+ *
+ * ── 为什么是「唤起一次进程」而不是常驻服务 ──────────────────────
+ *   常驻服务要处理开机自启、崩溃重连、多用户会话、升级替换 —— 成本远高于收益。
+ *   缩略图只在用户浏览文件夹时按需请求，而且第一次渲染后就命中缓存，
+ *   所以「按需起一个隐藏进程、渲完就退」在实际使用里几乎无感。
+ *   提供器侧用全局互斥串行化，避免一屏 30 个 PDF 同时起 30 个 Electron。
+ */
+const THUMB_FLAG = '--render-thumb'
+const thumbArgIndex = process.argv.indexOf(THUMB_FLAG)
+const THUMB_MODE = thumbArgIndex > 0
+const THUMB_SOURCE = THUMB_MODE ? resolve(process.argv[thumbArgIndex + 1] ?? '') : ''
+const THUMB_TARGET = THUMB_MODE
+  ? resolve(process.argv[thumbArgIndex + 2] ?? thumbPath(THUMB_SOURCE))
+  : ''
+
+/** 缩略图模式下一次渲染的超时（毫秒）：超时就交白卷，让 explorer 落回图标 */
+const THUMB_TIMEOUT_MS = 20000
+
+/** 渲染层把 dataURL 送回来的「等待者」；thumb 模式下只会有一次 */
+let thumbResolve: ((dataUrl: string | null) => void) | null = null
+
+/**
  * 单实例锁。
  *
  * 文件关联双击 PDF 时，Windows 会再启动一次本程序并带上文件路径。
  * 若开两个实例，阅读位置与最近列表会互相覆盖，因此第二个实例
  * 直接把文件转交给已有实例处理，然后退出。
+ *
+ * ★ 缩略图模式例外：它由 shell 缩略图提供器唤起，**不建可见窗口、不碰设置**，
+ *   而且经常发生在主窗口开着的时候 —— 一旦走锁，argv 会被转发给已有实例
+ *   然后本进程直接退出（缩略图永远渲不出来），所以这里必须跳过锁。
  */
-const gotLock = app.requestSingleInstanceLock()
+const gotLock = THUMB_MODE ? true : app.requestSingleInstanceLock()
 
 if (!gotLock) {
   app.quit()
@@ -227,7 +265,97 @@ async function onReady(): Promise<void> {
 
   registerPdfProtocol()
   registerIpc()
+
+  /* 资源管理器缩略图注册：幂等、免管理员、失败不影响启动 */
+  void ensureShellThumb()
+
+  /* 缩略图模式不建主窗口：只需要一个隐藏的离屏窗口渲一页就退出 */
+  if (THUMB_MODE) {
+    await runThumbMode()
+    return
+  }
+
   createMainWindow()
+}
+
+/**
+ * `--render-thumb` 的完整流程：建隐藏窗口 → 等渲染层要任务 → 拿到 dataURL → 写 PNG → 退出。
+ *
+ * 退出码约定（供 C# 提供器判断）：
+ *   0 = 已写出缩略图
+ *   1 = 渲染失败/超时（提供器落回图标，不重试爆炸）
+ *   2 = 源文件不存在
+ */
+async function runThumbMode(): Promise<void> {
+  if (!existsSync(THUMB_SOURCE)) {
+    console.warn('[thumb] 源文件不存在：', THUMB_SOURCE)
+    app.exit(2)
+    return
+  }
+
+  console.log('[thumb] 渲染缩略图：', THUMB_SOURCE, '→', THUMB_TARGET)
+
+  const win = new BrowserWindow({
+    show: false,
+    width: 960,
+    height: 1200,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.cjs'),
+      sandbox: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+      // 隐藏窗口会被 Chromium 降频，关掉才能保证 rAF/定时器正常跑完一帧
+      backgroundThrottling: false
+    }
+  })
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+
+  const done = new Promise<string | null>((resolveDone) => {
+    thumbResolve = resolveDone
+    const timer = setTimeout(() => {
+      console.warn('[thumb] 超时未拿到缩略图')
+      resolveDone(null)
+    }, THUMB_TIMEOUT_MS)
+    timer.unref?.()
+  })
+
+  const query = 'thumb=1'
+  const appRoot = readAppRootArg(process.argv)
+  const devUrl = process.env['ELECTRON_RENDERER_URL']
+  if (devUrl) {
+    await win.loadURL(`${devUrl}?${query}`)
+  } else if (appRoot) {
+    await win.loadFile(join(appRoot, 'out', 'renderer', 'index.html'), { search: query })
+  } else {
+    await win.loadFile(join(__dirname, '../renderer/index.html'), { search: query })
+  }
+
+  const dataUrl = await done
+  if (!dataUrl) {
+    app.exit(1)
+    return
+  }
+  const out = saveThumb(THUMB_SOURCE, dataUrl)
+  if (!out) {
+    console.warn('[thumb] 写缓存失败')
+    app.exit(1)
+    return
+  }
+  /* 允许命令行显式指定输出位置（测试/调试用）：额外再写一份 */
+  if (THUMB_TARGET && resolve(THUMB_TARGET) !== resolve(out)) {
+    try {
+      const match = /^data:image\/png;base64,(.+)$/.exec(dataUrl)
+      if (match) {
+        mkdirSync(dirname(THUMB_TARGET), { recursive: true })
+        writeFileSync(THUMB_TARGET, Buffer.from(match[1], 'base64'))
+        console.log('[thumb] 另存：', THUMB_TARGET)
+      }
+    } catch (err) {
+      console.warn('[thumb] 另存失败：', err)
+    }
+  }
+  console.log('[thumb] 完成：', out, statSync(out).size, 'B')
+  app.exit(0)
 }
 
 /*
@@ -281,7 +409,7 @@ function registerPdfProtocol(): void {
  *
  * ★ 必须处理 Chromium 的 URL 规范化（这是最隐蔽的一个坑）。
  *
- *   我们发出的是 `pdf-file:///C:/Users/a.pdf`（三段斜杠，盘符在路径里），
+ *   我们发出的是 `pdf-file:///C:/<user>/a.pdf`（三段斜杠，盘符在路径里），
  *   但 Chromium 解析特权协议时会把它规范化为
  *       `pdf-file://c/Users/a.pdf`
  *   —— 盘符被降为小写并变成了 **host**，路径里不再有冒号。
@@ -311,7 +439,7 @@ function decodePathFromUrl(rawUrl: string): string | null {
     return normalize(`${host.toUpperCase()}:${pathname}`)
   }
 
-  // 情况二：盘符在路径里 —— pdf-file:///C:/Users/a.pdf
+  // 情况二：盘符在路径里 —— pdf-file:///C:/<user>/a.pdf
   if (/^\/[a-zA-Z]:[\\/]/.test(pathname)) {
     return normalize(pathname.slice(1))
   }
@@ -335,6 +463,25 @@ function decodePathFromUrl(rawUrl: string): string | null {
  * 不依赖外部的 -WindowStyle Hidden 之类的技巧（实测不可靠且难以排查）。
  */
 const HIDDEN_MODE = process.argv.includes('--hidden')
+/*
+ * ★ 录屏模式（QX_CAPTURE=1）：窗口不显示在屏幕上，但保持「可见」状态并关掉节流，
+ *   这样 Page.startScreencast 才能持续出帧（隐藏窗口没有合成帧，screencast 只会零星来几张）。
+ *   窗口被挪到屏幕外 + 不进任务栏，用户看不到任何东西。
+ */
+const CAPTURE_MODE = process.env.QX_CAPTURE === '1'
+
+
+/** 插件市场清单的内存缓存（10 分钟内复用） */
+/**
+ * 市场源可被测试替换（**仅 --test-hooks 下生效**）。
+ *
+ * 为什么需要：清单的校验与「两源回落」是纯逻辑，但它读的是写死的两个公网 URL，
+ * 离线测试既不能依赖公网、也不能往真服务器塞坏包。测试期用本地 http 服务器喂
+ * 正常包 / 坏包 / 404 / 连不上四种情况，覆盖回落与丢弃逻辑。
+ */
+let MARKET_SOURCES: { name: string; url: string }[] | null = null
+
+let MARKET_CACHE: { at: number; value: { ok: boolean; items: unknown[]; at: number; source?: string } } | null = null
 
 /**
  * 原生对话框探针（**只在自动化测试里打开**）。
@@ -566,7 +713,7 @@ function createMainWindow(): void {
        *     · 一次内容编辑冒烟从 10s 变成 229s。
        *   真机用户看不见窗口时省电是好事，只有隐藏实例需要「照常跑」。
        */
-      backgroundThrottling: !HIDDEN_MODE
+      backgroundThrottling: !(HIDDEN_MODE && !CAPTURE_MODE)
     }
   })
 
@@ -583,7 +730,13 @@ function createMainWindow(): void {
     }
 
     // 隐藏模式下不调用 show()，窗口始终不出现在屏幕上
-    if (!HIDDEN_MODE) {
+    if (CAPTURE_MODE && mainWindow) {
+      // 录屏：挪到屏幕外再 showInactive，既不抢焦点也不出现在用户眼前
+      mainWindow.setSkipTaskbar(true)
+      mainWindow.setPosition(-4000, -3000)
+      mainWindow.showInactive()
+      console.log('[pdf] 录屏模式：窗口置于屏幕外，仅用于抓帧')
+    } else if (!HIDDEN_MODE) {
       mainWindow?.show()
     } else {
       console.log('[pdf] 隐藏模式：窗口不显示（供自动化测试使用）')
@@ -747,15 +900,20 @@ function readAppRootArg(argv: string[]): string | null {
  * 打开文件
  * ============================================================ */
 
-/** 从命令行参数里挑出第一个像 PDF 的路径 */
+/**
+ * 从命令行参数里挑出第一个可打开的路径（PDF 或图片）。
+ *
+ * ★ 2026-10-23：以前这里只认 `.pdf`，于是双击图片（注册表明明指向本程序）
+ * 会被当成"没有文件参数"直接开空窗口 —— 用户看到的就是"图片格式不支持"。
+ * 图片在主进程里会先转成一页 PDF（见 imageToPdfFile），所以这里放行即可。
+ */
 function extractFileArg(argv: string[]): string | null {
   for (const arg of argv.slice(1)) {
     if (arg.startsWith('-')) continue
     const ext = extname(arg).toLowerCase()
-    if (ext === '.pdf') {
-      const abs = resolve(arg)
-      if (existsSync(abs)) return abs
-    }
+    if (ext !== '.pdf' && !IMAGE_EXTS.includes(ext)) continue
+    const abs = resolve(arg)
+    if (existsSync(abs)) return abs
   }
   return null
 }
@@ -783,6 +941,163 @@ const SEND_DEDUPE_MS = 800
  *
  * 校验放在主进程做：渲染层拿不到 fs，无法自行判断文件是否存在、是否可读。
  */
+/**
+ * 图片转单页 PDF。
+ *
+ * 用 Electron 自带的 nativeImage 解码（png / jpg / webp / bmp / gif 都能读），
+ * 再交给 pdf-lib 排版，省掉一整套图片解码依赖。
+ *
+ * ★ 2026-10-24 提速（用户反馈"图片加载有点慢"）：
+ *   1. **结果缓存**：key = 绝对路径 + mtime + size 的 sha1，命中就直接返回，
+ *      第二次打开同一张图不再解码 / 重编码（之前每次都是全流程重做）。
+ *      缓存放在 userData/image-cache，按 48 个文件 / 7 天滚动清理。
+ *   2. **能直嵌就不重编码**：JPEG 源直接把原始字节塞进 PDF（省掉 toPNG 的
+ *      一次解码 + PNG 压码，10MP 图这一项就是好几百毫秒）。
+ *   3. **先缩小再编码**：超过 1600px 的图先 resize 到 1600 再编码/直嵌，
+ *      避免把 4000×3000 的整张 PNG 写进 PDF。
+ */
+function imageCacheKey(source: string): string {
+  const st = statSync(source)
+  return createHash('sha1')
+    .update(`${resolve(source)}|${st.mtimeMs}|${st.size}`)
+    .digest('hex')
+    .slice(0, 24)
+}
+
+/** 清掉过期缓存：保留最近 48 个，且删掉 7 天没被碰过的 */
+function pruneImageCache(dir: string): void {
+  try {
+    const files = readdirSync(dir)
+      .filter((name) => name.endsWith('.pdf'))
+      .map((name) => {
+        const full = join(dir, name)
+        const st = statSync(full)
+        return { full, at: st.mtimeMs, size: st.size }
+      })
+      .sort((a, b) => b.at - a.at)
+    const cutoff = Date.now() - 7 * 24 * 3600 * 1000
+    for (const [index, file] of files.entries()) {
+      if (index >= 48 || file.at < cutoff) rmSync(file.full, { force: true })
+    }
+  } catch {
+    /* 缓存清理失败不影响打开 */
+  }
+}
+
+async function imageToPdfFile(source: string): Promise<string> {
+  const dir = join(app.getPath('userData'), 'image-cache')
+  mkdirSync(dir, { recursive: true })
+
+  const key = imageCacheKey(source)
+  const cached = join(dir, `${key}.pdf`)
+  if (existsSync(cached)) {
+    /* 命中就刷新 mtime，让它排在"最近使用"里，不被滚动清理掉 */
+    try {
+      const now = new Date()
+      utimesSync(cached, now, now)
+    } catch {
+      /* 忽略 */
+    }
+    return cached
+  }
+
+  const image = nativeImage.createFromPath(source)
+  if (image.isEmpty()) throw new Error('无法解码这张图片')
+
+  const { width, height } = image.getSize()
+  if (!width || !height) throw new Error('图片尺寸异常')
+
+  const scale = Math.min(1600 / width, 1600 / height, 1)
+  const pageW = width * scale
+  const pageH = height * scale
+
+  const pdf = await PDFDocument.create()
+  const ext = extname(source).toLowerCase()
+  const resized = scale < 1 ? image.resize({ width: Math.round(pageW), height: Math.round(pageH) }) : image
+  let embedded
+  if (ext === '.jpg' || ext === '.jpeg') {
+    /* JPEG 直嵌：resize 之后的 toJPEG 仍然比 toPNG 快很多，体积也小 */
+    embedded = await pdf.embedJpg(resized.toJPEG(88))
+  } else {
+    embedded = await pdf.embedPng(resized.toPNG())
+  }
+
+  const page = pdf.addPage([pageW, pageH])
+  page.drawImage(embedded, { x: 0, y: 0, width: pageW, height: pageH })
+
+  await writeFile(cached, await pdf.save())
+  pruneImageCache(dir)
+  return cached
+}
+
+/* ---------------- 新建空白 PDF ---------------- */
+
+/** 常用纸张（pt）。A4 是默认值，教室打印最常用。 */
+const BLANK_SIZES: Record<string, [number, number]> = {
+  A4: [595.28, 841.89],
+  A3: [841.89, 1190.55],
+  Letter: [612, 792]
+}
+
+export interface BlankPdfSpec {
+  pages: number
+  size: 'A4' | 'A3' | 'Letter'
+  landscape: boolean
+  /** 纸面底色（十六进制）。默认纯白；米黄纸打印前肉眼更舒服。 */
+  background: string
+}
+
+/**
+ * 把渲染层传来的（不可信）参数收敛成合法值。
+ *
+ * 页数上限 200：再多也不是"新建空白"该干的事，而且 pdf-lib 生成会明显变慢。
+ */
+function normalizeBlankSpec(input: unknown): BlankPdfSpec {
+  const raw = (input ?? {}) as Partial<BlankPdfSpec>
+  const pages = Math.min(200, Math.max(1, Math.round(Number(raw.pages ?? 1) || 1)))
+  const size = (Object.keys(BLANK_SIZES).includes(String(raw.size)) ? String(raw.size) : 'A4') as BlankPdfSpec['size']
+  const hex = String(raw.background ?? '#ffffff').trim()
+  const background = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex.toLowerCase() : '#ffffff'
+  return { pages, size, landscape: Boolean(raw.landscape), background }
+}
+
+/**
+ * 生成一份空白 PDF 并返回路径。
+ *
+ * 文件名带时间戳，避免多次新建互相覆盖；目录在 userData/untitled，
+ * 属于"临时工作区"，导出时用户自己选位置。
+ */
+async function createBlankPdf(spec: BlankPdfSpec): Promise<string> {
+  const pdf = await PDFDocument.create()
+  const [shortSide, longSide] = BLANK_SIZES[spec.size]
+  const width = spec.landscape ? longSide : shortSide
+  const height = spec.landscape ? shortSide : longSide
+  const color = pdfRgb(
+    parseInt(spec.background.slice(1, 3), 16) / 255,
+    parseInt(spec.background.slice(3, 5), 16) / 255,
+    parseInt(spec.background.slice(5, 7), 16) / 255
+  )
+
+  for (let index = 0; index < spec.pages; index += 1) {
+    const page = pdf.addPage([width, height])
+    /* 白纸不用画（默认就是白），只有非白底才铺一层色块，省体积 */
+    if (spec.background !== '#ffffff') {
+      page.drawRectangle({ x: 0, y: 0, width, height, color })
+    }
+  }
+
+  pdf.setTitle('新建文档')
+  pdf.setCreator('秋夕-PDF阅读器')
+
+  const dir = join(app.getPath('userData'), 'untitled')
+  mkdirSync(dir, { recursive: true })
+  const stamp = new Date()
+  const name = `新建文档-${String(stamp.getMonth() + 1).padStart(2, '0')}${String(stamp.getDate()).padStart(2, '0')}-${String(stamp.getHours()).padStart(2, '0')}${String(stamp.getMinutes()).padStart(2, '0')}${String(stamp.getSeconds()).padStart(2, '0')}.pdf`
+  const target = join(dir, name)
+  await writeFile(target, await pdf.save())
+  return target
+}
+
 async function openFileInWindow(filePath: string): Promise<OpenResult> {
   const abs = resolve(filePath)
 
@@ -799,12 +1114,26 @@ async function openFileInWindow(filePath: string): Promise<OpenResult> {
     return { ok: false, error: `无法读取文件信息：${String(error)}` }
   }
 
-  if (extname(abs).toLowerCase() !== '.pdf') {
-    return { ok: false, error: '仅支持 PDF 格式' }
+  const ext = extname(abs).toLowerCase()
+  const isImage = IMAGE_EXTS.includes(ext)
+  if (ext !== '.pdf' && !isImage) {
+    return { ok: false, error: '仅支持 PDF 与常见图片格式（png / jpg / webp / bmp / gif）' }
   }
 
   if (size === 0) {
     return { ok: false, error: '文件为空' }
+  }
+
+  // 图片先转成一页 PDF，这样缩放、批注、OCR、导出全都直接可用
+  let target = abs
+  let title: string | undefined
+  if (isImage) {
+    try {
+      target = await imageToPdfFile(abs)
+      title = basename(abs)
+    } catch (error) {
+      return { ok: false, error: `这张图片打不开：${String(error)}` }
+    }
   }
 
   /*
@@ -817,20 +1146,20 @@ async function openFileInWindow(filePath: string): Promise<OpenResult> {
    *   以前两种都直接 return，文件就没了 —— 概率取决于首屏加载快慢。
    */
   if (!mainWindow || mainWindow.isDestroyed() || !rendererReady) {
-    queueOpen(abs)
+    queueOpen(target)
     console.log(
       `[pdf] 尚未就绪（窗口=${!!mainWindow && !mainWindow.isDestroyed()} 渲染层=${rendererReady}），已排队:`,
-      abs
+      target
     )
     // 窗口不在就先把它建出来，否则永远不会有人来冲洗队列
     if (!mainWindow || mainWindow.isDestroyed()) {
       createMainWindow()
     }
-    return { ok: true, path: abs }
+    return { ok: true, path: target, title }
   }
 
-  sendOpenToRenderer(abs, size)
-  return { ok: true, path: abs }
+  sendOpenToRenderer(target, size, title)
+  return { ok: true, path: target, title }
 }
 
 /**
@@ -839,7 +1168,7 @@ async function openFileInWindow(filePath: string): Promise<OpenResult> {
  * 反馈循环的最后一道防线：短时间内同一路径只发一次
  * （文件关联监听器 + 拖放可能对同一次操作各触发一遍）。
  */
-function sendOpenToRenderer(abs: string, size: number): void {
+function sendOpenToRenderer(abs: string, size: number, title?: string): void {
   if (!mainWindow || mainWindow.isDestroyed()) return
   const now = Date.now()
   if (abs === lastSentPath && now - lastSentAt < SEND_DEDUPE_MS) {
@@ -850,7 +1179,7 @@ function sendOpenToRenderer(abs: string, size: number): void {
   lastSentAt = now
 
   console.log('[pdf] 发送打开请求:', abs)
-  mainWindow.webContents.send('pdf:open', { path: abs, name: basename(abs), size })
+  mainWindow.webContents.send('pdf:open', { path: abs, name: title ?? basename(abs), size })
   // 更新窗口标题，任务栏与 Alt+Tab 里能看到正在读哪份文件
   mainWindow.setTitle(`${basename(abs)} - 秋夕-PDF阅读器`)
 }
@@ -890,6 +1219,38 @@ function registerIpc(): void {
     return true
   })
 
+  /* ============================================================
+   * 资源管理器缩略图（渲染层 ←→ 主进程 ←→ shell 提供器）
+   * ============================================================ */
+
+  /** 渲染层启动时问「要渲哪个文件」；非 thumb 模式下返回 pdfPath: '' */
+  ipcMain.handle('thumb:task', () => ({
+    mode: THUMB_MODE,
+    pdfPath: THUMB_SOURCE,
+    width: 512
+  }))
+
+  /** 渲染层交回 dataURL（thumb 模式的主链路） */
+  ipcMain.handle('thumb:done', (_e, dataUrl: string) => {
+    const resolveDone = thumbResolve
+    thumbResolve = null
+    resolveDone?.(typeof dataUrl === 'string' && dataUrl.startsWith('data:image/png') ? dataUrl : null)
+    return true
+  })
+
+  /** 正常打开 PDF 时顺手把首页缩略图写进缓存（走后门，不影响打开速度） */
+  ipcMain.handle('thumb:save', (_e, filePath: string, dataUrl: string) => {
+    if (typeof filePath !== 'string' || !filePath) return false
+    const out = saveThumb(filePath, dataUrl)
+    return out !== null
+  })
+
+  /** 已有新鲜缩略图就不必再渲一次（渲染层用它跳过重复工作） */
+  ipcMain.handle('thumb:fresh', (_e, filePath: string) => {
+    if (typeof filePath !== 'string' || !filePath) return false
+    return isThumbFresh(thumbPath(filePath), filePath)
+  })
+
   /**
    * 启动后静默查一次新版本（每个进程只查一次）。
    *
@@ -917,7 +1278,11 @@ function registerIpc(): void {
   ipcMain.handle('pdf:pick', async () => {
     const result = await dialog.showOpenDialog(mainWindow ?? undefined!, {
       title: '打开 PDF',
-      filters: [{ name: 'PDF 文档', extensions: ['pdf'] }],
+      filters: [
+        { name: 'PDF 与图片', extensions: ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] },
+        { name: 'PDF 文档', extensions: ['pdf'] },
+        { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] }
+      ],
       properties: ['openFile']
     })
     if (result.canceled || result.filePaths.length === 0) return null
@@ -926,6 +1291,55 @@ function registerIpc(): void {
 
   /** 打开指定路径（最近列表、拖放都会用到） */
   ipcMain.handle('pdf:open-path', (_e, filePath: string) => openFileInWindow(filePath))
+
+  /*
+   * 新建空白 PDF（2026-10-24，用户提的「没法新建空白 pdf」）。
+   *
+   * 只做「一叠白纸」：页数 / 纸张 / 方向 / 底色。生成后落在 userData 的
+   * untitled 目录里，当普通文档打开；要留存就用「导出 PDF」另存为。
+   */
+  ipcMain.handle('pdf:create-blank', async (_e, spec: unknown) => {
+    try {
+      const parsed = normalizeBlankSpec(spec)
+      const filePath = await createBlankPdf(parsed)
+      const opened = await openFileInWindow(filePath)
+      if (!opened.ok) return opened
+      return { ...opened, blank: true as const, pages: parsed.pages }
+    } catch (error) {
+      return { ok: false as const, error: `新建失败：${String(error)}` }
+    }
+  })
+
+  /* ---------- 阅读区背景图 ---------- */
+
+  ipcMain.handle('app:pick-background', async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: '窗口未就绪' }
+    const picked = await dialog.showOpenDialog(mainWindow, {
+      title: '选择阅读区背景图片',
+      properties: ['openFile'],
+      filters: [
+        { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'avif', 'bmp', 'gif', 'svg'] }
+      ]
+    })
+    if (picked.canceled || picked.filePaths.length === 0) return { ok: false, canceled: true }
+
+    const source = picked.filePaths[0]
+    const ext = extname(source).toLowerCase() || '.png'
+    const dir = join(app.getPath('userData'), 'backgrounds')
+    mkdirSync(dir, { recursive: true })
+    const target = join(dir, `reader-bg${ext}`)
+    try {
+      copyFileSync(source, target)
+      // 换格式时删掉上一张，避免 userData 里越堆越多
+      for (const old of readdirSync(dir)) {
+        if (old !== basename(target)) rmSync(join(dir, old), { force: true })
+      }
+      return { ok: true, path: target }
+    } catch (error) {
+      return { ok: false, error: `保存背景图失败：${String(error)}` }
+    }
+  })
+
 
   /* ---------- 设置 ---------- */
 
@@ -1168,7 +1582,20 @@ function registerIpc(): void {
   /* ---------- 关于面板 / 标签页标题 ---------- */
 
   /** 「关于」里的版本号取自 package.json，避免界面里硬编码一个会过期的号 */
-  ipcMain.handle('app:info', () => appVersionInfo())
+  /*
+ * 「默认应用」入口：Windows 10/11 不允许安装器直接改写 UserChoice，
+ * 只能把用户送到系统设置页让他自己点一次（见 installer.nsh.in 的
+ * Capabilities 注册）。这里只负责打开设置页，不改任何注册表。
+ */
+ipcMain.handle('app:open-default-apps', async () => {
+  try {
+    await shell.openExternal('ms-settings:defaultapps')
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, err: String(error) }
+  }
+})
+ipcMain.handle('app:info', () => appVersionInfo())
 
   /* ---------- 版本更新 ---------- */
 
@@ -1187,7 +1614,133 @@ function registerIpc(): void {
     return result
   })
 
+  /* ---------- 插件市场（主题扩展包） ---------- */
+
+  /**
+   * 拉取插件市场清单。
+   *
+   * 只做一件事：GET 镜像站的 `/contact/plugins.php`，把 JSON 原样交给渲染层。
+   * 校验放在渲染层做（它是纯展示逻辑），主进程只负责「别让渲染层直接连外网」。
+   * 结果缓存 10 分钟：用户来回开关面板不该反复打服务器。
+   */
+  /**
+   * 更新前备份用户数据。
+   *
+   * 「更新时保存历史数据」的落点：settings.json 里有主题、背景图路径、
+   * 界面缩放、快捷键开关等全部偏好，阅读位置也在同一个文件里，
+   * 所以备份这一个文件就够；再带上 customThemes 里引用的背景图副本。
+   * 备份目录按时间戳分，保留最近 10 份，避免无限长大。
+   */
+  ipcMain.handle('app:update-backup', async () => {
+    try {
+      const dir = app.getPath('userData')
+      const root = join(dir, 'backups')
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      const target = join(root, `update-${stamp}`)
+      mkdirSync(target, { recursive: true })
+      let copied = 0
+      for (const name of ['settings.json', 'positions.json', 'reading-positions.json']) {
+        const from = join(dir, name)
+        try {
+          copyFileSync(from, join(target, name))
+          copied += 1
+        } catch {
+          /* 文件不存在是正常的：不是每个版本都写这几个文件 */
+        }
+      }
+      const entries = (() => {
+        try {
+          return readdirSync(root, { withFileTypes: true })
+        } catch {
+          return []
+        }
+      })()
+      const olds = entries
+        .filter((e) => e.isDirectory() && e.name.startsWith('update-'))
+        .map((e) => e.name)
+        .sort()
+      for (const name of olds.slice(0, Math.max(0, olds.length - 10))) {
+        rmSync(join(root, name), { recursive: true, force: true })
+      }
+      console.log(`[update] 已备份用户数据 ${copied} 个文件 → ${target}`)
+      return { ok: true, dir: target, files: copied }
+    } catch (error) {
+      console.error('[update] 备份用户数据失败', error)
+      return { ok: false, error: (error as Error).message }
+    }
+  })
+
+  /** 测试挂钩：替换市场源（不联网、只改内存） */
+  ipcMain.handle('market:set-sources', (_e, list: unknown) => {
+    if (!process.argv.includes('--test-hooks')) {
+      console.warn('[market] 拒绝了源替换：未带 --test-hooks')
+      return false
+    }
+    if (!Array.isArray(list)) return false
+    const next = list
+      .map((one) => one as { name?: unknown; url?: unknown })
+      .filter((one) => typeof one?.name === 'string' && typeof one?.url === 'string')
+      .map((one) => ({ name: String(one.name), url: String(one.url) }))
+    MARKET_SOURCES = next.length > 0 ? next : null
+    MARKET_CACHE = null
+    console.log(`[market] 源已替换为 ${next.map((s) => s.name).join(', ') || '默认'}`)
+    return true
+  })
+
+  /** 测试挂钩：清掉 10 分钟缓存，让下一次 market:list 真的重新拉 */
+  ipcMain.handle('market:clear-cache', () => {
+    MARKET_CACHE = null
+    return true
+  })
+
+  ipcMain.handle('market:list', async () => {
+    const now = Date.now()
+    if (MARKET_CACHE && now - MARKET_CACHE.at < 10 * 60_000) return MARKET_CACHE.value
+
+    /*
+     * 两个源，同一份 schema：
+     *   ① 镜像站 plugins.php —— 国内快，包含未同步到 GitHub 的新包；
+     *   ② GitHub raw plugins/index.json —— 镜像站挂了/被墙时的兜底，
+     *      也是别人提 PR 加主题包的原始入口。
+     * 先①后②，任一成功就返回；两个都失败才报错（文案合并两边的失败原因）。
+     */
+    const sources = MARKET_SOURCES ?? [
+      { name: 'mirror', url: 'https://xn--6rso4u4lc86ad09c.top/contact/plugins.php' },
+      {
+        name: 'github',
+        url: 'https://raw.githubusercontent.com/QiuXiYueShiJiu/QX-PDFreader/main/plugins/index.json'
+      }
+    ]
+
+    const errors: string[] = []
+    for (const source of sources) {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 8000)
+      try {
+        const res = await net.fetch(source.url, { signal: controller.signal })
+        if (!res.ok) {
+          errors.push(`${source.name} ${res.status}`)
+          continue
+        }
+        const json = (await res.json()) as { items?: unknown[] }
+        const items = Array.isArray(json.items) ? json.items : []
+        const value = { ok: true, items, at: now, source: source.name }
+        MARKET_CACHE = { at: now, value }
+        console.log(`[market] 清单 ${items.length} 项（来源 ${source.name}）`)
+        return value
+      } catch (error) {
+        const aborted = (error as Error)?.name === 'AbortError'
+        errors.push(`${source.name} ${aborted ? '超时' : '连不上'}`)
+      } finally {
+        clearTimeout(timer)
+      }
+    }
+
+    return { ok: false, error: `市场不可用（${errors.join(' / ')}）`, items: [] }
+  })
+
   /** 当前版本号（界面显示用，不触发网络） */
+
   ipcMain.handle('app:update-current', () => currentVersion())
 
   /**
@@ -1224,8 +1777,54 @@ function registerIpc(): void {
     return result
   })
 
-  /** 打开下载好的安装包（用系统默认方式，装不装由用户决定） */
-  ipcMain.handle('app:update-install', (_e, path: unknown) => installUpdate(String(path ?? '')))
+  /**
+   * 打开下载好的安装包（用系统默认方式，装不装由用户决定）。
+   *
+   * ★ 装之前先把用户数据备份一份（v1.0.5.0）：
+   *   设置、阅读位置、最近列表、背景图都在 userData 里，装机/回滚时最容易丢；
+   *   这里在打开安装包之前拷到 `userData/update-backups/<版本>-<时间>/`，
+   *   只保留最近 3 份，避免越攒越多。备份失败不影响安装（只打个日志）。
+   */
+  ipcMain.handle('app:update-install', (_e, path: unknown) => {
+    const target = String(path ?? '')
+    if (!target) return installUpdate(target)
+    try {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      const version = currentVersion()
+      const dir = join(app.getPath('userData'), 'update-backups')
+      mkdirSync(dir, { recursive: true })
+      const dest = join(dir, `${version}-${stamp}`)
+      mkdirSync(dest, { recursive: true })
+      let copied = 0
+      for (const name of ['settings.json', 'positions.json', 'recent.json']) {
+        const src = join(app.getPath('userData'), name)
+        if (!existsSync(src)) continue
+        copyFileSync(src, join(dest, name))
+        copied += 1
+      }
+      const bgDir = join(app.getPath('userData'), 'backgrounds')
+      if (existsSync(bgDir)) {
+        cpSync(bgDir, join(dest, 'backgrounds'), { recursive: true })
+      }
+      // 只留最近 3 份
+      const keep = readdirSync(dir)
+        .filter((name) => !name.endsWith('.txt'))
+        .sort()
+        .slice(-3)
+      for (const name of readdirSync(dir)) {
+        if (!keep.includes(name)) rmSync(join(dir, name), { recursive: true, force: true })
+      }
+      writeFileSync(
+        join(dest, 'README.txt'),
+        `升级前自动备份\n版本：${version}\n时间：${new Date().toISOString()}\n内容：${copied} 个 json（设置 / 阅读位置 / 最近列表）\n`,
+        'utf8'
+      )
+      console.log(`[update] 升级前已备份用户数据 → ${dest}（${copied} 个文件）`)
+    } catch (error) {
+      console.warn('[update] 备份用户数据失败（不影响安装）：', error)
+    }
+    return installUpdate(target)
+  })
 
   /** 在浏览器里打开 release 页面，供用户自己看说明/手动下载 */
   ipcMain.handle('app:update-open-page', (_e, url: unknown) => {

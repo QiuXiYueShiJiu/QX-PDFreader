@@ -3,7 +3,7 @@
  *
  * 与设置面板共用 .sb-settings-* 外壳，这里只补它自己的布局：
  *   左边一条分区导航、右边可滚动的内容区、底部一条进度条。
- * 颜色全部走 base.css 的令牌，因此四套主题（含 Metro）自动适配。
+ * 颜色全部走 base.css 的变量，因此四套主题（含 Metro）自动适配。
  * ============================================================ */
 
 /* 工具箱内容比设置面板宽：文件列表、参数行都更占地方 */
@@ -872,4 +872,40 @@
 
 .tools-seg-wrap .sb-seg-btn {
   flex: 1 1 45%;
+}
+.tools-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: rgb(var(--text));
+}
+
+.tools-check input[type='checkbox'] {
+  accent-color: rgb(var(--accent));
+}
+
+.tools-path {
+  font-family: var(--font-mono, ui-monospace, 'Cascadia Mono', Consolas, monospace);
+  font-size: 0.76rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 6px;
+  background: rgb(var(--text) / 0.06);
+  word-break: break-all;
+}
+
+.sb-btn.is-active {
+  border-color: rgb(var(--accent));
+  color: rgb(var(--accent));
+  background: rgb(var(--accent) / 0.12);
+}
+
+.sb-btn--primary {
+  border-color: transparent;
+  background: rgb(var(--accent));
+  color: #fff;
+}
+
+.sb-btn--primary:hover:not(:disabled) {
+  filter: brightness(1.06);
 }

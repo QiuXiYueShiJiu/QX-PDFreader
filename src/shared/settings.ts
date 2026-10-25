@@ -13,7 +13,22 @@ export const SETTINGS_VERSION = 1
  * 不校验就会把 "metor" 这种拼错值一路带进 CSS（html[data-theme='metor']
  * 匹配不到任何主题 → 界面直接变成无样式默认值）。
  */
-export const THEME_MODES: readonly ThemeMode[] = ['light', 'dark', 'sepia', 'metro']
+export const THEME_MODES: readonly ThemeMode[] = [
+  'light',
+  'dark',
+  'sepia',
+  'metro',
+  'night',
+  'forest',
+  'warm',
+  'contrast',
+  'paper',
+  'midnight',
+  'plum',
+  'glow',
+  'glass',
+  'custom'
+]
 
 /** 把任意值收窄成合法主题；不合法就退回默认主题 */
 export function normalizeTheme(value: unknown, fallback: ThemeMode): ThemeMode {
@@ -42,7 +57,19 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
    * settings.json 里已有的 theme 仍然生效，不会被这次改默认值覆盖。
    */
   theme: 'sepia',
+  themeLayout: 'normal',
   pageBackground: '#f5f1e8',
+  readerImage: '',
+  readerImageDim: 0.35,
+  readerImageBlur: 0,
+  /*
+   * 液态玻璃主题包的两个参数。
+   *   · glassRadius：圆角半径（px），0 就是直角，24 已经很圆润；
+   *   · glassBlur：面板/工具条的背景模糊（px），0 关掉磨砂效果。
+   * 只在 theme='glass' 时生效，切到别的主题不影响其它主题的观感。
+   */
+  glassRadius: 14,
+  glassBlur: 12,
   defaultZoom: 'fit-width',
   restoreLastPosition: true,
   recentLimit: 12,
@@ -65,13 +92,27 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   /*
    * 公开版的更新通道偏好：auto = 两条通道并行、取版本最高的（同版本镜像站优先）；
    * github / mirror = 只用那一条（GitHub 被墙或镜像站抽风时手动兜底）。
-   * 特供版忽略这个字段（它只走内置令牌通道）。
+   * 静默部署版忽略这个字段（它只走内置校验值通道）。
    */
-  updateChannel: 'auto'
+  updateChannel: 'auto',
+  /* 强调色覆盖：空串 = 跟随主题；用户可换成自己的主题色 */
+  accentColor: '',
+  /* 插件市场装的主题包与当前选用项（默认空） */
+  customThemes: [],
+  customThemeId: ''
 }
 
 export function cloneDefaults(): ReaderSettings {
   return JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) as ReaderSettings
+}
+
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min
+  return Math.min(max, Math.max(min, value))
+}
+
+function clamp01(value: number): number {
+  return clamp(value, 0, 0.85)
 }
 
 /** 把可能残缺的配置合并到默认值上，保证字段完整 */
@@ -82,7 +123,13 @@ export function mergeSettings(raw: unknown): ReaderSettings {
   return {
     version: SETTINGS_VERSION,
     theme: normalizeTheme(input.theme, base.theme),
+    themeLayout: input.themeLayout === 'office' ? 'office' : 'normal',
     pageBackground: input.pageBackground ?? base.pageBackground,
+    readerImage: typeof input.readerImage === 'string' ? input.readerImage : base.readerImage,
+    readerImageDim: clamp01(input.readerImageDim ?? base.readerImageDim),
+    readerImageBlur: clamp(input.readerImageBlur ?? base.readerImageBlur, 0, 24),
+    glassRadius: clamp(input.glassRadius ?? base.glassRadius, 0, 24),
+    glassBlur: clamp(input.glassBlur ?? base.glassBlur, 0, 30),
     defaultZoom: input.defaultZoom ?? base.defaultZoom,
     restoreLastPosition:
       typeof input.restoreLastPosition === 'boolean' ? input.restoreLastPosition : base.restoreLastPosition,
@@ -100,6 +147,20 @@ export function mergeSettings(raw: unknown): ReaderSettings {
     updateChannel:
       input.updateChannel === 'github' || input.updateChannel === 'mirror' || input.updateChannel === 'auto'
         ? input.updateChannel
-        : base.updateChannel
+        : base.updateChannel,
+    accentColor:
+      typeof input.accentColor === 'string' && /^#[0-9a-f]{6}$/i.test(input.accentColor)
+        ? input.accentColor.toLowerCase()
+        : base.accentColor,
+    customThemes: Array.isArray(input.customThemes)
+      ? input.customThemes.filter((item): item is ReaderSettings['customThemes'][number] =>
+          Boolean(item) &&
+          typeof item.id === 'string' &&
+          typeof item.name === 'string' &&
+          /^[0-9 ]+$/.test(String(item.bg)) &&
+          /^[0-9 ]+$/.test(String(item.text))
+        ).slice(0, 12)
+      : base.customThemes,
+    customThemeId: typeof input.customThemeId === 'string' ? input.customThemeId : base.customThemeId
   }
 }

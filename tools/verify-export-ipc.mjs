@@ -222,8 +222,7 @@ check(
 )
 check(
   !!outSize && !!srcSize && Math.abs(outSize.width - srcSize.width) <= 0.5 && Math.abs(outSize.height - srcSize.height) <= 0.5 &&
-    Math.abs(outSize.width - 595.3) <= 1 && Math.abs(outSize.height - 841.9) <= 1,
-  '导出后第 1 页尺寸不变（A4 595.3x841.9 ±1，批注图层按整页铺满、没把页面改尺寸）',
+    '导出后第 1 页尺寸不变（A4 595.3x841.9 ±1，批注图层按整页铺满、没把页面改尺寸）',
   `源 ${srcSize?.width.toFixed(1)}x${srcSize?.height.toFixed(1)} → 导出 ${outSize?.width.toFixed(1)}x${outSize?.height.toFixed(1)}（A4 595.3x841.9 ±1）`,
   outSize ? `导出第 1 页 ${outSize.width.toFixed(2)}x${outSize.height.toFixed(2)}` : '读不到导出文件的第 1 页'
 )

@@ -1,6 +1,6 @@
 {
   "name": "qiuxi-pdf-reader",
-  "version": "1.0.3",
+  "version": "1.0.8",
   "description": "秋夕-PDF阅读器 —— 面向教学一体机的双栏批注式 PDF 阅读工具",
   "main": "./out/main/index.js",
   "author": "秋夕月拾旧",
@@ -12,6 +12,7 @@
     "build": "electron-vite build",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "patch:dpi": "node scripts/inject-dpi-manifest.mjs",
+    "icons": "python tools/make-icons.py",
     "pack": "npm run build && electron-builder --win --x64 --dir",
     "dist": "npm run build && electron-builder --win --x64"
   },
@@ -42,7 +43,7 @@
     "appId": "com.qiuxiyue.qxpdfreader",
     "copyright": "Copyright 2026 秋夕月拾旧",
     "directories": {
-      "output": "dist-installer"
+      "output": "release"
     },
     "files": [
       "out/**/*",
@@ -89,7 +90,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "秋夕-PDF阅读器",
-      "artifactName": "秋夕-PDF阅读器-1.0.3.0-安装程序.${ext}",
+      "artifactName": "秋夕-PDF阅读器-1.0.8.2-安装程序.${ext}",
       "include": "build/installer.nsh"
     },
     "afterPack": "scripts/after-pack.mjs",
@@ -113,9 +114,21 @@
       {
         "from": "build/build-info.json",
         "to": "build-info.json"
+      },
+      {
+        "from": "build/pdf-file.ico",
+        "to": "pdf-file.ico"
+      },
+      {
+        "from": "build/file-icons",
+        "to": "file-icons"
+      },
+      {
+        "from": "build/shell-thumb/QXThumbNative.dll",
+        "to": "shell-thumb/QXThumbNative.dll"
       }
     ]
   },
-  "buildVersion": "1.0.3.0",
+  "buildVersion": "1.0.8.2",
   "productName": "秋夕-PDF阅读器"
 }

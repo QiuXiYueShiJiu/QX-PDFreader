@@ -36,6 +36,7 @@ import { ToolsPanel } from './components/ToolsPanel'
 import { ScreenMask } from './components/ScreenMask'
 import { DisclaimerToast } from './components/DisclaimerToast'
 import { UpdateToast } from './components/UpdateToast'
+import { MarketPanel } from './components/MarketPanel'
 import { useDropZone } from './hooks/useDropZone'
 import { guardUnsaved, installCloseGuard, registerExporter } from './close-guard'
 
@@ -87,7 +88,7 @@ export default function App(): JSX.Element {
    */
   useEffect(() => {
     const off = window.pdfApp.onOpen((payload) => {
-      void useViewer.getState().openFile(payload.path)
+      void useViewer.getState().openFile(payload.path, undefined, payload.name)
     })
     /*
      * ★ 挂好监听后立刻向主进程报到（「不丢文件」握手）。
@@ -513,6 +514,7 @@ export default function App(): JSX.Element {
 
       {/* 版本更新：右下角浮层，自动下载、下完再问装不装 */}
       <UpdateToast />
+      <MarketPanel />
 
 
       {/*

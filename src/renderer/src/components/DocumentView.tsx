@@ -1733,6 +1733,13 @@ export function DocumentView({
 
   /** 由于滚轮/键盘引起的滚动，不希望反过来触发页码同步 */
   const syncingRef = useRef(false)
+  /**
+   * ★ 页码是被滚动「读」出来的（IntersectionObserver），不是用户点的翻页。
+   *   这种情况下绝不能再反向滚一次 —— 否则连续滚动时每到页界就被拽回页顶，
+   *   表现就是「页面切换时突然跳页」。滚动回写只做标记，让下面的
+   *   「页码变化 → 滚动到该页」effect 跳过一次。
+   */
+  const pageFromScrollRef = useRef(false)
 
   /*
    * 缩放前的阅读位置快照。
@@ -1954,7 +1961,10 @@ export function DocumentView({
             bestPage = Number((entry.target as HTMLElement).dataset.page)
           }
         }
-        if (bestPage > 0 && bestPage !== page) setPage(bestPage)
+        if (bestPage > 0 && bestPage !== page) {
+      pageFromScrollRef.current = true
+      setPage(bestPage)
+    }
       },
       { root, threshold: [0.1, 0.35, 0.6, 0.9] }
     )
@@ -2005,6 +2015,11 @@ export function DocumentView({
   /* ---------- 页码变化 → 滚动到该页 ---------- */
   useLayoutEffect(() => {
     if (!page) return
+    // 页码来自滚动观察：不回滚，否则连续滚动会在页界跳一下
+    if (pageFromScrollRef.current) {
+      pageFromScrollRef.current = false
+      return
+    }
     const el = pageRefs.current.get(page)
     const root = scrollRef.current
     if (!el || !root) return
@@ -2053,7 +2068,7 @@ export function DocumentView({
     // 让滚动稳定后再恢复观察
     const timer = setTimeout(() => {
       syncingRef.current = false
-    }, 160)
+    }, 400)
     return () => clearTimeout(timer)
     /*
      * registeredCount 也入依赖：首次渲染时节点还没登记，

@@ -10,7 +10,7 @@
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4" />
   <img alt="electron" src="https://img.shields.io/badge/Electron-33-47848F" />
   <img alt="react" src="https://img.shields.io/badge/React-18-61DAFB" />
-  <img alt="version" src="https://img.shields.io/badge/version-1.0.7.0-2E7D32" />
+  <img alt="version" src="https://img.shields.io/badge/version-1.0.8.2-2E7D32" />
   <img alt="license" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-orange" />
 </p>
 
@@ -29,6 +29,13 @@
 文档、批注、OCR 全部在本机完成，**不上传文件**；只有「检查更新」会访问 GitHub 或镜像站。
 
 ---
+
+## 这一版新增（1.0.8.2）
+
+- **资源管理器里直接看到 PDF 首页**：安装后在资源管理器的「大图标 / 超大图标」视图下，PDF 会显示自己的首页缩略图（Windows 原生缩略图提供器，按文件修改时间与大小缓存，换页即失效重渲染）
+- **连续滚动不再「到页界跳一下」**：修正翻到页边界时的定位抖动
+- **批注浮条跟随主题**：浮条颜色随当前主题包变化，不再是固定深色
+- **若干隐私与文案清理**：仓库与安装包里不再出现内部部署信息
 
 ## 功能总览
 
@@ -230,11 +237,11 @@
 
 到本仓库的 **Releases** 页面下载：
 
-- 文件名：`秋夕-PDF阅读器-1.0.7.0-安装程序.exe`
+- 文件名：`秋夕-PDF阅读器-1.0.8.2-安装程序.exe`
 - 双击安装，可自选安装目录；
 - 「选择附加任务」页可分别勾选**桌面快捷方式**与**开始菜单快捷方式**（默认都勾，开始菜单统一放在「秋夕-教学软件」文件夹）；
-- 静默安装（批量部署）：`秋夕-PDF阅读器-1.0.7.0-安装程序.exe /S`
-- 校验：同一 Release 附有 `SHA256SUMS.txt`，可用 `certutil -hashfile 秋夕-PDF阅读器-1.0.7.0-安装程序.exe SHA256` 对比。
+- 静默安装（批量部署）：`秋夕-PDF阅读器-1.0.8.2-安装程序.exe /S`
+- 校验：同一 Release 附有 `SHA256SUMS.txt`，可用 `certutil -hashfile 秋夕-PDF阅读器-1.0.8.2-安装程序.exe SHA256` 对比。
 
 系统要求：Windows 10 / 11（x64）。安装包未做代码签名，首次运行若出现 SmartScreen 提示，选择「更多信息 → 仍要运行」。
 

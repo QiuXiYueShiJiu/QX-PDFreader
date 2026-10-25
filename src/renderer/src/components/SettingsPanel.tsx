@@ -12,10 +12,11 @@
  * 数据全部来自 props，避免出现「面板里一份、主界面一份」的双份状态。
  */
 
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   BookOpenCheck,
   Eye,
+  Image,
   Keyboard,
   RefreshCw,
   Maximize2,
@@ -23,6 +24,7 @@ import {
   PanelLeft,
   Palette,
   Info,
+  FileImage,
   X
 } from 'lucide-react'
 import { useViewer } from '../store'
@@ -44,15 +46,98 @@ const UI_SCALE_STEP = 0.05
 /** 主题选项：swatch 用该主题的真实底色，做到所见即所得 */
 const THEME_OPTIONS: ReadonlyArray<{ value: ThemeMode; label: string; swatch: string; tip: string }> = [
   { value: 'light', label: '浅色', swatch: '#f3f4f7', tip: '明亮白底，适合光线充足的教室' },
-  { value: 'dark', label: '深色', swatch: '#1a1d24', tip: '关灯上课不刺眼' },
+  { value: 'warm', label: '暖灰', swatch: '#ece9e3', tip: '低饱和纸感，白天室内不反光' },
   { value: 'sepia', label: '米色', swatch: '#ece0c8', tip: '纸质米黄，长时间阅读更放松' },
+  { value: 'forest', label: '护眼绿', swatch: '#ddeade', tip: '绿底白字，投影与白炽灯教室最不刺眼' },
+  { value: 'dark', label: '深色', swatch: '#1a1d24', tip: '关灯上课不刺眼' },
+  { value: 'night', label: '深夜', swatch: '#131a26', tip: '深蓝底，比纯黑柔和' },
+  { value: 'contrast', label: '高对比', swatch: '#000000', tip: '纯黑底 + 暖金强调，大屏远距离最清楚' },
+  { value: 'paper', label: '纸墨', swatch: '#f4f0e8', tip: '教科书内页的暖白，正文对比强，久看不累' },
+  { value: 'plum', label: '青梅', swatch: '#eceeea', tip: '灰绿底 + 梅子粉强调，护眼又不发黄' },
+  { value: 'glow', label: '柔光', swatch: '#faf9f6', tip: '几乎不压暗的日光白，靠窗教室最舒服' },
+  { value: 'midnight', label: '午夜蓝', swatch: '#0e1626', tip: '深蓝底 + 青色强调，比纯黑柔和' },
   {
     value: 'metro',
     label: 'Metro',
     swatch: '#0078d4',
     tip: 'Windows 10 风格：直角磁贴、Segoe UI、单一强调色'
+  },
+  {
+    value: 'glass',
+    label: '液态玻璃',
+    swatch: '#dfe8ff',
+    tip: '半透明磨砂面板 + 大圆角，圆角与模糊可在下面调'
   }
 ]
+
+/**
+ * 主题包：把 9 档配色收成 3 个「包」，每个包有自己的设置项。
+ *
+ * 用户 2026-10-23 的要求是「现在有主题包：默认（已有的配色，除 metro）、
+ * metro、液态玻璃」——所以「默认」包里放除 metro/glass 之外的 7 档，
+ * 这样分段控件从 9 项降到 3 项，窄面板里也不会横向溢出（那就是用户
+ * 截图里报的 bug）。
+ */
+const THEME_PACKS = [
+  {
+    id: 'classic',
+    label: '默认',
+    tip: '11 档内置配色：浅色 / 暖灰 / 米色 / 纸墨 / 护眼绿 / 青梅 / 柔光 / 深色 / 深夜 / 午夜蓝 / 高对比',
+    themes: [
+      'light',
+      'warm',
+      'sepia',
+      'paper',
+      'forest',
+      'plum',
+      'glow',
+      'dark',
+      'night',
+      'midnight',
+      'contrast'
+    ] as ThemeMode[],
+    fallback: 'sepia' as ThemeMode
+  },
+  {
+    id: 'metro',
+    label: 'Metro',
+    tip: 'Windows 10 磁贴风格：直角、平色、Segoe UI',
+    themes: ['metro'] as ThemeMode[],
+    fallback: 'metro' as ThemeMode
+  },
+  {
+    id: 'glass',
+    label: '液态玻璃',
+    tip: '半透明磨砂 + 大圆角，可调圆角半径与模糊强度',
+    themes: ['glass'] as ThemeMode[],
+    fallback: 'glass' as ThemeMode
+  }
+] as const
+
+/**
+ * 强调色预设。
+ *
+ * 三个主题包共用一组（前四个就是 Win10 磁贴色板里的常用色，Metro 包原本只有这四个）：
+ * 用户抱怨「改不了颜色」，根因是强调色只在 Metro 包里露出来，默认包和液态玻璃包
+ * 根本没有入口；自定义取色也只对阅读区底色开放。现在每个包都有预设色 + 取色器 + 恢复默认。
+ */
+const ACCENT_PRESETS = [
+  { value: '#0078d4', label: '蓝' },
+  { value: '#107c10', label: '绿' },
+  { value: '#c239b3', label: '紫' },
+  { value: '#d13438', label: '红' },
+  { value: '#4c6ef5', label: '靛' },
+  { value: '#b5651d', label: '琥珀' },
+  { value: '#0f766e', label: '青' },
+  { value: '#475569', label: '灰' }
+] as const
+
+/** 各主题包自己的主色（与 base.css / metro.css / glass.css 里的 --accent 保持一致） */
+const PACK_DEFAULT_ACCENT: Record<string, string> = {
+  classic: '#c0392b',
+  metro: '#0078d4',
+  glass: '#4c6ef5'
+}
 
 /**
  * 内置阅读底色。
@@ -80,6 +165,29 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
   /** 打开时把焦点移进来，关闭时还给原来的元素 —— 键盘和读屏用户才不会迷路 */
   const panelRef = useRef<HTMLDivElement | null>(null)
   const idPrefix = useId()
+
+  /** 背景图预览：与主界面走同一条 pdf-file 协议 */
+  const readerImageUrl = useMemo(() => {
+    if (!settings.readerImage) return ''
+    const encoded = settings.readerImage
+      .replace(/\\/g, '/')
+      .split('/')
+      .map((seg) => encodeURIComponent(seg).replace(/%3A/gi, ':'))
+      .join('/')
+    return `pdf-file:///${encoded}`
+  }, [settings.readerImage])
+
+  const [picking, setPicking] = useState(false)
+  const onPickImage = async (): Promise<void> => {
+    if (picking) return
+    setPicking(true)
+    try {
+      const picked = await window.pdfApp.app.pickBackground()
+      if (picked.ok && picked.path) onChange({ readerImage: picked.path })
+    } finally {
+      setPicking(false)
+    }
+  }
 
   /**
    * 「关于」里的版本号来自主进程。
@@ -130,6 +238,7 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
    * 不打扰界面其它部分。
    */
   const checkUpdateNow = useViewer((s) => s.checkUpdateNow)
+  const setShowMarket = useViewer((s) => s.setShowMarket)
   const [checking, setChecking] = useState(false)
   const [checkMsg, setCheckMsg] = useState('')
 
@@ -214,6 +323,11 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
   const colorKey = settings.pageBackground.trim().toLowerCase()
   const isPresetColor = PAGE_COLORS.some((preset) => preset.value === colorKey)
 
+  /* 当前属于哪个主题包（认不出的主题值兜底到「默认」包，不至于整块消失） */
+  const activePack =
+    THEME_PACKS.find((pack) => (pack.themes as readonly ThemeMode[]).includes(settings.theme)) ??
+    THEME_PACKS[0]
+
   return (
     <div className="sb-settings-overlay">
       {/* 背板负责变暗背景，点它就当「取消」，符合抽屉类面板的普遍预期 */}
@@ -248,27 +362,146 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
 
             <div className="sb-field">
               <div className="sb-field-text">
-                <span className="sb-field-label">主题</span>
+                <span className="sb-field-label">主题包</span>
                 <span className="sb-field-hint">
-                  切换整体明暗风格：深色适合关灯上课，米色偏纸质更护眼，Metro 是 Windows 10 的磁贴风格
+                  先选主题包，再调这个包自己的配色 / 圆角；切换包会用它默认的那一档
                 </span>
               </div>
-              <div className="sb-seg" role="group" aria-label="主题">
-                {THEME_OPTIONS.map((option) => (
+              <div className="sb-seg" role="group" aria-label="主题包">
+                {THEME_PACKS.map((pack) => (
                   <button
-                    key={option.value}
+                    key={pack.id}
                     type="button"
                     className="sb-seg-btn"
-                    aria-pressed={settings.theme === option.value}
-                    title={option.tip}
-                    onClick={() => onChange({ theme: option.value })}
+                    data-theme-pack={pack.id}
+                    aria-pressed={activePack.id === pack.id}
+                    title={pack.tip}
+                    onClick={() => {
+                      if (activePack.id === pack.id) return
+                      onChange({ theme: pack.fallback })
+                    }}
                   >
-                    <i className="sb-swatch" style={{ background: option.swatch }} aria-hidden="true" />
-                    {option.label}
+                    {pack.label}
                   </button>
                 ))}
               </div>
             </div>
+
+            {/* 「默认」包：7 档内置配色的色卡 */}
+            {activePack.id === 'classic' ? (
+              <div className="sb-field">
+                <div className="sb-field-text">
+                  <span className="sb-field-label">配色</span>
+                  <span className="sb-field-hint">深色适合关灯上课，米色偏纸质更护眼</span>
+                </div>
+                <div className="sb-seg" role="group" aria-label="主题">
+                  {THEME_OPTIONS.filter((option) =>
+                    (activePack.themes as readonly ThemeMode[]).includes(option.value)
+                  ).map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className="sb-seg-btn"
+                      data-theme-option={option.value}
+                      aria-pressed={settings.theme === option.value}
+                      title={option.tip}
+                      onClick={() => onChange({ theme: option.value })}
+                    >
+                      <i className="sb-swatch" style={{ background: option.swatch }} aria-hidden="true" />
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {/* 强调色：三个主题包都能改（预设 + 自定义取色 + 恢复默认） */}
+            <div className="sb-field">
+              <div className="sb-field-text">
+                <span className="sb-field-label">强调色</span>
+                <span className="sb-field-hint">
+                  按钮、选中态、图标都用这个颜色；三个主题包都能改，改完立刻生效
+                </span>
+              </div>
+              <div className="sb-colors" role="group" aria-label="强调色">
+                {ACCENT_PRESETS.map((accent) => (
+                  <button
+                    key={accent.value}
+                    type="button"
+                    className="sb-color-btn"
+                    style={{ background: accent.value }}
+                    aria-label={`强调色：${accent.label}`}
+                    aria-pressed={settings.accentColor.toLowerCase() === accent.value}
+                    data-accent-preset={accent.value}
+                    title={accent.label}
+                    onClick={() => onChange({ accentColor: accent.value })}
+                  />
+                ))}
+                <label
+                  className="sb-color-custom"
+                  title={`自定义强调色${settings.accentColor ? `（${settings.accentColor}）` : ''}`}
+                >
+                  <input
+                    type="color"
+                    value={
+                      /^#[0-9a-f]{6}$/i.test(settings.accentColor)
+                        ? settings.accentColor
+                        : PACK_DEFAULT_ACCENT[activePack.id] ?? '#c0392b'
+                    }
+                    aria-label="自定义强调色"
+                    data-accent-custom="1"
+                    onChange={(event) => onChange({ accentColor: event.target.value })}
+                  />
+                  <span>自定</span>
+                </label>
+                <button
+                  type="button"
+                  className="sb-btn sb-btn--ghost sb-color-reset"
+                  onClick={() => onChange({ accentColor: '' })}
+                  disabled={!settings.accentColor}
+                  data-accent-reset="1"
+                  title="恢复这个主题包自带的主色"
+                >
+                  默认
+                </button>
+              </div>
+            </div>
+
+            {/* 液态玻璃包：圆角半径 + 模糊强度 */}
+            {activePack.id === 'glass' ? (
+              <div className="sb-field sb-field--stack">
+                <div className="sb-field-text">
+                  <span className="sb-field-label">玻璃质感</span>
+                  <span className="sb-field-hint">圆角越大越圆润；模糊 0 是纯半透明，越大越磨砂</span>
+                </div>
+                <label className="sb-range" htmlFor={`${idPrefix}-glass-radius`}>
+                  <span className="sb-range__label">圆角 {settings.glassRadius}px</span>
+                  <input
+                    id={`${idPrefix}-glass-radius`}
+                    type="range"
+                    min={0}
+                    max={24}
+                    step={1}
+                    value={settings.glassRadius}
+                    data-glass-radius="1"
+                    onChange={(event) => onChange({ glassRadius: Number(event.target.value) })}
+                  />
+                </label>
+                <label className="sb-range" htmlFor={`${idPrefix}-glass-blur`}>
+                  <span className="sb-range__label">模糊 {settings.glassBlur}px</span>
+                  <input
+                    id={`${idPrefix}-glass-blur`}
+                    type="range"
+                    min={0}
+                    max={30}
+                    step={1}
+                    value={settings.glassBlur}
+                    data-glass-blur="1"
+                    onChange={(event) => onChange({ glassBlur: Number(event.target.value) })}
+                  />
+                </label>
+              </div>
+            ) : null}
 
             <div className="sb-field">
               <div className="sb-field-text">
@@ -300,6 +533,106 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
                   />
                   <span>自定</span>
                 </label>
+              </div>
+            </div>
+
+
+            {/* 2026-10-24：布局与配色解耦，单独一门开关 */}
+            <div className="sb-field">
+              <div className="sb-field-text">
+                <span className="sb-field-label">界面布局</span>
+                <span className="sb-field-hint">
+                  紧凑是现在的工具条；Office 2019 换成功能区式的条带（图标在上、文字在下、直角），配色仍跟着上面选的主题走
+                </span>
+              </div>
+              <div className="sb-seg sb-seg--wrap" role="group" aria-label="界面布局">
+                <button
+                  type="button"
+                  className={`sb-seg-btn${settings.themeLayout === 'normal' ? ' is-active' : ''}`}
+                  data-tb-id="layout-normal"
+                  aria-pressed={settings.themeLayout === 'normal'}
+                  onClick={() => onChange({ themeLayout: 'normal' })}
+                >
+                  紧凑
+                </button>
+                <button
+                  type="button"
+                  className={`sb-seg-btn${settings.themeLayout === 'office' ? ' is-active' : ''}`}
+                  data-tb-id="layout-office"
+                  aria-pressed={settings.themeLayout === 'office'}
+                  onClick={() => onChange({ themeLayout: 'office' })}
+                >
+                  Office 2019
+                </button>
+              </div>
+            </div>
+
+            <div className="sb-field">
+              <div className="sb-field-text">
+                <span className="sb-field-label">
+                  <Image size={14} aria-hidden="true" />
+                  背景图片
+                </span>
+                <span className="sb-field-hint">
+                  用自己的照片或壁纸垫在 PDF 页面后面；压暗与模糊只作用于背景，不影响阅读
+                </span>
+              </div>
+              <div className="sb-bgpic">
+                {settings.readerImage ? (
+                  <img className="sb-bgpic-thumb" src={readerImageUrl} alt="当前背景" />
+                ) : (
+                  <span className="sb-bgpic-empty">未设置</span>
+                )}
+                <div className="sb-bgpic-actions">
+                  <button type="button" className="sb-btn" onClick={onPickImage} data-tb-id="settings-bg-pick">
+                    选择图片
+                  </button>
+                  <button
+                    type="button"
+                    className="sb-btn sb-btn--ghost"
+                    onClick={() => onChange({ readerImage: '' })}
+                    disabled={!settings.readerImage}
+                    data-tb-id="settings-bg-clear"
+                  >
+                    清除
+                  </button>
+                </div>
+              </div>
+              <div className="sb-field-control">
+                <output className="sb-readout">{Math.round(settings.readerImageDim * 100)}%</output>
+                <input
+                  type="range"
+                  min={0}
+                  max={0.85}
+                  step={0.05}
+                  value={settings.readerImageDim}
+                  aria-label="背景压暗程度"
+                  onChange={(event) => onChange({ readerImageDim: Number(event.target.value) })}
+                />
+              </div>
+              <div className="sb-field-control">
+                <output className="sb-readout">{settings.readerImageBlur}px</output>
+                <input
+                  type="range"
+                  min={0}
+                  max={24}
+                  step={1}
+                  value={settings.readerImageBlur}
+                  aria-label="背景模糊半径"
+                  onChange={(event) => onChange({ readerImageBlur: Number(event.target.value) })}
+                />
+              </div>
+              <div className="sb-field-hint" style={{ marginTop: 4 }}>
+                想要更多配色？去
+                <button
+                  type="button"
+                  className="sb-link"
+                  data-tb-id="settings-open-market"
+                  onClick={() => setShowMarket(true)}
+                >
+                  插件市场
+                </button>
+                看看社区主题包
               </div>
             </div>
 
@@ -430,6 +763,37 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
             </div>
           </section>
 
+          {/* ---------------- 文件关联 ---------------- */}
+          <section className="sb-card" aria-labelledby={`${idPrefix}-sec-assoc`}>
+            <h3 className="sb-card-title" id={`${idPrefix}-sec-assoc`}>
+              <FileImage size={15} aria-hidden="true" />
+              文件关联
+            </h3>
+            <div className="sb-field sb-field--stack">
+              <div className="sb-field-text">
+                <span className="sb-field-label">把图片交给秋夕打开</span>
+                <span className="sb-field-hint">
+                  安装时已登记 PDF 与常见图片格式。Windows 10/11 把「默认打开方式」锁在用户设置里，
+                  安装器改不了，需要你在设置页点一次「秋夕-PDF阅读器」。
+                </span>
+              </div>
+              <div className="sb-row">
+                <button
+                  type="button"
+                  className="sb-btn sb-btn-primary"
+                  data-tb-id="settings-open-default-apps"
+                  onClick={() => {
+                    void window.pdfApp.app.openDefaultApps()
+                  }}
+                >
+                  打开默认应用设置
+                </button>
+                <span className="sb-field-hint">
+                  改完回到这里，双击 .png / .jpg 就会用秋夕打开。
+                </span>
+              </div>
+            </div>
+          </section>
           {/* ---------------- 关于 ---------------- */}
           {/* ---------------- 更新 ---------------- */}
           <section className="sb-card" aria-labelledby={`${idPrefix}-sec-update`}>
@@ -469,7 +833,7 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
               自动检查是静默的：只有查到新版本才会在右下角提示并开始下载，下载完由你决定什么时候装。
             </p>
 
-            {/* 通道偏好：只有公开版能选；特供版固定走服务器令牌通道 */}
+            {/* 通道偏好：只有公开版能选；静默部署版固定走服务器校验值通道 */}
             <div className="sb-field">
               <span className="sb-field-label">更新来源</span>
               <div className="sb-seg" role="radiogroup" aria-label="更新来源" data-update-channel="1">
@@ -497,7 +861,7 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
                 ))}
               </div>
               <p className="sb-field-hint">
-                特供版没有这个选项 —— 它只从指定服务器取更新，走内置令牌校验。
+                静默部署版没有这个选项 —— 它只从指定服务器取更新，走内置校验值校验。
               </p>
             </div>
 

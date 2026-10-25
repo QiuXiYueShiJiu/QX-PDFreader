@@ -19,7 +19,7 @@ import { useViewer } from '../store'
  *   和启动声明同一个理由：更新不阻塞翻页/批注。用户正在讲题时弹个
  *   必须点掉的框很讨厌，右下角浮层不挡正文，也随时能关。
  *
- * 颜色取主题令牌（--surface/--text/--border/--muted/--accent），
+ * 颜色取主题校验值（--surface/--text/--border/--muted/--accent），
  * 三套主题下自动适配，不单独维护配色。
  */
 export function UpdateToast(): JSX.Element | null {
@@ -33,6 +33,7 @@ export function UpdateToast(): JSX.Element | null {
   const setUpdateStage = useViewer((s) => s.setUpdateStage)
   const dismissUpdate = useViewer((s) => s.dismissUpdate)
   const [error, setError] = useState('')
+  const [backingUp, setBackingUp] = useState(false)
   const started = useRef(false)
 
   // 主进程推来的「有新版本」事件
@@ -80,6 +81,13 @@ export function UpdateToast(): JSX.Element | null {
 
   const install = (): void => {
     void (async () => {
+      /* 装之前先把偏好与阅读位置备份一份：新版本起不来时用户还能把 settings.json 拷回去 */
+      setBackingUp(true)
+      try {
+        await window.pdfApp.update.backup()
+      } finally {
+        setBackingUp(false)
+      }
       const result = await window.pdfApp.update.install(updateFile)
       if (!result.ok) setError(result.error ?? '打不开安装包')
     })()
@@ -108,7 +116,7 @@ export function UpdateToast(): JSX.Element | null {
             {updateInfo.source === 'github'
               ? '来自 GitHub'
               : updateInfo.source === 'special'
-                ? '来自特供服务器'
+                ? '来自静默部署服务器'
                 : '来自镜像站'}
           </span>
         ) : null}
@@ -141,9 +149,10 @@ export function UpdateToast(): JSX.Element | null {
               type="button"
               className="update-toast__btn update-toast__btn--primary"
               data-tb-id="update-install"
+              disabled={backingUp}
               onClick={install}
             >
-              立即安装
+              {backingUp ? '备份数据中…' : '立即安装'}
             </button>
             <button
               type="button"

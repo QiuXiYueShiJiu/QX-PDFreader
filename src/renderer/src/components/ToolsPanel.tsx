@@ -53,7 +53,7 @@ import {
   SquarePen,
   Trash2,
   X
-} from 'lucide-react'
+, Grid2x2} from 'lucide-react'
 import type { OfficeConverterInfo } from '@shared/pdf-tools'
 import { useViewer } from '../store'
 import {
@@ -89,6 +89,7 @@ import {
   PrintSection
 } from './advanced/DesignSections'
 import { BatchSection, CompareSection } from './advanced/CompareBatchSections'
+import { ImposeSection } from './advanced/ImposeSection'
 import { PagesSection } from './advanced/PagesSection'
 import { RedactSection } from './advanced/RedactSection'
 
@@ -106,6 +107,7 @@ type SectionId =
   | 'convert'
   | 'office'
   /* ---- 文档编辑（Acrobat 级） ---- */
+  | 'impose'
   | 'pages'
   | 'header'
   | 'bates'
@@ -138,6 +140,7 @@ const SECTIONS: ReadonlyArray<{
   { id: 'protect', label: '加密', icon: <Lock size={17} />, tip: '加打开密码 / 移除保护', group: 'file' },
   { id: 'convert', label: '图片', icon: <FileImage size={17} />, tip: 'PDF 与图片互转（长图 / 分页）', group: 'file' },
   { id: 'office', label: 'Office', icon: <FileOutput size={17} />, tip: 'Word / Excel / PPT 转 PDF', group: 'file' },
+  { id: 'impose', label: '拼版', icon: <Grid2x2 size={17} />, tip: '多页拼到一张 A4（2/4/6/9 页）', group: 'file' },
   { id: 'pages', label: '页面', icon: <ListOrdered size={17} />, tip: '整理页面：排序 / 删除 / 旋转 / 裁剪', group: 'doc' },
   { id: 'header', label: '页眉', icon: <AlignCenter size={17} />, tip: '页眉页脚与页码（支持中文）', group: 'doc' },
   { id: 'bates', label: '编号', icon: <Hash size={17} />, tip: '贝茨编号（Bates numbering）', group: 'doc' },
@@ -376,7 +379,8 @@ export function ToolsPanel({ onClose }: ToolsPanelProps): JSX.Element {
             {section === 'office' ? <OfficeTool task={task} /> : null}
 
             {/* ---------- 文档编辑（Acrobat 级） ---------- */}
-            {section === 'pages' ? <PagesSection task={task} currentDoc={currentDoc} /> : null}
+            {section === 'impose' ? <ImposeSection task={task} currentDoc={currentDoc} /> : null}
+          {section === 'pages' ? <PagesSection task={task} currentDoc={currentDoc} /> : null}
             {section === 'header' ? (
               <HeaderFooterSection task={task} currentDoc={currentDoc} />
             ) : null}

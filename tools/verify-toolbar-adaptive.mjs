@@ -216,6 +216,30 @@ const rm = JSON.parse(removed)
 const rightPanelGone = !rm.rightPanelBtn && !rm.panelDom && !rm.tabDom
 const othersKept = rm.leftPanelBtn && rm.settingsBtn
 
+/*
+ * ⑥ 版式还在（v1.0.5.2 加）：
+ * 1.0.2.0 合并工具箱时，viewer.css 被旧版覆盖，`.toolbar{display:flex}` 与
+ * `.sidebar__tabs` 一起丢了 —— 功能全对、界面却竖排，任何 DOM 断言都发现不了。
+ * 所以这里直接量「工具栏是不是一行」「侧栏页签有没有高度」。
+ */
+const layout = JSON.parse(
+  await evalJs(`(() => {
+    const tb = document.querySelector('.toolbar');
+    const tabs = document.querySelector('.sidebar__tabs');
+    const cs = tb ? getComputedStyle(tb) : null;
+    const ts = tabs ? getComputedStyle(tabs) : null;
+    return JSON.stringify({
+      hasToolbar: Boolean(tb),
+      toolbarDisplay: cs?.display ?? '',
+      toolbarH: tb ? Math.round(tb.getBoundingClientRect().height) : 0,
+      tabsH: tabs ? Math.round(tabs.getBoundingClientRect().height) : 0,
+      tabsDisplay: ts?.display ?? ''
+    });
+  })()`)
+)
+const layoutOk =
+  layout.hasToolbar && layout.toolbarDisplay === 'flex' && layout.toolbarH > 30 && layout.toolbarH < 70
+
 console.log('--- 判据 ---')
 console.log(`① 任何宽度都不溢出:        ${noOverflowEverywhere ? '✓' : '✗'}`)
 console.log(
@@ -226,11 +250,14 @@ console.log(
 )
 console.log(`④ 宽窗口保持原样:          ${wideUnscaled ? '✓' : '✗'}`)
 console.log(
+  `⑥ 顶部工具栏仍是一行:      ${layoutOk ? '✓' : '✗'}（display=${layout.toolbarDisplay}，高 ${layout.toolbarH}px，侧栏页签高 ${layout.tabsH}px）`
+)
+console.log(
   `⑤ 右侧「批注」列表已下线:  ${rightPanelGone ? '✓' : '✗'}（右侧栏按钮 ${rm.rightPanelBtn ? '还在' : '已去掉'}、.right-panel ${rm.panelDom ? '还在' : '不在'}、页签 ${rm.tabDom ? '还在' : '不在'}）`
 )
 
 const pass =
-  noOverflowEverywhere && scaledWhenNarrow && overflowMenuWhenVeryNarrow && wideUnscaled && rightPanelGone
+  noOverflowEverywhere && scaledWhenNarrow && overflowMenuWhenVeryNarrow && wideUnscaled && rightPanelGone && layoutOk
 if (pass && !othersKept) {
   console.log(`⚠ 左栏/设置按钮缺失：左栏=${rm.leftPanelBtn} 设置=${rm.settingsBtn}`)
 }

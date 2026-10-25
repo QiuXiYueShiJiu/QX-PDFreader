@@ -55,7 +55,7 @@ const PORT = Number(process.argv[3] ?? process.argv[2] ?? 9290)
 /*
  * 已安装产物 = **exe 旁边**的 resources/app.asar。
  * 不能拿 installDir() 直接拼 resources —— 2.1.x 的 NSIS 会多建一层
- * `qiuxi-pdf-reader\`，拼出来是 `C:\Program Files\QiuXiPDFReader\resources\app.asar`
+ * `qiuxi-pdf-reader\`，拼出来是 `D:\QXClass\PDFReader\resources\app.asar`
  * （旧布局、安装后根本不存在），2026-10-18 安装态轮次因此假红两条。
  */
 const EXE = process.env.PDF_READER_EXE ?? installedExe()

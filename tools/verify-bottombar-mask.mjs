@@ -193,6 +193,22 @@ console.log(`   图片工具：${JSON.stringify(withImage)}`)
 check('图片工具出现「选择图片」按钮', withImage?.选图钮 === true)
 check('隐藏的 file input 仍在（触屏能唤起相册）', withImage?.隐藏input === true)
 
+/*
+ * 先把「未导出的内容编辑」清干净。
+ * 1.0.6.x 起：只要还有没导出的内容编辑，编辑条就常驻（提示用户导出），
+ * 这是有意设计；但脏实例上「退出编辑后整行消失」这条判据会误报。
+ * 截图脚本、别的用例留下脏状态时就会踩到，所以这里显式复位。
+ */
+await cdp(`(() => {
+  const s = window.__store.getState();
+  const anns = s.annotations ?? [];
+  const keep = anns.filter((a) => !['whiteout', 'rect', 'ellipse', 'text', 'image'].includes(a.type));
+  if (keep.length !== anns.length) s.setAnnotations?.(keep);
+  s.setExportDirty?.(false);
+  return 'cleaned';
+})()`, 20000)
+await sleep(400)
+
 /* 退出编辑：这一行应整体消失，不留空行 */
 cdp(`(() => { window.__store.getState().setEditTool('none'); return 'ok' })()`)
 await sleep(350)
@@ -266,34 +282,53 @@ check('退出按钮点击区够大（触屏友好，≥44px 高）', (maskBase?.
 check('提示条仍在顶部', (maskBase?.提示条矩形?.上 ?? 999) < 120, `上=${maskBase?.提示条矩形?.上}`)
 check('底部退出条可以接收点击', maskBase?.底层可点 === 'auto', `pointer-events=${maskBase?.底层可点}`)
 
-/* 单指拖动：光圈必须跟着走 */
+/* 单指拖动：光圈必须跟着走，且页面不能跟着滚 */
+/*
+ * ★ 事件要派发到 **elementFromPoint 命中的元素**（真实手指的 target），
+ *   不能派发到 window 上。1.0.6.0 的事故就是这样漏掉的：
+ *   吞事件的监听器挂在 window 捕获阶段并 stopPropagation，
+ *   真实触摸（target 在页面里）会把遮罩自己的冒泡监听器一起拦掉，
+ *   而用例把事件直接派发到 window（target 就是 window，同一节点的监听器
+ *   不会被 stopPropagation 掐断），于是「用例全绿、用户完全拖不动」。
+ *   这条教训写进判据：必须是真实 target + 断言页面没有滚动。
+ */
 const dragResult = j(
   cdp(`(async () => {
      const wait = (ms) => new Promise(r => setTimeout(r, ms));
      const before = window.__maskState;
      if (!before) return JSON.stringify({ err: '没有 __maskState（测试挂钩没开）' });
      const target = { x: Math.round(window.innerWidth * 0.3), y: Math.round(window.innerHeight * 0.35) };
-     const opts = { pointerId: 1, pointerType: 'touch', isPrimary: true, bubbles: true, cancelable: true, clientX: target.x, clientY: target.y };
-     window.dispatchEvent(new PointerEvent('pointerdown', opts));
+     const el = document.elementFromPoint(target.x, target.y);
+     if (!el) return JSON.stringify({ err: 'elementFromPoint 拿不到元素' });
+     const scroll = document.querySelector('.viewer-scroll');
+     const scroll0 = Math.round(scroll?.scrollTop ?? 0);
+     const opts = { pointerId: 1, pointerType: 'touch', isPrimary: true, bubbles: true, cancelable: true, clientX: target.x, clientY: target.y, buttons: 1 };
+     const mk = (k, x, y) => new PointerEvent(k, { ...opts, clientX: x, clientY: y });
+     el.dispatchEvent(mk('pointerdown', target.x, target.y));
      await wait(120);
-     window.dispatchEvent(new PointerEvent('pointermove', { ...opts, clientX: target.x + 40, clientY: target.y + 30 }));
+     el.dispatchEvent(mk('pointermove', target.x + 40, target.y + 30));
      await wait(120);
      const during = window.__maskState;
-     window.dispatchEvent(new PointerEvent('pointerup', { ...opts, clientX: target.x + 40, clientY: target.y + 30 }));
+     el.dispatchEvent(mk('pointerup', target.x + 40, target.y + 30));
      await wait(120);
-     return JSON.stringify({ 拖动前: before, 落点: target, 拖动后: during });
+     return JSON.stringify({ 拖动前: before, 落点: target, 拖动后: during, 命中: el.className || el.tagName, 滚动前: scroll0, 滚动后: Math.round(scroll?.scrollTop ?? 0) });
    })()`, 60000)
 )
 console.log(`   单指拖动：${JSON.stringify(dragResult)}`)
 check(
-  '单指按下立即把光圈移到手指处（触屏关键行为）',
+  '单指按下立即把光圈移到手指处（触屏关键行为·真实 target）',
   dragResult?.拖动后 && Math.abs(dragResult.拖动后.x - dragResult.拖动前.x) > 20,
-  `前 x=${dragResult?.拖动前?.x} → 后 x=${dragResult?.拖动后?.x}`
+  `前 x=${dragResult?.拖动前?.x} → 后 x=${dragResult?.拖动后?.x}（命中 ${dragResult?.命中}）`
 )
 check(
   '光圈位置贴近落点（跟随手指，不是自己乱跑）',
   dragResult?.拖动后 && Math.abs(dragResult.拖动后.x - (dragResult?.落点?.x ?? 0) - 40) < 40,
   `光圈 x=${dragResult?.拖动后?.x} 期望≈${(dragResult?.落点?.x ?? 0) + 40}`
+)
+check(
+  '拖光圈时页面不跟着滚（遮罩独占这次触摸）',
+  dragResult?.滚动前 === dragResult?.滚动后,
+  `滚动 ${dragResult?.滚动前} → ${dragResult?.滚动后}`
 )
 
 /* 双指捏合：半径必须变 */
@@ -345,6 +380,60 @@ const handleResult = j(
 )
 console.log(`   外缘圆点：${JSON.stringify(handleResult)}`)
 check('拖动外缘圆点能改光圈大小', (handleResult?.拖后半径 ?? 0) > (handleResult?.起始半径 ?? 0) + 30, `${handleResult?.起始半径} → ${handleResult?.拖后半径}`)
+
+/*
+ * 放大镜 + 触屏（用户 2026-10-23：「聚光和放大镜功能对于触屏还是有适配问题」）。
+ *
+ * 三条判据对应三种真实的坏法：
+ *   ① 切到放大镜后拖不动（只认 hover/pointermove 的老代码就这表现）；
+ *   ② 拖到页面边缘抛异常/黑屏——镜头取源越界，drawImage 会失败；
+ *   ③ 遮罩上的拖动把底下的 PDF 一起滚了——触摸事件没被吞掉。
+ */
+cdp(`(() => { window.__store.getState().setMaskMode('magnifier'); return 'ok' })()`)
+await sleep(450)
+const magResult = j(
+  cdp(`(async () => {
+     const wait = (ms) => new Promise(r => setTimeout(r, ms));
+     const scroller = document.querySelector('.viewer-scroll');
+     const scrollBefore = scroller ? scroller.scrollTop : -1;
+     const before = window.__maskState;
+     if (!before) return JSON.stringify({ err: '没有 __maskState' });
+     const base = { pointerId: 31, pointerType: 'touch', isPrimary: true, bubbles: true, cancelable: true };
+     const startX = Math.max(40, Math.round(window.innerWidth * 0.25));
+     const startY = Math.max(40, Math.round(window.innerHeight * 0.2));
+     window.dispatchEvent(new PointerEvent('pointerdown', { ...base, clientX: startX, clientY: startY }));
+     await wait(100);
+     for (const d of [[-30, -30], [-90, -80], [-160, -140]]) {
+       window.dispatchEvent(new PointerEvent('pointermove', { ...base, clientX: startX + d[0], clientY: startY + d[1] }));
+       await wait(90);
+     }
+     const during = window.__maskState;
+     window.dispatchEvent(new PointerEvent('pointerup', { ...base, clientX: startX - 160, clientY: startY - 140 }));
+     await wait(150);
+     const scrollAfter = scroller ? scroller.scrollTop : -1;
+     return JSON.stringify({
+       模式: during?.mode,
+       前: { x: before.x, y: before.y },
+       后: { x: during?.x, y: during?.y },
+       放大绘制: during?.放大绘制,
+       滚动: { before: scrollBefore, after: scrollAfter }
+     });
+   })()`, 60000)
+)
+console.log(`   放大镜拖动：${JSON.stringify(magResult)}`)
+check(
+  '放大镜模式下单指拖动，光圈跟着走（触屏适配）',
+  magResult?.模式 === 'magnifier' &&
+    magResult?.后 &&
+    (Math.abs(magResult.后.x - (magResult?.前?.x ?? 0)) > 20 ||
+      Math.abs(magResult.后.y - (magResult?.前?.y ?? 0)) > 20),
+  `(${magResult?.前?.x},${magResult?.前?.y}) → (${magResult?.后?.x},${magResult?.后?.y})`
+)
+check(
+  '遮罩上的触摸不会把底下的 PDF 滚走（事件被吞掉）',
+  (magResult?.滚动?.before ?? -1) === (magResult?.滚动?.after ?? -2),
+  `scrollTop ${magResult?.滚动?.before} → ${magResult?.滚动?.after}`
+)
 
 /* 黑屏也要有底部退出按钮（黑屏时最需要它） */
 cdp(`(() => { window.__store.getState().setMaskMode('black'); return 'ok' })()`)

@@ -33,6 +33,7 @@ import {
 import { batchPdfToImages } from './batch-images'
 import './styles/base.css'
 import './styles/viewer.css'
+import './styles/viewer-compat.css'
 import './styles/rails.css'
 import './styles/drawbar.css'
 import './styles/tabs.css'
@@ -44,13 +45,17 @@ import './styles/components.css'
 import './styles/edit.css'
 import './styles/disclaimer.css'
 /*
- * Metro 主题的形态覆盖放最后：它只改「外观形态」，颜色令牌在 base.css 里，
+ * Metro 主题的形态覆盖放最后：它只改「外观形态」，颜色校验值在 base.css 里，
  * 放最后能确保它对前面文件的圆角/阴影规则有最终决定权。
  */
 import './styles/metro.css'
+import './styles/glass.css'
 /* PDF 工具箱面板（合并/拆分/水印/压缩/加解密/图片互转/Office 转换） */
 import './styles/tools.css'
 import './styles/update-toast.css'
+import './styles/market.css'
+/* 布局包放最后：它只写结构，需要能覆盖前面各主题对圆角/高度的设定 */
+import './styles/layout-office.css'
 
 /*
  * ---------- 自动化测试挂钩 ----------
@@ -121,9 +126,78 @@ if (exposeTestHooks) {
 
 const container = document.getElementById('root')
 if (!container) throw new Error('找不到 #root 容器')
+/* 收窄后另存一份非空引用：bootstrap 是异步函数，TS 不会把外面的收窄带进闭包 */
+const rootEl: HTMLElement = container
 
-createRoot(container).render(
-  <StrictMode>
-    <App />
-  </StrictMode>
-)
+/*
+ * ---------- 资源管理器缩略图客户端 ----------
+ *
+ * 两个入口共用一份渲染代码（`./thumb.ts`）：
+ *   ① `--render-thumb` 启动（shell 提供器唤起）：只渲染首页 → 交回 dataURL → 主进程写盘退出。
+ *      ★ 这种模式**不挂 React**（见文件末尾的 bootstrap）：挂载整套界面只会拖慢启动，
+ *      而且 App 挂载后会 `app:renderer-ready`，主进程会把待打开文件推过来 ——
+ *      等于为了渲一张缩略图顺手把整个文档加载一遍。
+ *   ② 正常启动：文档打开后顺手把首页缩略图写进缓存，用户在资源管理器里马上就能看到。
+ *      用 store 订阅而不是改组件，避免把「顺带做的事」散进渲染路径。
+ */
+async function bootstrap(): Promise<void> {
+  const api = window.pdfApp
+  let thumbMode = false
+  if (api?.thumb) {
+    let pdfPath = ''
+    let width = 512
+    try {
+      const task = await api.thumb.task()
+      thumbMode = task.mode
+      pdfPath = task.pdfPath
+      width = task.width || 512
+    } catch (err) {
+      console.warn('[thumb] 取任务失败', err)
+    }
+
+    if (thumbMode) {
+      try {
+        const { renderThumbDataUrl } = await import('./thumb')
+        const dataUrl = await renderThumbDataUrl(pdfPath, width)
+        await api.thumb.done(dataUrl)
+      } catch (err) {
+        console.warn('[thumb] 渲染失败', err)
+        await api.thumb.done('')
+      }
+      /* 交完就停：不挂 React、不报到 renderer-ready */
+      return
+    }
+
+    /* 正常模式：每个路径只暖一次；失败静默（缩略图不能让阅读主流程变慢或报错） */
+    const warmed = new Set<string>()
+    let busy = false
+    useViewer.subscribe((state) => {
+      if (busy) return
+      const tab = state.tabs.find((t) => t.id === state.activeTabId)
+      const path = tab?.path
+      if (!path || state.pageCount < 1 || warmed.has(path)) return
+      warmed.add(path)
+      busy = true
+      void (async () => {
+        try {
+          if (await api.thumb.fresh(path)) return
+          const { renderThumbDataUrl } = await import('./thumb')
+          const dataUrl = await renderThumbDataUrl(path, 512)
+          await api.thumb.save(path, dataUrl)
+        } catch (err) {
+          console.warn('[thumb] 缓存失败', err)
+        } finally {
+          busy = false
+        }
+      })()
+    })
+  }
+
+  createRoot(rootEl).render(
+    <StrictMode>
+      <App />
+    </StrictMode>
+  )
+}
+
+void bootstrap()

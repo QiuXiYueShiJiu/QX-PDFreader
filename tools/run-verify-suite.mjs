@@ -77,8 +77,12 @@ const DEFAULT_SUITE = [
   'verify-select.mjs', // ★ 选择工具的**鼠标**交互：跨行拖选 / 反向拖选 / 点灰底清选区 / 双击选词 / 高亮矩形落在页内（含「拖两行只选 1 个字」回归）
   'verify-ocr.mjs', // 扫描页 OCR：识别当前页画布 / 文字层可选中 / 选中后可进改文字（tesseract 资源与 CSP 的回归）
   'verify-teaching.mjs',
-  'verify-update.mjs', // 更新：设置页入口/自动开关/浮层出现与收起/拒绝越权地址/ready 双按钮（离线，不连真站）
+  'verify-update.mjs',
+  'verify-theme.mjs', // 主题 9 档校验值与对比度、Metro 直角、自定义背景图的 CSS 变量与解码
+  'verify-theme-pack.mjs', // 主题包：3 个包 / 每包设置 / 分段控件不溢出（用户报的横向溢出）
   'verify-tools.mjs', // PDF 工具箱：面板入口 + 水印/元数据两条真链路 + 高级 API 齐全（离线）
+  'verify-newpdf.mjs',
+    'verify-impose.mjs', // 新建空白 PDF：工具栏入口 / 对话框默认值 / 页数方向底色 / 创建后多标签且不顶掉旧文档
   'verify-content-edit.mjs', // 内容编辑入口冒烟：工具接线 / 画-选-删链路 / 文字层让位 / 漫游态不误建物件
   'verify-export-ipc.mjs', // 导出为新 PDF 的 IPC（带 targetPath 不弹框）：落盘、可解析、拒绝覆盖源文件
   'verify-no-foreground.mjs', // 前台不被改动：第二实例转交文件时不许把隐藏窗口拽到前台

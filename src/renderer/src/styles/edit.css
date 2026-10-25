@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 覆盖式内容编辑（选择 / 文字 / 图片 / 涂白 / 矩形 / 椭圆）的样式。
  *
  * ============================================================
@@ -343,7 +343,7 @@
   height: 32px;
   padding: 0 6px;
   border-radius: 8px;
-  color: rgb(232 236 244);
+  color: rgb(var(--text));
   font-size: 12px;
   transition: background var(--dur-fast, 120ms) var(--ease, ease);
 }
@@ -389,7 +389,7 @@
   min-height: 32px;
   padding: 0 10px;
   border-radius: 8px;
-  color: rgb(232 236 244);
+  color: rgb(var(--text));
   font-size: 12px;
   white-space: nowrap;
   transition: background var(--dur-fast, 120ms) var(--ease, ease);
@@ -467,9 +467,11 @@
   gap: 2px;
   padding: 4px;
   border-radius: 10px;
-  background: rgb(28 30 38 / 0.96);
-  border: 1px solid rgb(255 255 255 / 0.12);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+  /* 跟着主题走：浮条不再写死深色（浅色/米色主题下原来是黑条压在白纸上） */
+  background: rgb(var(--surface) / 0.97);
+  border: 1px solid rgb(var(--border) / 0.55);
+  color: rgb(var(--text));
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.22);
   animation: edit-selbar-in 120ms var(--ease, ease);
 }
 
@@ -487,12 +489,12 @@
   height: 32px;
   padding: 0 8px;
   border-radius: 8px;
-  color: rgb(232 236 244);
+  color: rgb(var(--text));
   font-size: 12px;
 }
 
 .edit-selbar__btn:hover {
-  background: rgb(255 255 255 / 0.14);
+  background: rgb(var(--text) / 0.10);
 }
 
 .edit-selbar__btn--plain {
@@ -699,4 +701,45 @@
     width: 14px;
     height: 14px;
   }
+}
+/* 阅读区背景图片：缩略图 + 两个按钮 */
+.sb-bgpic {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.sb-bgpic-thumb {
+  width: 96px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgb(var(--border));
+  flex: 0 0 auto;
+}
+
+.sb-bgpic-empty {
+  width: 96px;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  border: 1px dashed rgb(var(--border));
+  color: rgb(var(--muted));
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+
+.sb-bgpic-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sb-btn--ghost {
+  background: transparent;
+  border: 1px solid rgb(var(--border));
+  color: rgb(var(--text));
 }

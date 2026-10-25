@@ -1,11 +1,11 @@
 /* ============================================================================
  * components.css —— 设置面板与「最近打开」列表的样式
  *
- * 只写这两个组件的样式，颜色令牌沿用 base.css 的定义（--bg / --surface / --text /
+ * 只写这两个组件的样式，颜色变量沿用 base.css 的定义（--bg / --surface / --text /
  * --muted / --border / --accent / --accent-fg），本文件不再整套重复定义主题色。
  * 原因：base.css 已按 html[data-theme] 定义了三套主题，若这里再定义一遍，
  * 两处的值会各自演化、组件与外壳慢慢就不一致了。
- * 本文件只补两类东西：base.css 没有的令牌（--overlay / --danger / --control-h …），
+ * 本文件只补两类东西：base.css 没有的变量（--overlay / --danger / --control-h …），
  * 以及下面注明理由的主色对比度微调。
  *
  * 尺寸约定（与 base.css 的「界面缩放」机制一致）：
@@ -17,7 +17,7 @@
  * ========================================================================== */
 
 :root {
-  /* base.css 没有的令牌，就地补上并给出兜底值，避免依赖加载顺序 */
+  /* base.css 没有的变量，就地补上并给出兜底值，避免依赖加载顺序 */
   --overlay: 15 20 28; /* 遮罩基色：深色下的遮罩由 --overlay-alpha 调重 */
   --overlay-alpha: 0.44;
   --shadow: 15 23 42;
@@ -35,7 +35,7 @@
    *   用户看到的现象就是「弹窗里只有取消，右边没有第二个按钮」，
    *   实际上按钮一直在、也能点，只是根本看不见。
    *
-   *   需要「不透明的实色」时用下面这个令牌，它自带 rgb() 包裹。
+   *   需要「不透明的实色」时用下面这个变量，它自带 rgb() 包裹。
    */
   --danger-solid: #d13b40;
 
@@ -368,9 +368,16 @@ html[data-theme='metro'] {
 
 /* ---------- 分段控件 ---------- */
 
+/*
+ * 分段控件的「防溢出」约束（2026-10-23 用户截图里的 bug：主题项被面板右边切掉）。
+ *   · flex-wrap：选项多时必须能折行，不能硬挤成一行；
+ *   · min-width: 0：父级是 flex 行，不给 0 的话内容宽度算不回来，会顶破容器。
+ */
 .sb-seg {
   display: flex;
   flex: 0 1 auto;
+  flex-wrap: wrap;
+  min-width: 0;
   gap: 0.15rem;
   padding: 0.15rem;
   border: 1px solid rgb(var(--border));
@@ -382,6 +389,9 @@ html[data-theme='metro'] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* 均分当前行宽，最小 4.2rem；不够就折到下一行 */
+  flex: 1 1 calc(25% - 0.15rem);
+  min-width: 3.6rem;
   gap: 0.25rem;
   min-height: var(--control-h);
   padding: 0 0.6rem;
@@ -423,6 +433,17 @@ html[data-theme='metro'] {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.35rem;
+}
+
+/* 强调色的「默认」按钮：与色块同高，排在取色器后面 */
+.sb-color-reset {
+  height: var(--control-h);
+  padding: 0 0.55rem;
+  white-space: nowrap;
+}
+
+.sb-color-reset[disabled] {
+  opacity: 0.45;
 }
 
 .sb-color-btn {
@@ -781,5 +802,235 @@ html[data-theme='metro'] {
   .sb-recent-row,
   .sb-recent-meta {
     transition: none;
+  }
+}
+
+/* 竖向字段：标签在上、控件在下（玻璃主题的两个滑块用）。
+   与 .sb-field 的「左右两栏」不同，滑块需要整行宽度才好拖。 */
+.sb-field--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+.sb-field--stack .sb-range {
+  width: 100%;
+}
+
+/* 文件关联卡片的按钮行 */
+.sb-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* ============================ 新建空白 PDF ============================ */
+
+/*
+ * 与插件市场同一套浮层骨架（fixed 铺满 + 居中卡片 + 点击遮罩关闭另由键盘 Esc 兜底），
+ * 但只服务于一次性的表单，所以不复用 .market 的样式，避免耦合。
+ */
+.newpdf {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(12 14 20 / 0.42);
+}
+
+.newpdf__card {
+  width: min(520px, 100%);
+  padding: 18px 20px 16px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 16px;
+  background: rgb(var(--surface));
+  box-shadow: 0 24px 60px rgb(8 10 16 / 0.38);
+  color: rgb(var(--text));
+}
+
+.newpdf__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.newpdf__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.newpdf__sub {
+  margin: 0;
+  max-width: 40ch;
+  font-size: 12px;
+  line-height: 1.55;
+  color: rgb(var(--muted));
+}
+
+.newpdf__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid rgb(var(--border) / 0.55);
+}
+
+.newpdf__row:first-of-type {
+  border-top: 0;
+}
+
+.newpdf__label {
+  flex: 0 0 42px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgb(var(--muted));
+}
+
+.newpdf__pages {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.newpdf__step {
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 9px;
+  background: rgb(var(--surface-2, var(--surface)));
+  color: rgb(var(--text));
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.newpdf__step:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.newpdf__input {
+  width: 66px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 9px;
+  background: rgb(var(--surface));
+  color: rgb(var(--text));
+  font-size: 13px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.newpdf__hint {
+  font-size: 11px;
+  color: rgb(var(--muted));
+}
+
+.newpdf__seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.newpdf__seg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 10px;
+  background: transparent;
+  color: rgb(var(--text));
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.newpdf__seg-btn.is-on {
+  border-color: rgb(var(--accent));
+  background: rgb(var(--accent) / 0.14);
+  color: rgb(var(--accent));
+  font-weight: 600;
+}
+
+.newpdf__swatch {
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 4px;
+}
+
+.newpdf__notice {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: #c2410c;
+}
+
+.newpdf__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.newpdf__ghost {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: rgb(var(--muted));
+  cursor: pointer;
+}
+
+.newpdf__ghost:hover {
+  background: rgb(var(--text) / 0.06);
+  color: rgb(var(--text));
+}
+
+.newpdf__ghost--text {
+  width: auto;
+  padding: 0 14px;
+  font-size: 13px;
+}
+
+.newpdf__ok {
+  min-height: 36px;
+  padding: 0 18px;
+  border: 1px solid rgb(var(--accent));
+  border-radius: 10px;
+  background: rgb(var(--accent));
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.newpdf__ok:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@media (pointer: coarse) {
+  .newpdf__step,
+  .newpdf__input {
+    min-height: 40px;
+  }
+
+  .newpdf__seg-btn,
+  .newpdf__ok {
+    min-height: 42px;
   }
 }

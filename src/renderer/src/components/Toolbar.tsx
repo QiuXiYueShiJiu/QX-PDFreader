@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   Briefcase,
+  FilePlus2,
   ChevronLeft,
   ChevronRight,
   Columns2,
@@ -28,6 +29,7 @@ import {
   Settings,
   Square
 } from 'lucide-react'
+import { NewPdfDialog } from './NewPdfDialog'
 import { useViewer } from '../store'
 
 /**
@@ -53,6 +55,7 @@ const OVERFLOW_ORDER = ['settings', 'left-panel', 'rotate', 'viewmode', 'zoom-ou
 
 
 export function Toolbar(): JSX.Element {
+  const [newPdfOpen, setNewPdfOpen] = useState(false)
   const page = useViewer((s) => s.page)
   const pageCount = useViewer((s) => s.pageCount)
   const zoom = useViewer((s) => s.zoom)
@@ -229,6 +232,15 @@ const requestOcr = useViewer((s) => s.requestOcr)
         <button className="tb" onClick={() => void pickFile()} title="打开 PDF（Ctrl+O）">
           <File size={17} />
           <span className="tb__label">打开</span>
+        </button>
+        <button
+          className="tb"
+          data-tb-id="new-pdf"
+          onClick={() => setNewPdfOpen(true)}
+          title="新建空白 PDF"
+        >
+          <FilePlus2 size={17} />
+          <span className="tb__label">新建</span>
         </button>
 
         <span className="toolbar__sep" />
@@ -585,6 +597,10 @@ const requestOcr = useViewer((s) => s.requestOcr)
           </div>
         ) : null}
       </div>
+
+      {newPdfOpen && (
+        <NewPdfDialog onClose={() => setNewPdfOpen(false)} />
+      )}
     </div>
   )
 }

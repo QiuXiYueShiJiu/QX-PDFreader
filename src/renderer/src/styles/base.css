@@ -1,9 +1,9 @@
 /**
- * 全局基础样式与设计令牌。
+ * 全局基础样式与设计变量。
  *
  * 约定：
- *   · 颜色令牌写成 `R G B` 三数字，用 `rgb(var(--text))` 或
- *     `rgb(var(--text) / 0.6)` 使用，同一个令牌可复用于任意透明度。
+ *   · 颜色变量写成 `R G B` 三数字，用 `rgb(var(--text))` 或
+ *     `rgb(var(--text) / 0.6)` 使用，同一个变量可复用于任意透明度。
  *   · 主题切换靠 `html[data-theme='light'|'dark'|'sepia']`（由 App 写入）。
  *   · 界面缩放靠 `html { font-size }` + 组件使用 rem/em 实现，
  *     这样滑块调一个变量就能整体缩放，不必改每个组件。
@@ -84,8 +84,8 @@ html[data-theme='sepia'] {
  *    · 强调色 #0078D4（系统默认「蓝色」磁贴）
  *    · 底色 #F2F4F8（设置页背景）
  *    · 文字 #1A1A1A / 次要 #5F6A79
- *  形态特征全部落实在令牌与 metro.css 里：
- *    · 直角（圆角令牌归零）—— 磁贴、按钮、面板都不描圆角
+ *  形态特征全部落实在变量与 metro.css 里：
+ *    · 直角（圆角变量归零）—— 磁贴、按钮、面板都不描圆角
  *    · 平直色块，不叠阴影、不用渐变
  *    · Segoe UI 字体
  *    · 单一强调色做「选中 / 当前」的唯一提示
@@ -101,7 +101,7 @@ html[data-theme='metro'] {
   --accent-fg: 255 255 255;
   --reader-bg: 245 247 250;
 
-  /* 直角是 Metro 的第一特征：圆角令牌归零，全站控件跟着变方 */
+  /* 直角是 Metro 的第一特征：圆角变量归零，全站控件跟着变方 */
   --radius: 0px;
   --radius-sm: 0px;
   --radius-lg: 0px;
@@ -109,6 +109,63 @@ html[data-theme='metro'] {
   --warn-fg: 138 84 6;
 
   color-scheme: light;
+}
+
+/* 深夜：深蓝底，比纯黑少一点反差 */
+html[data-theme='night'] {
+  --bg: 18 22 34;
+  --surface: 26 31 47;
+  --surface-strong: 33 39 58;
+  --text: 226 232 245;
+  --muted: 146 157 180;
+  --border: 52 61 84;
+  --accent: 112 158 255;
+  --reader-bg: 13 16 26;
+
+  color-scheme: dark;
+}
+
+/* 护眼绿：投影与白炽灯教室里最不刺眼 */
+html[data-theme='forest'] {
+  --bg: 232 240 232;
+  --surface: 246 250 246;
+  --surface-strong: 238 245 238;
+  --text: 42 58 44;
+  --muted: 104 124 106;
+  --border: 200 214 202;
+  --accent: 56 138 92;
+  --reader-bg: 221 234 222;
+
+  color-scheme: light;
+}
+
+/* 暖灰：低饱和纸感浅色，白天不反光 */
+html[data-theme='warm'] {
+  --bg: 236 233 227;
+  --surface: 250 248 243;
+  --surface-strong: 243 240 234;
+  --text: 58 54 47;
+  --muted: 128 120 108;
+  --border: 210 204 193;
+  --accent: 170 116 58;
+  --reader-bg: 228 223 213;
+
+  color-scheme: light;
+}
+
+/* 高对比：黑底白字 + 暖金强调，远距离投影最清楚 */
+html[data-theme='contrast'] {
+  --bg: 8 8 10;
+  --surface: 18 18 22;
+  --surface-strong: 28 28 34;
+  --text: 255 255 255;
+  --muted: 176 176 186;
+  --border: 78 78 88;
+  --accent: 255 196 64;
+  --accent-fg: 24 18 0;
+  --reader-bg: 0 0 0;
+
+  color-scheme: dark;
 }
 /* ---------- 重置 ---------- */
 
@@ -220,4 +277,62 @@ button,
 
 .icon-btn:disabled:hover {
   background: none;
+}
+
+/* ===== 2026-10-24 新增 4 档配色（用户要求「丰富主题包」） ===== */
+
+/* 纸墨：更接近教科书内页的暖白，正文对比强，适合长时间批注 */
+html[data-theme='paper'] {
+  --bg: 244 240 232;
+  --surface: 253 251 246;
+  --surface-strong: 246 242 234;
+  --text: 38 34 28;
+  --muted: 118 110 98;
+  --border: 214 206 194;
+  --accent: 28 78 120;
+  --reader-bg: 236 230 220;
+
+  color-scheme: light;
+}
+
+/* 午夜蓝：深蓝底 + 青色强调，关灯讲课时比纯黑柔和又不乏对比 */
+html[data-theme='midnight'] {
+  --bg: 14 22 38;
+  --surface: 22 32 52;
+  --surface-strong: 30 42 66;
+  --text: 226 234 246;
+  --muted: 148 164 190;
+  --border: 52 68 98;
+  --accent: 86 190 214;
+  --reader-bg: 18 28 46;
+
+  color-scheme: dark;
+}
+
+/* 青梅：灰绿底 + 梅子粉强调，护眼但不发黄，适合投影和白板混用 */
+html[data-theme='plum'] {
+  --bg: 236 238 234;
+  --surface: 250 250 248;
+  --surface-strong: 242 243 238;
+  --text: 44 48 44;
+  --muted: 116 124 116;
+  --border: 206 210 204;
+  --accent: 150 64 108;
+  --reader-bg: 228 231 226;
+
+  color-scheme: light;
+}
+
+/* 柔光：极浅的日光白，页面几乎不压暗，适合白天靠窗的教室 */
+html[data-theme='glow'] {
+  --bg: 250 249 246;
+  --surface: 255 254 251;
+  --surface-strong: 249 248 244;
+  --text: 48 46 42;
+  --muted: 130 126 118;
+  --border: 226 223 216;
+  --accent: 96 112 196;
+  --reader-bg: 245 244 240;
+
+  color-scheme: light;
 }

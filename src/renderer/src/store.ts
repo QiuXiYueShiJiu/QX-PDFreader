@@ -10,6 +10,7 @@
  */
 
 import { create } from 'zustand'
+import { normalizeMarketList } from './market-validate'
 import {
   CONTENT_ANNOTATION_TYPES,
   type Annotation,
@@ -25,6 +26,23 @@ import {
 import { DEFAULT_SETTINGS } from '@shared/settings'
 
 /** 更新检查结果（渲染层只用到这几个字段） */
+/** 插件市场里的一条主题扩展包（服务器 plugins.php 的 items[] 子集） */
+export interface MarketItem {
+  id: string
+  name: string
+  version?: string
+  author?: string
+  desc?: string
+  theme: {
+    accent: string
+    bg: string
+    surface: string
+    text: string
+    muted: string
+    border: string
+    readerBg: string
+  }
+}
 export interface UpdateInfo {
   ok: boolean
   newer: boolean
@@ -191,6 +209,11 @@ interface ViewerState {
    * 同时打开会互相遮挡；App 里保证「开其中一个就关掉另一个」。
    */
   showTools: boolean
+  /** 插件市场面板是否打开 */
+  showMarket: boolean
+  /** 市场清单（主题扩展包），null 表示还没拉过 */
+  marketItems: MarketItem[] | null
+  marketError: string
   /**
    * 启动声明是否已在**本次启动**里被关掉。
    *
@@ -308,7 +331,7 @@ interface ViewerState {
    * 浏览器语义：这个文件已经在某个标签里 → 切过去（不开第二个）；
    * 否则**新开一个标签**，并把当前标签的页码/缩放/批注暂存起来。
    */
-  openFile: (filePath: string, page?: number) => Promise<void>
+  openFile: (filePath: string, page?: number, titleName?: string) => Promise<void>
   pickFile: () => Promise<void>
 
   /* ---------- 标签页 ---------- */
@@ -354,6 +377,13 @@ interface ViewerState {
   setShowSettings: (v: boolean) => void
   /** 打开 / 关闭 PDF 工具箱（与设置面板互斥，见 App） */
   setShowTools: (v: boolean) => void
+  /** 打开 / 关闭插件市场 */
+  setShowMarket: (v: boolean) => void
+  /** 拉取市场清单（失败只记文案，不抛） */
+  loadMarket: () => Promise<void>
+  /** 安装主题包并立刻切过去 */
+  installTheme: (item: MarketItem) => Promise<void>
+
   /** 关掉本次启动的声明浮层（不写持久化） */
   dismissDisclaimer: () => void
 
@@ -502,6 +532,10 @@ let toastTimer: ReturnType<typeof setTimeout> | null = null
 /** 阅读位置防抖定时器（翻页很快时不希望每次都写盘） */
 let positionTimer: ReturnType<typeof setTimeout> | null = null
 
+/** 内容编辑是否还剩脏数据：删干净了就不该再挂「未导出」提示 */
+const hasContentEdits = (list: Annotation[]): boolean =>
+  list.some((a) => CONTENT_ANNOTATION_TYPES.includes(a.type))
+
 export const useViewer = create<ViewerState>((set, get) => ({
   filePath: '',
   fileName: '',
@@ -526,6 +560,9 @@ export const useViewer = create<ViewerState>((set, get) => ({
   showRightPanel: DEFAULT_SETTINGS.showRightPanel,
   showSettings: false,
   showTools: false,
+  showMarket: false,
+  marketItems: null,
+  marketError: '',
   disclaimerDismissed: false,
   updateInfo: null,
   updateProgress: { received: 0, total: 0, fraction: 0 },
@@ -581,7 +618,7 @@ export const useViewer = create<ViewerState>((set, get) => ({
     }
   },
 
-  openFile: async (filePath, page) => {
+  openFile: async (filePath, page, titleName) => {
     const before = get()
 
     // 已经开过这个文件：切过去，不要再开一个标签
@@ -611,7 +648,7 @@ export const useViewer = create<ViewerState>((set, get) => ({
         {
           id: activeTabId,
           path: result.path,
-          name: result.path.split(/[\\/]/).pop() ?? result.path,
+          name: titleName ?? result.title ?? result.path.split(/[\\/]/).pop() ?? result.path,
           page: page ?? 1,
           /*
            * ★ 每次新开文件都回到「适应宽度」。
@@ -809,7 +846,43 @@ export const useViewer = create<ViewerState>((set, get) => ({
   setShowSettings: (v) => set(v ? { showSettings: true, showTools: false } : { showSettings: false }),
 
   /* 工具箱与设置面板互斥：两个都是右侧抽屉，同时开会互相遮挡 */
-  setShowTools: (v) => set(v ? { showTools: true, showSettings: false } : { showTools: false }),
+  setShowTools: (v) => set(v ? { showTools: true, showSettings: false, showMarket: false } : { showTools: false }),
+
+  setShowMarket: (v) => set(v ? { showMarket: true, showSettings: false, showTools: false } : { showMarket: false }),
+
+  loadMarket: async () => {
+    try {
+      const res = await window.pdfApp.market.list()
+      /*
+       * 清单在这里过一遍校验：服务器/镜像/raw 上的 JSON 都可能被人手改坏，
+       * 半坏的主题会让界面一处黑一处白，所以坏包整条丢弃（不截断、不补默认值）。
+       */
+      const items = normalizeMarketList(res.items)
+      const rawCount = Array.isArray(res.items) ? res.items.length : 0
+      const note =
+        res.ok && rawCount > 0 && items.length === 0 ? '清单里没有合法的主题包（七色校验值缺失或颜色越界）' : ''
+      set({ marketItems: items, marketError: res.ok ? note : res.error ?? '市场不可用' })
+    } catch (error) {
+      set({ marketItems: [], marketError: '连不上市场服务器' })
+    }
+  },
+
+  installTheme: async (item) => {
+    const pack = {
+      id: item.id,
+      name: item.name,
+      accent: item.theme.accent,
+      bg: item.theme.bg,
+      surface: item.theme.surface,
+      text: item.theme.text,
+      muted: item.theme.muted,
+      border: item.theme.border,
+      readerBg: item.theme.readerBg
+    }
+    const state = get()
+    const rest = state.settings.customThemes.filter((x) => x.id !== pack.id)
+    await state.patchSettings({ customThemes: [...rest, pack], customThemeId: pack.id, theme: 'custom' })
+  },
 
   dismissDisclaimer: () => set({ disclaimerDismissed: true }),
 
@@ -956,9 +1029,14 @@ export const useViewer = create<ViewerState>((set, get) => ({
     // 涂白/文字/图片/形状改的是页面内容，得让人知道「还没导出」
     if (CONTENT_ANNOTATION_TYPES.includes(item.type)) set({ exportDirty: true })
   },
-
   removeAnnotation: async (id) => {
-    set({ annotations: get().annotations.filter((a) => a.id !== id) })
+    const rest = get().annotations.filter((a) => a.id !== id)
+    /*
+     * ★ 删掉最后一条内容编辑后要把 exportDirty 复位。
+     *   不然「清空」之后编辑条常驻、角标一直提示「有未导出的编辑」，
+     *   用户没有任何入口能把它消掉 —— 实测会被当成 bug 报上来。
+     */
+    set({ annotations: rest, exportDirty: hasContentEdits(rest) && get().exportDirty })
   },
 
   updateAnnotationNote: async (id, note) => {
@@ -1189,7 +1267,8 @@ export const useViewer = create<ViewerState>((set, get) => ({
     if (get().annotations.length === 0) return
     // 清空是可撤销的：先压栈再清，否则误触清屏就救不回来了
     pushHistory(get())
-    set({ annotations: [] })
+    // 清空同样要复位「未导出」：一条内容编辑都不剩了，再挂角标就是错误提示
+    set({ annotations: [], exportDirty: false })
     get().showToast('已清空批注（可撤销）')
   }
 }))
@@ -1200,10 +1279,85 @@ export const useViewer = create<ViewerState>((set, get) => ({
  * 用 CSS 变量而不是把样式散落到组件里，这样滑块拖动时整个界面
  * 立刻按比例缩放，不需要重新渲染任何组件。
  */
+function hexToRgbTriple(hex: string): string | null {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
+  if (!m) return null
+  const n = parseInt(m[1], 16)
+  return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`
+}
+
 function applyTheme(settings: ReaderSettings): void {
   const root = document.documentElement
   root.dataset.theme = settings.theme
+  /* 2026-10-24：布局（office = Office 2019 风格的功能区）与配色解耦，各自独立切换 */
+  root.dataset.layout = settings.themeLayout
   // 基准字号 13px，uiScale 1.15 → 约 15px
   root.style.fontSize = `${(13 * settings.uiScale).toFixed(2)}px`
   root.style.setProperty('--reader-bg', settings.pageBackground)
+
+  /*
+   * 液态玻璃主题包的两个可调参数。
+   *
+   * 用行内变量而不是 data 属性：滑块拖动时要立刻生效，走 CSS 变量
+   * 不触发任何 React 重渲染；切到别的主题时保留值也无害（那套规则
+   * 只写在 html[data-theme='glass'] 作用域里）。
+   */
+  root.style.setProperty('--glass-radius', `${settings.glassRadius}px`)
+  root.style.setProperty('--glass-blur', `${settings.glassBlur}px`)
+
+  /*
+   * 插件市场装的主题包（theme='custom'）。
+   *
+   * 内置主题靠 base.css 的 `html[data-theme=...]` 规则，主题包不能改 CSS 文件，
+   * 所以这里把校验值写成**行内变量**覆盖：行内优先级高于样式表，切走时再清掉。
+   */
+  const tokens = [
+    '--bg',
+    '--surface',
+    '--surface-strong',
+    '--text',
+    '--muted',
+    '--border',
+    '--accent',
+    '--reader-bg'
+  ]
+  for (const name of tokens) root.style.removeProperty(name)
+  if (settings.theme === 'custom') {
+    const pack =
+      settings.customThemes.find((x) => x.id === settings.customThemeId) ?? settings.customThemes[0]
+    if (pack) {
+      root.style.setProperty('--bg', pack.bg)
+      root.style.setProperty('--surface', pack.surface)
+      root.style.setProperty('--text', pack.text)
+      root.style.setProperty('--muted', pack.muted)
+      root.style.setProperty('--border', pack.border)
+      root.style.setProperty('--accent', pack.accent)
+      root.style.setProperty('--reader-bg', pack.readerBg)
+    }
+  }
+
+  /*
+   * 强调色覆盖：三个内置包与市场主题包都能换主色。
+   *
+   * 上面第 1312 行已经把 --accent 清掉（自定义包会再写回自己的主色），
+   * 所以这里只要用户设了 accentColor 就直接覆盖；没设就什么都不做，
+   * 内置包用 CSS 里的默认值、市场包用 JSON 里的 accent。
+   */
+  const accent = hexToRgbTriple(settings.accentColor)
+  if (accent) root.style.setProperty('--accent', accent)
+
+  // 自定义背景图：走 pdf-file 协议（与 PDF 同一条链路），冒号不编码
+  const image = settings.readerImage
+  if (image) {
+    const encoded = image
+      .replace(/\\/g, '/')
+      .split('/')
+      .map((seg) => encodeURIComponent(seg).replace(/%3A/gi, ':'))
+      .join('/')
+    root.style.setProperty('--reader-image', `url("pdf-file:///${encoded}")`)
+  } else {
+    root.style.setProperty('--reader-image', 'none')
+  }
+  root.style.setProperty('--reader-image-dim', image ? String(settings.readerImageDim) : '0')
+  root.style.setProperty('--reader-image-blur', `${settings.readerImageBlur}px`)
 }

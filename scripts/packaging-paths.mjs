@@ -7,7 +7,7 @@
  * ══════════════════════════════════════════════════════════════════
  * 为什么要有这个文件（用户 2026-10-16 要求：源码零隐私信息）
  * ══════════════════════════════════════════════════════════════════
- *   以前 `C:\Program Files\QiuXiPDFReader` 这个内网目录被硬编码在十几处源码与脚本里，
+ *   以前 `D:\QXClass\QXPDFReader` 这个安装目录被硬编码在十几处源码与脚本里，
  *   仓库一开源就把客户的部署路径泄出去了。
  *   现在：
  *     · 源码里只有**通用默认值**（见下面 DEFAULT_*）；
@@ -66,8 +66,8 @@ export function installDir() {
  * ── 为什么需要这一层 ──────────────────────────────────────────────
  *   v2.1.0.1 起 NSIS 脚本（build/installer.nsh.in）把程序装进
  *   `$INSTDIR\<APP_FILENAME>\`，也就是安装根目录下再多一层 `qiuxi-pdf-reader`：
- *     C:\Program Files\QiuXiPDFReader\              ← installDir()
- *     C:\Program Files\QiuXiPDFReader\qiuxi-pdf-reader\   ← 真正的程序目录
+ *     D:\QXClass\PDFReader\              ← installDir()
+ *     D:\QXClass\PDFReader\qiuxi-pdf-reader\   ← 真正的程序目录
  *   早先的脚本直接拼 `installDir()\秋夕-PDF阅读器.exe`，2026-10-18 装的
  *   2.1.1.0 之后全部指向不存在的路径（退出对话框用例因此读错了 app.asar）。
  */

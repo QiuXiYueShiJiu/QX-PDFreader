@@ -66,6 +66,21 @@ const HANDLE_HIT = 30
  */
 const MAGNIFY = 2.2
 
+/**
+ * 把触点收进视口范围。
+ *
+ * 为什么需要：圆心直接取 clientX/clientY，而触点在边缘、或用测试脚本从
+ * 页面坐标换算过来时，可能落到视口外（负数或超过宽高）。圆心在视口外，
+ * 用户看到的就是「光圈不见了」——这在触屏上尤其容易发生（手指贴着屏幕
+ * 边缘往外拖）。夹到 [0, 视口宽高] 后，光圈始终贴在边上，不会消失。
+ */
+function clampPointer(x: number, y: number): { x: number; y: number } {
+  const maxX = typeof window === 'undefined' ? x : window.innerWidth
+  const maxY = typeof window === 'undefined' ? y : window.innerHeight
+  return { x: Math.min(Math.max(0, x), maxX), y: Math.min(Math.max(0, y), maxY) }
+}
+
+
 export function ScreenMask(): JSX.Element | null {
   const maskMode = useViewer((s) => s.maskMode)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -102,6 +117,8 @@ export function ScreenMask(): JSX.Element | null {
     let radiusStartX = 0
     /** 最近一次捏合的计算明细（测试挂钩会读它，见文件末尾的 __maskState） */
     let lastPinch: Record<string, number> = {}
+    /** 上一次绘制时，放大镜是否真的把源画面画进了洞里（测试挂钩用） */
+    let magDrawn = false
 
     const resize = (): void => {
       const dpr = window.devicePixelRatio || 1
@@ -154,39 +171,164 @@ export function ScreenMask(): JSX.Element | null {
        * 源画面取的是 .pdf-page__canvas（pdf.js 渲染的那张），
        * 它就在同一个文档里，可以直接 drawImage。
        */
+      /*
+       * ★ 放大镜的「底」：先给洞里铺一层深色（2026-10-23 修）。
+       *
+       * 旧实现只在洞里有画布时画一张放大图，画不到就留着透明——而透明洞
+       * 露出的是白色纸面，于是「光圈停在工具栏/页面外」或「页面是空白」
+       * 时，用户看到的是一个**纯白圆盘**，和聚光灯一模一样（用户实测反馈
+       * 「聚光和放大镜功能一样了，形式也有错误」）。
+       * 现在恒填深色底：取不到画面时是一枚深色镜头，而不是刺眼的白洞。
+       */
       if (maskMode === 'magnifier') {
+        ctx.save()
+        ctx.beginPath()
+        ctx.arc(x, y, r, 0, Math.PI * 2)
+        ctx.clip()
+        ctx.fillStyle = 'rgba(16, 20, 28, 0.94)'
+        ctx.fillRect(x - r, y - r, r * 2, r * 2)
+        ctx.restore()
+      }
+
+      /*
+       * 洞里画什么：聚光灯 = 页面原尺寸，放大镜 = 放大 MAGNIFY 倍。
+       *
+       * ★ 聚光灯也走「画布重绘」而不是「留透明洞」（2026-10-23 修）。
+       *   留透明洞本该透出下面真实页面，但实测洞里的文字被一层白雾冲淡
+       *   （合成层叠原因），看起来像"聚光灯坏了"。改成把页面画布的对应
+       *   区域按 1:1 画进洞里，两种模式就都走同一条确定路径：
+       *     聚光灯 1.0×、放大镜 2.2× —— 视觉差异一眼可辨，且永远有内容。
+       *   取不到画布（光圈在侧栏/工具条上）时，聚光灯退回透明洞（露出真实
+       *   UI），放大镜留深色镜头底。
+       */
+      if (maskMode === 'magnifier' || maskMode === 'spotlight') {
+        const zoom = maskMode === 'magnifier' ? MAGNIFY : 1
         const src = document.querySelector<HTMLCanvasElement>('.pdf-page__canvas')
         if (src && src.width > 0 && src.height > 0) {
           const rect = src.getBoundingClientRect()
           /* 屏幕坐标 → 源画布像素坐标（要考虑画布自身的 CSS 尺寸与位图尺寸之比） */
           const kx = src.width / Math.max(1, rect.width)
           const ky = src.height / Math.max(1, rect.height)
-          const sx = (x - rect.left - r / MAGNIFY) * kx
-          const sy = (y - rect.top - r / MAGNIFY) * ky
-          const sw = ((r * 2) / MAGNIFY) * kx
-          const sh = ((r * 2) / MAGNIFY) * ky
+          const sx = (x - rect.left - r / zoom) * kx
+          const sy = (y - rect.top - r / zoom) * ky
+          const sw = ((r * 2) / zoom) * kx
+          const sh = ((r * 2) / zoom) * ky
 
-          // 源区域超出画布时不画（drawImage 对越界源是静默裁剪，会得到错位画面）
-          if (sx >= 0 && sy >= 0 && sx + sw <= src.width && sy + sh <= src.height) {
+          /*
+           * ★ 源区域越界时**裁剪**，不能整块放弃（2026-10-23 修）。
+           *
+           * 旧写法要求源矩形完整落在画布里，否则什么都不画 —— 于是
+           * 把光圈挪到页面边缘、或在放大倍率下页面只露出局部时，
+           * 洞口里是空的（看起来像"放大镜坏了/白圈"）。
+           * 现在把源矩形与画布求交，再按同一比例换算目标矩形：
+           * 画面可能与圆心略有偏移，但永远有内容，且不会错位。
+           */
+          const ix0 = Math.max(0, sx)
+          const iy0 = Math.max(0, sy)
+          const ix1 = Math.min(src.width, sx + sw)
+          const iy1 = Math.min(src.height, sy + sh)
+          if (ix1 > ix0 && iy1 > iy0) {
             ctx.save()
             ctx.beginPath()
-            ctx.arc(x, y, r, 0, Math.PI * 2)
+            /*
+             * 放大镜把画面收进 r-7 的内圈，留一圈深色镜壁。
+             * 为什么：光圈停在空白纸面时，1:1 与 2.2× 的洞里都是白纸，
+             * 两者看起来"一模一样"（用户实测反馈）。留出镜壁 + ×2.2 角标
+             * 后，即使画面全白也能一眼认出这是放大镜。
+             */
+            ctx.arc(x, y, maskMode === 'magnifier' ? r - 7 : r, 0, Math.PI * 2)
             ctx.clip()
             ctx.imageSmoothingEnabled = true
             ctx.imageSmoothingQuality = 'high'
-            ctx.drawImage(src, sx, sy, sw, sh, x - r, y - r, r * 2, r * 2)
+            // 相交块在"源矩形"里的相对位置 → 折算到目标圆里
+            const tx = x - r + ((ix0 - sx) / Math.max(1, sw)) * r * 2
+            const ty = y - r + ((iy0 - sy) / Math.max(1, sh)) * r * 2
+            const tw = ((ix1 - ix0) / Math.max(1, sw)) * r * 2
+            const th = ((iy1 - iy0) / Math.max(1, sh)) * r * 2
+            ctx.drawImage(src, ix0, iy0, ix1 - ix0, iy1 - iy0, tx, ty, tw, th)
             ctx.restore()
+            magDrawn = true
+          } else {
+            magDrawn = false
           }
         }
       }
 
-      // 洞口描边：让边界清晰，避免与深色背景糊在一起
+      /*
+       * 洞口描边 + 模式标识：让两种模式一眼能分开。
+       *
+       * 聚光灯 = 光圈（白边 + 外发光，像手电筒照在纸上）；
+       * 放大镜 = 镜头（蓝色双环 + 右下角「×2.2」倍率标）。
+       * 光靠"洞里有没有放大"区分不出来——页面是白纸时两者都白。
+       */
       ctx.save()
-      ctx.beginPath()
-      ctx.arc(x, y, r, 0, Math.PI * 2)
-      ctx.strokeStyle = maskMode === 'magnifier' ? 'rgba(120,180,255,0.9)' : 'rgba(255,255,255,0.55)'
-      ctx.lineWidth = 2
-      ctx.stroke()
+      if (maskMode === 'magnifier') {
+        // 外圈柔光
+        ctx.beginPath()
+        ctx.arc(x, y, r + 6, 0, Math.PI * 2)
+        ctx.strokeStyle = 'rgba(120, 180, 255, 0.28)'
+        ctx.lineWidth = 6
+        ctx.stroke()
+        // 内圈实边
+        ctx.beginPath()
+        ctx.arc(x, y, r, 0, Math.PI * 2)
+        ctx.strokeStyle = 'rgba(150, 200, 255, 0.95)'
+        ctx.lineWidth = 2
+        ctx.stroke()
+        // 倍率标
+        const label = `×${MAGNIFY}`
+        ctx.font = '600 12px system-ui, sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        const lw = ctx.measureText(label).width + 14
+        const lx = x + r * 0.72
+        const ly = y + r * 0.72
+        ctx.beginPath()
+        // 手写圆角矩形（不用 roundRect：避免 TS DOM 版本与运行时不齐）
+        const bx = lx - lw / 2
+        const by = ly - 11
+        const bh = 22
+        const br = 11
+        ctx.moveTo(bx + br, by)
+        ctx.lineTo(bx + lw - br, by)
+        ctx.arcTo(bx + lw, by, bx + lw, by + br, br)
+        ctx.lineTo(bx + lw, by + bh - br)
+        ctx.arcTo(bx + lw, by + bh, bx + lw - br, by + bh, br)
+        ctx.lineTo(bx + br, by + bh)
+        ctx.arcTo(bx, by + bh, bx, by + bh - br, br)
+        ctx.lineTo(bx, by + br)
+        ctx.arcTo(bx, by, bx + br, by, br)
+        ctx.closePath()
+        ctx.fillStyle = 'rgba(24, 32, 46, 0.9)'
+        ctx.fill()
+        ctx.strokeStyle = 'rgba(150, 200, 255, 0.55)'
+        ctx.lineWidth = 1
+        ctx.stroke()
+        ctx.fillStyle = 'rgba(214, 232, 255, 0.96)'
+        ctx.fillText(label, lx, ly + 0.5)
+      } else {
+        /*
+         * 光斑：只在**环带**上提亮，绝不盖住洞内（2026-10-23 再修）。
+         * 之前用径向渐变整圆填充，渐变的内侧也会落在洞里，把纸面文字
+         * 冲成一层白雾——看起来就像"聚光灯也坏了"。
+         * 环带用两段 evenodd 圆环叠出柔边，洞里保持原样。
+         */
+        ctx.beginPath()
+        ctx.arc(x, y, r + 26, 0, Math.PI * 2)
+        ctx.arc(x, y, r + 10, 0, Math.PI * 2, true)
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.05)'
+        ctx.fill('evenodd')
+        ctx.beginPath()
+        ctx.arc(x, y, r + 10, 0, Math.PI * 2)
+        ctx.arc(x, y, r, 0, Math.PI * 2, true)
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.10)'
+        ctx.fill('evenodd')
+        ctx.beginPath()
+        ctx.arc(x, y, r, 0, Math.PI * 2)
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.62)'
+        ctx.lineWidth = 2
+        ctx.stroke()
+      }
       ctx.restore()
 
       /*
@@ -250,6 +392,12 @@ export function ScreenMask(): JSX.Element | null {
       }
     }
 
+    /** 底部退出条 / 顶部提示条：这些区域交给它们自己处理，遮罩不抢事件 */
+    const isChrome = (e: Event): boolean => {
+      const target = e.target instanceof Element ? e.target : null
+      return !!target?.closest('.screen-mask__bottom, .screen-mask__hint')
+    }
+
     const onPointerDown = (e: PointerEvent): void => {
       // 黑屏没有光圈，不需要拖动
       if (maskMode === 'black') return
@@ -276,7 +424,7 @@ export function ScreenMask(): JSX.Element | null {
        */
       dragMode = 'spot'
       dragPointerId = e.pointerId
-      pointerRef.current = { x: e.clientX, y: e.clientY }
+      pointerRef.current = clampPointer(e.clientX, e.clientY)
       canvas.setPointerCapture?.(e.pointerId)
       schedule()
       safePrevent(e)
@@ -344,12 +492,20 @@ export function ScreenMask(): JSX.Element | null {
         const next = radiusStart + (e.clientX - radiusStartX)
         radiusRef.current = Math.min(MAX_RADIUS, Math.max(MIN_RADIUS, next))
         schedule()
+        if (!isChrome(e)) {
+          e.stopPropagation()
+          safePrevent(e)
+        }
         return
       }
 
       if (dragMode === 'spot' && e.pointerId === dragPointerId) {
-        pointerRef.current = { x: e.clientX, y: e.clientY }
+        pointerRef.current = clampPointer(e.clientX, e.clientY)
         schedule()
+        if (!isChrome(e)) {
+          e.stopPropagation()
+          safePrevent(e)
+        }
         return
       }
 
@@ -358,7 +514,7 @@ export function ScreenMask(): JSX.Element | null {
        * 手指不会产生 hover 事件，所以触摸屏完全靠上面的拖动分支。
        */
       if (e.pointerType === 'mouse') {
-        pointerRef.current = { x: e.clientX, y: e.clientY }
+        pointerRef.current = clampPointer(e.clientX, e.clientY)
         schedule()
       }
     }
@@ -386,6 +542,10 @@ export function ScreenMask(): JSX.Element | null {
         dragPointerId = -1
       }
       onPointerDown(e)
+      if (!isChrome(e)) {
+        e.stopPropagation()
+        safePrevent(e)
+      }
     }
 
     /** 滚轮调整光圈大小（键鼠用户） */
@@ -430,6 +590,7 @@ export function ScreenMask(): JSX.Element | null {
           触点数: pointsRef.size,
           捏合基准: lastPinchDist,
           拖动模式: dragMode,
+          放大绘制: magDrawn,
           捏合明细: lastPinch,
           触点: [...pointsRef.entries()].map(([id, p]) => ({ id, x: Math.round(p.x), y: Math.round(p.y) }))
         })
@@ -441,21 +602,54 @@ export function ScreenMask(): JSX.Element | null {
       }
     }
 
+    /*
+     * ★ 监听全部挂在 **window 的捕获阶段**，且由遮罩自己 stopPropagation。
+     *
+     * 第一版把「吞事件」写成一组独立的捕获监听器（swallow），再让遮罩用
+     * 冒泡阶段的监听器收事件。结果同一个 target（window）上，捕获阶段
+     * 先跑、`stopPropagation()` 一拦，遮罩自己的冒泡监听器**根本不会触发** ——
+     * 现象是「鼠标拖光圈不动、触屏完全没用」，而代码看起来两边都在。
+     * 教训：同一个元素上要「先干活再拦截」，必须同一个监听器里做完，
+     * 不要靠两个监听器 + 阶段差来协作。
+     *
+     * 现在：捕获阶段自己处理（可 preventDefault、可 stopPropagation），
+     * 处理完再拦截，底层 PDF 收不到同一次触摸，页面也就不会跟着滚/翻页。
+     */
+    const captureOn = { capture: true, passive: false } as const
+    const captureOnPassiveUp = { capture: true } as const
     window.addEventListener('resize', resize)
-    window.addEventListener('pointerdown', onPointerDownTrack, { passive: false })
-    window.addEventListener('pointermove', onPointerMove, { passive: true })
-    window.addEventListener('pointerup', onPointerUp)
-    window.addEventListener('pointercancel', onPointerUp)
+    window.addEventListener('pointerdown', onPointerDownTrack, captureOn)
+    window.addEventListener('pointermove', onPointerMove, captureOn)
+    window.addEventListener('pointerup', onPointerUp, captureOnPassiveUp)
+    window.addEventListener('pointercancel', onPointerUp, captureOnPassiveUp)
     window.addEventListener('wheel', onWheel, { passive: false })
+
+    /*
+     * 触摸滚动兜底：pointer 事件已经拦住，但部分一体机会先走 touch 序列；
+     * 这里只 preventDefault（不 stopPropagation），确保页面不会跟着滑动。
+     * 不动 touchstart 的默认行为，避免连按钮的点击合成都被吃掉。
+     */
+    const blockTouchScroll = (e: TouchEvent): void => {
+      const target = e.target instanceof Element ? e.target : null
+      if (target && target.closest('.screen-mask__bottom')) return
+      safePrevent(e)
+    }
+    window.addEventListener('touchmove', blockTouchScroll, captureOn)
+
+    const rootStyle = document.documentElement.style
+    const prevTouchAction = rootStyle.touchAction
+    rootStyle.touchAction = 'none'
 
     return () => {
       if (raf) cancelAnimationFrame(raf)
       window.removeEventListener('resize', resize)
-      window.removeEventListener('pointerdown', onPointerDownTrack)
-      window.removeEventListener('pointermove', onPointerMove)
-      window.removeEventListener('pointerup', onPointerUp)
-      window.removeEventListener('pointercancel', onPointerUp)
+      window.removeEventListener('pointerdown', onPointerDownTrack, captureOn)
+      window.removeEventListener('pointermove', onPointerMove, captureOn)
+      window.removeEventListener('pointerup', onPointerUp, captureOnPassiveUp)
+      window.removeEventListener('pointercancel', onPointerUp, captureOnPassiveUp)
       window.removeEventListener('wheel', onWheel)
+      window.removeEventListener('touchmove', blockTouchScroll, captureOn)
+      rootStyle.touchAction = prevTouchAction
       void dirty
     }
   }, [maskMode])

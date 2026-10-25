@@ -47,6 +47,8 @@ export interface OpenResult {
   ok: boolean
   error?: string
   path?: string
+  /** 图片转 PDF 时保留原文件名 */
+  title?: string
 }
 
 export interface PdfAppApi {
@@ -55,6 +57,15 @@ export interface PdfAppApi {
     path: (filePath: string) => Promise<OpenResult>
     reveal: (filePath: string) => Promise<boolean>
     external: (filePath: string) => Promise<boolean>
+  }
+  create: {
+    /** 新建空白 PDF（页数/纸张/方向/底色），成功后直接作为文档打开 */
+    blank: (spec: {
+      pages: number
+      size: 'A4' | 'A3' | 'Letter'
+      landscape: boolean
+      background: string
+    }) => Promise<OpenResult & { blank?: boolean; pages?: number }>
   }
   settings: {
     get: () => Promise<ReaderSettings>
@@ -106,6 +117,8 @@ export interface PdfAppApi {
     confirmUnsaved: (fileName: string) => Promise<'save' | 'discard' | 'cancel'>
   }
   app: {
+    /** 选一张图片当阅读区背景 */
+    pickBackground: () => Promise<{ ok: boolean; path?: string; error?: string; canceled?: boolean }>
     /** 退出应用（渲染层已弹确认框；主进程负责落盘后退出） */
     quit: () => Promise<void>
     /** 问完用户后真正退出（不再弹一次「确定退出吗」） */
@@ -125,6 +138,7 @@ export interface PdfAppApi {
      */
     /** 报到：渲染层已挂好 pdf:open 监听（主进程据此冲洗待打开队列） */
     rendererReady: () => Promise<boolean>
+    openDefaultApps: () => Promise<{ ok: boolean; err?: string }>
     info: () => Promise<{
       product: string
       version: string
@@ -137,6 +151,19 @@ export interface PdfAppApi {
       usageScope: string
       support: string
     }>
+  }
+  /**
+   * 资源管理器缩略图。
+   *
+   * `mode=true` 表示本次进程是 shell 提供器唤起的（`--render-thumb`），
+   * 渲染层只渲首页、交回 dataURL 就该退出，不挂界面。
+   * `mode=false` 表示正常启动，此时只需在文档打开后顺手暖一次缓存。
+   */
+  thumb: {
+    task: () => Promise<{ mode: boolean; pdfPath: string; width: number }>
+    done: (dataUrl: string) => Promise<boolean>
+    save: (filePath: string, dataUrl: string) => Promise<boolean>
+    fresh: (filePath: string) => Promise<boolean>
   }
   /** 渲染诊断日志（只在主进程开启诊断时才落盘，平时零副作用） */
   diag: {
@@ -196,6 +223,11 @@ export interface PdfAppApi {
    * ★ 网络请求全部在主进程（渲染层 CSP 不放外网），这里只是壳。
    *   与 preload 的 `update` 字段一一对应，改一边记得同步另一边。
    */
+  market: {
+    list: () => Promise<{ ok: boolean; items: unknown[]; at?: number; error?: string }>
+    setSources: (list: { name: string; url: string }[]) => Promise<boolean>
+    clearCache: () => Promise<boolean>
+  }
   update: {
     check: () => Promise<UpdateInfoLike>
     current: () => Promise<string>
@@ -206,6 +238,7 @@ export interface PdfAppApi {
     }) => Promise<{ ok: boolean; path?: string; error?: string }>
     install: (path: string) => Promise<{ ok: boolean; error?: string }>
     openPage: (url: string) => Promise<boolean>
+    backup: () => Promise<{ ok: boolean; dir?: string; files?: number; error?: string }>
     onAvailable: (handler: (info: UpdateInfoLike) => void) => () => void
     onProgress: (
       handler: (p: { received: number; total: number; fraction: number }) => void

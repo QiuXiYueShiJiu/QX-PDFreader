@@ -7,8 +7,8 @@
  * ══════════════════════════════════════════════════════════════════
  * 为什么要单独一份（用户 2026-10-16 要求：源码零隐私信息 + 版本隔离）
  * ══════════════════════════════════════════════════════════════════
- *   源码是要 Apache-2.0 开源的，不能出现学校名、内网目录、本机路径。
- *   但交付时快速版又必须装到指定的内网目录、安装包名要带学校标识。
+ *   源码是要 Apache-2.0 开源的，不能出现学单位名称、安装目录、本机路径。
+ *   但交付时快速版又必须装到指定的安装目录、安装包名要带学校标识。
  *   解法：源码里只留**通用默认值**，交付参数放在这份**不发布**的
  *   `build/packaging.json` 里（已在 .gitignore 中）。
  *
@@ -36,7 +36,7 @@ const root = resolve(here, '..')
  *   · 公开版这三项必须为空（不得出现任何单位信息）；
  *   · 专供版必须带适用范围声明与技术支持。
  * 两份包共用同一个 nsis include 与同一个 resources/build-info.json，
- * 所以不区分变体就会出现「公开版里带着学校名」。
+ * 所以不区分变体就会出现「公开版里带着学单位名称」。
  */
 const VARIANT = (() => {
   const arg = process.argv.find((a) => a.startsWith('--variant='))
@@ -55,7 +55,7 @@ const DEFAULT_INSTALL_DIR = 'C:\\Program Files\\QXPDFReader'
 /**
  * 首次运行 build-setup 时写进 build/packaging.json 的**通用默认值**。
  *
- * ★ 这里**不要**写具体的单位名 / 内网目录 —— 本文件是公开源码。
+ * ★ 这里**不要**写具体的单位名 / 安装目录 —— 本文件是公开源码。
  *   交付时把真实值填进 build/packaging.json（该文件不发布），
  *   或者直接用环境变量 PDFREADER_INSTALL_DIR / PDFREADER_QUICK_NAME 覆盖。
  */
@@ -100,7 +100,7 @@ const installDir = (cfg.installDir ?? DEFAULT_INSTALL_DIR).replace(/\\+$/, '')
 /**
  * 需要顺带清掉的**旧安装目录**（交付值，源码里为空数组）。
  *
- * 本版默认安装位置从 C:\Program Files\QiuXiPDFReader 改成 C:\Program Files\QiuXiPDFReader。
+ * 本版默认安装位置统一到安装目录（旧版曾用过另一个子目录）。
  * 老机器上可能留着整个旧目录：两份 exe、两个卸载器、
  * 指向旧 exe 的快捷方式。安装时清掉，避免用户点错版本。
  */
@@ -146,7 +146,7 @@ const legal = {
     support: cfg.legal?.quick?.support ?? ''
   },
   /*
-   * 特供版：只给签约单位部署，更新走「内置令牌 + 服务器清单」通道。
+   * 静默部署版：只给签约单位部署，更新走「内置校验值 + 服务器清单」通道。
    * 声明可以单独配（cfg.legal.special），没配就复用 quick 的。
    */
   special: {
@@ -242,10 +242,10 @@ pkg.build.nsis ??= {}
 
 const artifact = cfg.artifactName ?? DEFAULT_ARTIFACT
 /*
- * 特供版单独一个产物名：同一个输出目录里三份安装包必须能一眼区分，
- * 否则「特供版静默装」和「公开标准版」只差一个目录，发错就是事故。
+ * 静默部署版单独一个产物名：同一个输出目录里三份安装包必须能一眼区分，
+ * 否则「静默部署版静默装」和「公开标准版」只差一个目录，发错就是事故。
  */
-const specialArtifact = cfg.specialArtifactName ?? '秋夕-PDF阅读器-${buildVersion}-特供版安装程序.${ext}'
+const specialArtifact = cfg.specialArtifactName ?? '秋夕-PDF阅读器-${buildVersion}-静默部署版安装程序.${ext}'
 pkg.build.nsis.artifactName = (VARIANT === 'special' ? specialArtifact : artifact).replace('${buildVersion}', pkg.buildVersion ?? pkg.version)
 
 writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')
@@ -294,7 +294,7 @@ const buildInfo = {
   support: legal[VARIANT].support,
   /*
    * 更新通道：public 走 GitHub + 镜像站双通道；special 只走服务器清单，
-   * 且必须带内置令牌（运行时由主进程加在请求头里，不进源码、不进日志）。
+   * 且必须带内置校验值（运行时由主进程加在请求头里，不进源码、不进日志）。
    */
   channel: VARIANT === 'special' ? 'special' : 'public',
   specialToken:

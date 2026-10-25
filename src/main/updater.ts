@@ -2,7 +2,7 @@
 // Copyright 2026 秋夕月拾旧
 
 /**
- * 版本更新检查（双通道 + 特供版令牌通道）。
+ * 版本更新检查（双通道 + 静默部署版校验值通道）。
  *
  * ── 三条通道 ──────────────────────────────────────────────────
  *   1. GitHub Releases API（公开版主通道，全球可用，国内可能慢）
@@ -11,10 +11,10 @@
  *      GET https://xn--6rso4u4lc86ad09c.top/contact/api.php
  *      资源：/contact/asset.php?repo=<full_name>&f=assets/<tag>/<文件名>&dl=1
  *      ★ 必须是 `assets/<tag>/<文件名>`，裸文件名 404（踩过）
- *   3. 特供版专用接口（只有 `variant=special` 的包才会用）
- *      GET /contact/special-update.php?v=<当前版本>   头 X-QX-Token: <内置令牌>
+ *   3. 静默部署版专用接口（只有 `variant=special` 的包才会用）
+ *      GET /contact/special-update.php?v=<当前版本>   头 X-QX-Token: <内置校验值>
  *      返回 { ok, latest:{version,tag,notes,published_at,page,asset:{name,size,sha256,url}} }
- *      下载走 special-asset.php（同样带令牌），客户端下完校验 SHA256。
+ *      下载走 special-asset.php（同样带校验值），客户端下完校验 SHA256。
  *
  * ── 为什么在主进程 ────────────────────────────────────────────
  *   渲染层 CSP 是 `connect-src 'self' pdf-file: blob: data:`，
@@ -24,7 +24,7 @@
  *   检查更新是锦上添花：断网、镜像挂了、格式变了 —— 一律 ok:false + 原因。
  *   公开版两条通道**并行**查，取版本号更高的那个；同版本时按用户偏好
  *   （设置里的 updateChannel，默认 auto→镜像站优先，因为国内更快）。
- *   特供版失败**不回落**到公开通道，避免把特供用户引到公开版。
+ *   静默部署版失败**不回落**到公开通道，避免把静默部署用户引到公开版。
  */
 
 import { app, net, shell } from 'electron'
@@ -47,9 +47,9 @@ export interface UpdateAsset {
   name: string
   size: number
   url: string
-  /** 特供版清单里给的校验值（公开通道一般没有） */
+  /** 静默部署版清单里给的校验值（公开通道一般没有） */
   sha256?: string
-  /** 下载时需要带的令牌（特供版） */
+  /** 下载时需要带的校验值（静默部署版） */
   token?: string
   source?: UpdateSource
 }
@@ -94,7 +94,7 @@ export function readBuildInfo(): BuildInfo {
   return {}
 }
 
-/** 特供版：内置令牌 + 专用通道 */
+/** 静默部署版：内置校验值 + 专用通道 */
 export function isSpecialBuild(): boolean {
   const info = readBuildInfo()
   return info.channel === 'special' || info.variant === 'special'
@@ -296,7 +296,7 @@ async function checkGithub(timeoutMs: number, current: string): Promise<UpdateCh
 }
 
 /* ============================================================
- * 通道三：特供版（内置令牌）
+ * 通道三：静默部署版（内置校验值）
  * ============================================================ */
 
 interface SpecialPayload {
@@ -316,7 +316,7 @@ interface SpecialPayload {
 async function checkSpecial(timeoutMs: number, current: string): Promise<UpdateCheckResult> {
   const base: UpdateCheckResult = { ok: false, newer: false, current, latest: current, source: 'special' }
   const token = specialToken()
-  if (!token) return { ...base, error: '特供版缺少内置令牌（构建时没有注入）' }
+  if (!token) return { ...base, error: '静默部署版缺少内置校验值（构建时没有注入）' }
 
   const ac = new AbortController()
   const timer = setTimeout(() => ac.abort(), timeoutMs)
@@ -329,15 +329,15 @@ async function checkSpecial(timeoutMs: number, current: string): Promise<UpdateC
         'X-QX-Token': token
       }
     })
-    if (res.status === 401) return { ...base, error: '特供令牌无效或已被吊销' }
-    if (!res.ok) return { ...base, error: `特供服务器返回 HTTP ${res.status}` }
+    if (res.status === 401) return { ...base, error: '静默部署校验值无效或已被吊销' }
+    if (!res.ok) return { ...base, error: `静默部署服务器返回 HTTP ${res.status}` }
     const data = (await res.json()) as SpecialPayload
-    if (!data.ok) return { ...base, error: data.error ?? '特供服务器返回失败' }
-    if (!data.latest) return { ...base, error: '特供服务器上还没有发布版本' }
+    if (!data.ok) return { ...base, error: data.error ?? '静默部署服务器返回失败' }
+    if (!data.latest) return { ...base, error: '静默部署服务器上还没有发布版本' }
 
     const latestInfo = data.latest
     const latest = String(latestInfo.version ?? '').replace(/^v/i, '')
-    if (!latest) return { ...base, error: '特供清单缺少版本号' }
+    if (!latest) return { ...base, error: '静默部署清单缺少版本号' }
     const newer = isNewer(latest, current)
     let asset: UpdateAsset | undefined
     if (newer && latestInfo.asset?.name) {
@@ -365,7 +365,7 @@ async function checkSpecial(timeoutMs: number, current: string): Promise<UpdateC
     }
   } catch (error) {
     const aborted = error instanceof Error && error.name === 'AbortError'
-    return { ...base, error: aborted ? '连接特供服务器超时' : '连接特供服务器失败（可能没有网络）' }
+    return { ...base, error: aborted ? '连接静默部署服务器超时' : '连接静默部署服务器失败（可能没有网络）' }
   } finally {
     clearTimeout(timer)
   }
@@ -393,7 +393,7 @@ export function pickBest(results: UpdateCheckResult[], prefer: UpdateChannel): U
  * 查一次最新版本。
  *
  * @param timeoutMs 允许调用方缩短（自动检查用 6s，手动检查用默认 12s）
- * @param prefer    公开版的通道偏好（特供版忽略它）
+ * @param prefer    公开版的通道偏好（静默部署版忽略它）
  */
 export async function checkForUpdate(
   timeoutMs = TIMEOUT_MS,
@@ -401,7 +401,7 @@ export async function checkForUpdate(
 ): Promise<UpdateCheckResult> {
   const current = currentVersion()
 
-  // 特供版：只走令牌通道，失败不回落
+  // 静默部署版：只走校验值通道，失败不回落
   if (isSpecialBuild()) {
     return checkSpecial(timeoutMs, current)
   }
@@ -476,7 +476,7 @@ function sha256Of(file: string): Promise<string> {
  *
  * 只允许下载检查结果里给出的那个 asset：URL 必须在允许的站点下，
  * 避免这条 IPC 被当成「任意地址下载器」。
- * 特供版带 `sha256` 时会校验，不匹配直接删文件。
+ * 静默部署版带 `sha256` 时会校验，不匹配直接删文件。
  */
 export async function downloadUpdate(
   asset: UpdateAsset,

@@ -1,0 +1,147 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright 2026 秋夕月拾旧
+
+/**
+ * Office 2019 布局（布局包，不管配色）。
+ *
+ * 用户的原话是「metro 和 office 2019 的布局」，要的是**结构**上的两种观感：
+ *   · Metro：已经作为主题包做过（直角、平色、Segoe UI）；
+ *   · Office 2019：功能区式条带 —— 更高的工具条、图标在上文字在下、
+ *     直角、细边框、激活项用强调色下划线，标签页也是方角页签。
+ *
+ * 为什么单独一个文件：布局要能和任意配色组合（`html[data-layout='office']`
+ * 与 `html[data-theme='...']` 互不干扰），放在 base/packs 里会很难读。
+ * 这里只写"结构"，颜色一律引用主题变量（--surface / --accent / --border）。
+ */
+
+html[data-layout='office'] {
+  /* 直角为主：Office 2019 的圆角基本只有 1~2px */
+  --radius: 2px;
+}
+
+/* ---------------- 顶部工具条：功能区 ---------------- */
+
+html[data-layout='office'] .toolbar {
+  height: 60px;
+  gap: 2px;
+  padding: 0 10px;
+  border-bottom: 1px solid rgb(var(--border));
+  /* 背景交给主题：这里再写一层会盖掉液态玻璃的半透明（2026-10-24 实测踩到） */
+  box-shadow: none;
+}
+
+html[data-layout='office'] .toolbar__group {
+  gap: 2px;
+}
+
+html[data-layout='office'] .tb {
+  flex-direction: column;
+  gap: 2px;
+  height: 50px;
+  min-width: 56px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  font-size: 12px;
+}
+
+html[data-layout='office'] .tb__label {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+html[data-layout='office'] .tb:hover {
+  border-color: rgb(var(--border));
+  background: rgb(var(--accent) / 0.1);
+}
+
+html[data-layout='office'] .tb:active {
+  background: rgb(var(--accent) / 0.18);
+}
+
+/* 激活态用底部强调条，而不是整块填充 —— 这是功能区的标志性细节 */
+html[data-layout='office'] .tb.is-on {
+  border-color: transparent;
+  background: rgb(var(--accent) / 0.1);
+  box-shadow: inset 0 -2px 0 rgb(var(--accent));
+  color: rgb(var(--accent));
+}
+
+html[data-layout='office'] .toolbar__sep {
+  height: 34px;
+  width: 1px;
+  margin: 0 4px;
+  background: rgb(var(--border));
+}
+
+/* 页码输入框：方角 + 细边框，和功能区里的"数字调节"一致 */
+html[data-layout='office'] .page-input,
+html[data-layout='office'] .pagebox input {
+  border-radius: 2px;
+}
+
+/* ---------------- 标签栏：方角页签 ---------------- */
+
+html[data-layout='office'] .tabbar {
+  height: 32px;
+  border-bottom: 1px solid rgb(var(--border));
+  background: rgb(var(--surface-strong, var(--surface)));
+}
+
+html[data-layout='office'] .tab {
+  border-radius: 0;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+}
+
+html[data-layout='office'] .tab.is-active {
+  border-color: rgb(var(--border));
+  border-bottom-color: rgb(var(--accent));
+  background: rgb(var(--surface));
+}
+
+/* ---------------- 左/右竖直栏：方角、贴边 ---------------- */
+
+html[data-layout='office'] .rail,
+html[data-layout='office'] .rail__btn,
+html[data-layout='office'] .sidebar__tabs button,
+html[data-layout='office'] .sb-card {
+  border-radius: 2px;
+}
+
+html[data-layout='office'] .rail {
+  border-right: 1px solid rgb(var(--border));
+  background: rgb(var(--surface-strong, var(--surface)));
+}
+
+/* ---------------- 状态栏：更薄、更"系统" ---------------- */
+
+html[data-layout='office'] .statusbar {
+  height: 24px;
+  font-size: 11px;
+  border-top: 1px solid rgb(var(--border));
+  background: rgb(var(--surface-strong, var(--surface)));
+}
+
+/* ---------------- 底部内容编辑条：功能区化的横条 ---------------- */
+
+html[data-layout='office'] .drawbar {
+  border-radius: 2px;
+  border: 1px solid rgb(var(--border));
+  box-shadow: 0 6px 18px rgb(8 10 16 / 0.18);
+}
+
+/* ---------------- 触屏：功能区按钮再放大一点 ---------------- */
+
+@media (pointer: coarse) {
+  html[data-layout='office'] .toolbar {
+    height: 66px;
+  }
+
+  html[data-layout='office'] .tb {
+    height: 56px;
+    min-width: 62px;
+    font-size: 12px;
+  }
+}

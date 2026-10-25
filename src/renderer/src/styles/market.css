@@ -1,0 +1,186 @@
+/* SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+ * Copyright 2026 秋夕月拾旧
+ *
+ * 插件市场浮层。配色全部走主题变量，切主题时自动跟着变。
+ */
+
+.market {
+  position: fixed;
+  inset: 0;
+  z-index: 1080;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 56px;
+  background: rgb(var(--bg) / 0.62);
+  backdrop-filter: blur(6px);
+}
+
+.market__card {
+  width: min(1040px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px 26px;
+  border: 1px solid rgb(var(--border));
+  border-radius: var(--radius-lg);
+  background: rgb(var(--surface));
+  color: rgb(var(--text));
+  box-shadow: var(--shadow-lg);
+  overflow: auto;
+}
+
+.market__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.market__title {
+  margin: 0 0 4px;
+  font-size: 19px;
+  font-weight: 700;
+}
+
+.market__sub {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgb(var(--muted));
+  max-width: 62ch;
+}
+
+.market__tools {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.market__ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgb(var(--border));
+  border-radius: var(--radius);
+  background: transparent;
+  color: rgb(var(--text));
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.market__ghost:hover {
+  border-color: rgb(var(--accent));
+  color: rgb(var(--accent));
+}
+
+.market__note {
+  margin: 0;
+  font-size: 13px;
+  color: rgb(var(--muted));
+}
+
+.market__note[data-market-error='1'] {
+  color: rgb(var(--danger, 220 38 38));
+}
+
+.market__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.market__item {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgb(var(--border));
+  border-radius: var(--radius-lg);
+  background: rgb(var(--bg) / 0.5);
+}
+
+.market__preview {
+  position: relative;
+  height: 104px;
+  border-radius: var(--radius);
+  border: 1px solid rgb(var(--border));
+  overflow: hidden;
+}
+
+.market__dot {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+}
+
+.market__line {
+  position: absolute;
+  left: 48px;
+  right: 12px;
+  top: 18px;
+  height: 9px;
+  border-radius: 5px;
+  opacity: 0.85;
+}
+
+.market__line--short {
+  top: 36px;
+  right: 42%;
+  opacity: 0.5;
+}
+
+.market__body {
+  flex: 1 1 auto;
+}
+
+.market__name {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.market__desc {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: rgb(var(--muted));
+}
+
+.market__meta {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: rgb(var(--muted));
+}
+
+.market__install {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  border: 0;
+  border-radius: var(--radius);
+  background: rgb(var(--accent));
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.market__install:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@media (pointer: coarse) {
+  .market__ghost,
+  .market__install {
+    min-height: 40px;
+  }
+}

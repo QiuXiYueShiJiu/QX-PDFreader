@@ -64,9 +64,9 @@ export interface UpdateAsset {
   name: string
   size: number
   url: string
-  /** 特供版清单里的校验值 */
+  /** 静默部署版清单里的校验值 */
   sha256?: string
-  /** 特供版下载要带的令牌 */
+  /** 静默部署版下载要带的校验值 */
   token?: string
   /** 来源通道（github / mirror / special） */
   source?: string
@@ -105,6 +105,22 @@ const api = {
     reveal: (filePath: string) => invoke<boolean>('pdf:reveal', filePath),
     /** 用系统默认程序打开（对照用） */
     external: (filePath: string) => invoke<boolean>('pdf:open-external', filePath)
+  },
+
+  /* ---------- 新建 ---------- */
+  create: {
+    /**
+     * 新建空白 PDF 并直接打开。
+     *
+     * spec 的合法范围由主进程再收一次（页数 1~200、纸张三选一、底色 #rrggbb），
+     * 渲染层传什么都行，不会被拼进奇怪的文件。
+     */
+    blank: (spec: {
+      pages: number
+      size: 'A4' | 'A3' | 'Letter'
+      landscape: boolean
+      background: string
+    }): Promise<OpenResult & { blank?: boolean; pages?: number }> => invoke('pdf:create-blank', spec)
   },
 
   /* ---------- 设置 ---------- */
@@ -238,7 +254,12 @@ const api = {
      * 否则 `webContents.send` 会发给空气（无监听者时消息静默丢失），
      * 表现为「有概率打不开」。详见 src/main/index.ts 的 pendingOpens。
      */
-    rendererReady: (): Promise<boolean> => invoke('app:renderer-ready'),
+    openDefaultApps: (): Promise<{ ok: boolean; err?: string }> => invoke('app:open-default-apps'),    rendererReady: (): Promise<boolean> => invoke('app:renderer-ready'),
+    /** 选一张图片当阅读区背景（主进程负责落盘到 userData） */
+    pickBackground: () =>
+      invoke<{ ok: boolean; path?: string; error?: string; canceled?: boolean }>(
+        'app:pick-background'
+      ),
     info: () =>
       invoke<{
         product: string
@@ -257,6 +278,25 @@ const api = {
         usageScope: string
         support: string
       }>('app:info')
+  },
+
+  /* ---------- 资源管理器缩略图 ---------- */
+  /**
+   * 缩略图链路。
+   *
+   * `task()`：渲染层启动后问「这次要渲什么」——带 `--render-thumb` 启动时
+   * 主进程会给出 PDF 路径；正常启动时 `mode=false`，渲染层就只做「顺手暖缓存」。
+   * `done()`：把首页 PNG 的 dataURL 交回主进程（thumb 模式的主链路）。
+   * `save()`：正常打开文件时顺手写缓存，失败也不影响打开。
+   * `fresh()`：已有新鲜缩略图就跳过重复渲染。
+   */
+  thumb: {
+    task: (): Promise<{ mode: boolean; pdfPath: string; width: number }> =>
+      invoke('thumb:task'),
+    done: (dataUrl: string): Promise<boolean> => invoke('thumb:done', dataUrl),
+    save: (filePath: string, dataUrl: string): Promise<boolean> =>
+      invoke('thumb:save', filePath, dataUrl),
+    fresh: (filePath: string): Promise<boolean> => invoke('thumb:fresh', filePath)
   },
 
   /* ---------- 渲染诊断日志 ---------- */
@@ -299,6 +339,15 @@ const api = {
    * 更新检查的所有网络请求都在主进程做（渲染层 CSP 不放外网），
    * 这里只暴露「查 / 下 / 装」三件事 + 两个事件订阅。
    */
+  /** 插件市场：清单来自镜像站，主题包由渲染层落到 settings.customThemes */
+  market: {
+    list: () => invoke<{ ok: boolean; items: unknown[]; at?: number; error?: string }>('market:list'),
+    /** 仅 --test-hooks 生效：替换市场源（离线测试用） */
+    setSources: (list: { name: string; url: string }[]) => invoke<boolean>('market:set-sources', list),
+    /** 清掉 10 分钟清单缓存 */
+    clearCache: () => invoke<boolean>('market:clear-cache')
+  },
+
   update: {
     /** 查最新版本；失败也 resolve（带 error 文案），不 reject */
     check: () => invoke<UpdateCheckResult>('app:update-check'),
@@ -310,6 +359,8 @@ const api = {
     install: (path: string) => invoke<{ ok: boolean; error?: string }>('app:update-install', path),
     /** 在浏览器里打开 release 页面 */
     openPage: (url: string) => invoke<boolean>('app:update-open-page', url),
+    /** 装之前备份 settings.json 等用户数据（失败不阻断安装） */
+    backup: () => invoke<{ ok: boolean; dir?: string; files?: number; error?: string }>('app:update-backup'),
     /** 启动时自动检查发现新版本（每个进程最多一次） */
     onAvailable: (handler: (info: UpdateCheckResult) => void): (() => void) => {
       const listener = (_e: unknown, info: UpdateCheckResult): void => handler(info)

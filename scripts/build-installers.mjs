@@ -38,7 +38,7 @@ const pkgForOut = JSON.parse(readFileSync('package.json', 'utf8'))
  * 先跑 build-setup.mjs，它会把 build/packaging.json（不发布）
  * 与源码里的通用默认值合并成 build/.packaging-resolved.json。
  *
- * 这样即使有人拿到源码，也看不到客户的内网安装目录与定制包名。
+ * 这样即使有人拿到源码，也看不到客户的本地安装目录与定制包名。
  */
 const setup = spawnSync('node', ['scripts/build-setup.mjs'], { stdio: 'inherit', shell: true })
 if (setup.status !== 0) {
@@ -52,8 +52,8 @@ const resolved = JSON.parse(readFileSync('build/.packaging-resolved.json', 'utf8
  * 产物输出目录：读 package.json 的 build.directories.output（单一来源）。
  *
  * 早先这里写死 `--config.directories.output=dist-installer`，
- * 于是 package.json 里配了别的目录也不生效 —— 用户要求把安装包
- * 放到 dist-installer，所以改成跟着配置走。
+ * 于是 package.json 里配了别的目录也不生效 —— 所以改成跟着配置走，
+ * 需要自定义时设 PDF_RELEASE_DIR 环境变量即可。
  */
 const OUT_DIR = pkgForOut.build?.directories?.output ?? 'dist-installer'
 
@@ -85,7 +85,7 @@ function run(cmd, args, label) {
  *   · 专供版（快速版）必须带**适用范围声明**与技术支持。
  *   两者共用同一个 `nsis.include` 与同一个 `resources/build-info.json`，
  *   所以必须在每次打包**之前**把它们改成对应变体的内容 ——
- *   否则会出现「公开版里带着学校名」这种直接违反要求的情况。
+ *   否则会出现「公开版里带着学单位名称」这种直接违反要求的情况。
  */
 function renderVariant(variant) {
   const r = spawnSync('node', ['scripts/build-setup.mjs', `--variant=${variant}`], {
@@ -141,13 +141,13 @@ run(
   '打包 快速版'
 )
 
-/* ---------- ③b 特供版（一键静默 · 内置令牌通道） ---------- */
+/* ---------- ③b 静默部署版（一键静默 · 内置校验值通道） ---------- */
 /*
- * 只在显式传 --with-special 时打：特供版要带单位声明与内置令牌，
+ * 只在显式传 --with-special 时打：静默部署版要带单位声明与内置校验值，
  * 平时做公开包不该把它顺手产出来（容易发错文件）。
  */
 const WITH_SPECIAL = process.argv.includes('--with-special')
-const SPECIAL_NAME = String(resolved.specialArtifactName ?? '秋夕-PDF阅读器-${buildVersion}-特供版安装程序.${ext}')
+const SPECIAL_NAME = String(resolved.specialArtifactName ?? '秋夕-PDF阅读器-${buildVersion}-静默部署版安装程序.${ext}')
   .replace('.${ext}', '')
 if (WITH_SPECIAL) {
   renderVariant('special')
@@ -160,13 +160,13 @@ if (WITH_SPECIAL) {
       '--config.nsis.oneClick=true',
       '--config.nsis.perMachine=false',
       '--config.nsis.allowToChangeInstallationDirectory=false',
-      // 特供版装完不自动启动：单位部署时批量装完再统一开
+      // 静默部署版装完不自动启动：单位部署时批量装完再统一开
       '--config.nsis.runAfterFinish=false',
       '--config.nsis.include=build/installer.nsh',
       // 产物名：`${ext}` 是 electron-builder 的占位符，这里要原样传给它
       `--config.nsis.artifactName=${SPECIAL_NAME}.\${ext}`
     ],
-    '打包 特供版'
+    '打包 静默部署版'
   )
 }
 
@@ -174,7 +174,7 @@ if (WITH_SPECIAL) {
 /*
  * 打包完立刻还原。否则工作区会停在专供版状态，
  * 下次有人只跑一次 `build-setup` 或直接 `electron-builder` 时，
- * 公开版包里就会带上学校名 —— 这类事故排查起来很费劲。
+ * 公开版包里就会带上学单位名称 —— 这类事故排查起来很费劲。
  */
 renderVariant('standard')
 console.log('\n（收尾）工作区声明已还原为公开版')
