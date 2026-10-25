@@ -191,7 +191,7 @@
 
 ## 插件市场（主题扩展包）
 
-除了内置的 13 档配色，还可以从**插件市场**装第三方配色。市场只下发颜色令牌，不下发代码。
+除了内置的 13 档配色，还可以从**插件市场**装第三方配色。市场只下发颜色值，不下发代码。
 
 **两个源，同一份 schema**：优先镜像站 `contact/plugins.php`，失败自动回落到
 `raw.githubusercontent.com/QiuXiYueShiJiu/QX-PDFreader/main/plugins/index.json`。
@@ -334,7 +334,7 @@ node tools\run-verify-suite.mjs --dev 9401 verify-select.mjs   # 单支
 本项目使用 **PolyForm Noncommercial License 1.0.0**（PNC 1.0）：
 
 - ✅ 个人使用、学习、研究、非营利教学——随便用，可以改；
-- ✅ 可以 fork、二次开发、校内批量部署；
+- ✅ 可以 fork、二次开发，用于教学与非商业用途；
 - ❌ **不得用于商业用途**（随硬件销售、付费培训、商业产品内置、SaaS 等）；
 - 商业授权请通过 Issues 联系作者。
 
