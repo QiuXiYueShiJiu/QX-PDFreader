@@ -1,5 +1,5 @@
 ﻿import { readFileSync, writeFileSync, existsSync } from 'node:fs'
-const idx = JSON.parse(readFileSync('plugin-store/index.json', 'utf8'))
+const idx = JSON.parse(readFileSync('plugin-store/index.example.json', 'utf8'))
 const errs = []
 const ids = new Set()
 const kinds = new Set(['theme', 'plugin'])

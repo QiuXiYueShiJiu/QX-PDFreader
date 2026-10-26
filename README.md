@@ -206,7 +206,7 @@
 | 双通道 | GitHub Releases + 镜像站，自动取版本更高的一边，同版本优先镜像 |
 | 下载与校验 | 下载安装包后校验 SHA256，再询问是否立即安装 |
 | 插件市场 | 内置市场浮层，可浏览/安装主题包与工具插件；数据源可配置 |
-| 市场仓库 | [`plugin-store/`](plugin-store/README.md)：`index.json` 清单 + [API 规范](plugin-store/docs/API.md) + [JSON Schema](plugin-store/schema/plugin.schema.json) + [上架流程](plugin-store/docs/PUBLISHING.md) |
+| 市场仓库 | [`plugin-store/`](plugin-store/README.md)：`index.example.json` 样例清单 + [API 规范](plugin-store/docs/API.md) + [JSON Schema](plugin-store/schema/plugin.schema.json) + [上架流程](plugin-store/docs/PUBLISHING.md) |
 | 清单自检 | `node tools/check-market.mjs`（校验 id 唯一、https 直链、sha256 长度、主题枚举） |
 
 ### 十一、其它

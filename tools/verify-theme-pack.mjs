@@ -188,13 +188,13 @@ check(
   '④ 点磁贴「绿」把强调色写成 #107c10',
   String(accent?.set ?? '').toLowerCase() === '#107c10' &&
     String(accent?.css ?? '').replace(/\s+/g, ' ') === '16 124 16',
-  `设置=${accent?.set} 校验值=${accent?.css}`
+  `设置=${accent?.set} 变量=${accent?.css}`
 )
 
 /* ---------------- ⑤ 液态玻璃：半透明外壳 ---------------- */
 /*
  * 先把两个滑块复位成默认值：上一支用例（或人工截图）可能把圆角改成了 16，
- * 直接断言「默认 14px」会误报。判据要看「校验值跟着设置走」，而不是赌环境干净。
+ * 直接断言「默认 14px」会误报。判据要看「变量跟着设置走」，而不是赌环境干净。
  */
   /* 布局与配色解耦后，外壳的半透明只看主题；这里固定回紧凑布局，避免布局包的背景规则干扰判据 */
   await patch({ themeLayout: 'normal' })
@@ -225,12 +225,12 @@ check(
   `theme=${glass?.theme} bg=${glass?.bg}`
 )
 check(
-  '⑤ 圆角与模糊两个校验值已生效（默认 14px / 12px）',
+  '⑤ 圆角与模糊两个变量已生效（默认 14px / 12px）',
   glass?.radius === '14px' && glass?.blurVar === '12px',
   `radius=${glass?.radius} blur=${glass?.blurVar} filter=${glass?.blur}`
 )
 
-/* ---------------- ⑥ 两个滑块真的能改校验值 ---------------- */
+/* ---------------- ⑥ 两个滑块真的能改变量 ---------------- */
 const sliders = ev(`
   const r = document.querySelector('[data-glass-radius]')
   const b = document.querySelector('[data-glass-blur]')
@@ -254,12 +254,12 @@ const afterSliders = ev(`
   }
 `)
 check(
-  '⑥ 拖动圆角/模糊滑块会同时改 CSS 校验值与设置',
+  '⑥ 拖动圆角/模糊滑块会同时改 CSS 变量与设置',
   afterSliders?.radius === '24px' &&
     afterSliders?.blur === '3px' &&
     afterSliders?.saved?.radius === 24 &&
     afterSliders?.saved?.blur === 3,
-  `校验值 ${afterSliders?.radius}/${afterSliders?.blur}，设置 ${afterSliders?.saved?.radius}/${afterSliders?.saved?.blur}（滑块读到 ${sliders?.radius}/${sliders?.blur}）`
+  `变量 ${afterSliders?.radius}/${afterSliders?.blur}，设置 ${afterSliders?.saved?.radius}/${afterSliders?.saved?.blur}（滑块读到 ${sliders?.radius}/${sliders?.blur}）`
 )
 
 /* ---------------- ⑦ 默认包 7 档逐个切换 ---------------- */

@@ -78,7 +78,7 @@ const DEFAULT_SUITE = [
   'verify-ocr.mjs', // 扫描页 OCR：识别当前页画布 / 文字层可选中 / 选中后可进改文字（tesseract 资源与 CSP 的回归）
   'verify-teaching.mjs',
   'verify-update.mjs',
-  'verify-theme.mjs', // 主题 9 档校验值与对比度、Metro 直角、自定义背景图的 CSS 变量与解码
+  'verify-theme.mjs', // 主题 13 档 CSS 变量与对比度、Metro 直角、自定义背景图的 CSS 变量与解码
   'verify-theme-pack.mjs', // 主题包：3 个包 / 每包设置 / 分段控件不溢出（用户报的横向溢出）
   'verify-tools.mjs', // PDF 工具箱：面板入口 + 水印/元数据两条真链路 + 高级 API 齐全（离线）
   'verify-newpdf.mjs',
