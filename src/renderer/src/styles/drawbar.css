@@ -612,3 +612,111 @@
 .drawbar__group.is-muted * {
   opacity: 1;
 }
+
+
+/* ============================================================
+ * v1.0.9 工具条：顶栏 Office 工具带 + 底部授课悬浮胶囊
+ * ============================================================ */
+
+.drawbar--ribbon {
+  position: static !important;
+  width: 100%;
+  border-radius: 0;
+  padding: 4px 10px;
+  border-top: 1px solid rgb(var(--border) / 0.6);
+  background: rgb(var(--surface) / 0.92);
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  opacity: 1 !important;
+}
+
+.drawbar--ribbon .drawbar__group {
+  padding-top: 12px;
+  opacity: 1 !important;
+}
+
+.drawbar--ribbon .drawbar__group::before {
+  content: attr(data-group-name);
+  font-size: 10px;
+  color: rgb(var(--text) / 0.55);
+}
+
+.drawbar--ribbon .drawbar__tool {
+  min-width: 46px;
+  height: 40px;
+  font-size: 10px;
+  color: rgb(var(--text) / 0.86);
+  opacity: 1 !important;
+}
+
+.drawbar--ribbon .drawbar__tool:hover:not(:disabled) {
+  background: rgb(var(--text) / 0.08);
+}
+
+.drawbar--ribbon .drawbar__tool.is-active {
+  color: rgb(var(--accent));
+  background: rgb(var(--accent) / 0.14);
+  box-shadow: inset 0 0 0 1px rgb(var(--accent) / 0.38);
+}
+
+.drawbar--ribbon .drawbar__tool:disabled {
+  color: rgb(var(--text) / 0.35);
+}
+
+.drawbar--ribbon .drawbar__peek,
+.drawbar__peek {
+  display: none !important;
+}
+
+/* 顶栏只放备课类：开始 / 颜色 / 画笔 三组藏掉 */
+.drawbar--zone-edit [data-group-name='开始'],
+.drawbar--zone-edit [data-group-name='颜色'],
+.drawbar--zone-edit [data-group-name='画笔'] {
+  display: none !important;
+}
+
+/* 底部只放授课类：插入 / 编辑 两组藏掉 */
+.drawbar--zone-pen [data-group-name='插入'],
+.drawbar--zone-pen [data-group-name='编辑'] {
+  display: none !important;
+}
+
+/* 底部悬浮胶囊 */
+.drawbar--dock {
+  position: fixed !important;
+  left: 50%;
+  bottom: calc(var(--statusbar-h) + 14px);
+  transform: translateX(-50%);
+  width: auto;
+  max-width: calc(100vw - 56px);
+  padding: 4px 10px;
+  border: 1px solid rgb(var(--border) / 0.55);
+  border-radius: 16px;
+  background: rgb(var(--surface) / 0.94);
+  box-shadow: 0 14px 34px rgb(0 0 0 / 0.2);
+  backdrop-filter: blur(12px) saturate(1.05);
+  z-index: 60;
+}
+
+.drawbar--dock .drawbar__group {
+  padding-top: 0;
+}
+
+.drawbar--dock .drawbar__group::before {
+  display: none;
+}
+
+.drawbar--dock .drawbar__tool,
+.drawbar--dock .drawbar__tool * {
+  color: rgb(var(--text) / 0.86) !important;
+}
+
+.drawbar--dock .drawbar__tool.is-active,
+.drawbar--dock .drawbar__tool.is-active * {
+  color: rgb(var(--accent)) !important;
+}
+
+.drawbar--dock .drawbar__tool.is-active {
+  background: rgb(var(--accent) / 0.14) !important;
+  box-shadow: inset 0 0 0 1px rgb(var(--accent) / 0.36);
+}

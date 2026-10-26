@@ -11,10 +11,9 @@
  *      GET https://xn--6rso4u4lc86ad09c.top/contact/api.php
  *      资源：/contact/asset.php?repo=<full_name>&f=assets/<tag>/<文件名>&dl=1
  *      ★ 必须是 `assets/<tag>/<文件名>`，裸文件名 404（踩过）
- *   3. 静默部署版专用接口（只有 `variant=special` 的包才会用）
- *      GET /contact/special-update.php?v=<当前版本>   头 X-QX-Token: <内置校验值>
+ *   3. 自定义部署通道（只有内置了通道参数的自定义版才会用；地址与头名在 build-info 里）
  *      返回 { ok, latest:{version,tag,notes,published_at,page,asset:{name,size,sha256,url}} }
- *      下载走 special-asset.php（同样带校验值），客户端下完校验 SHA256。
+ *      下载地址同样来自 build-info，客户端下完校验 SHA256。
  *
  * ── 为什么在主进程 ────────────────────────────────────────────
  *   渲染层 CSP 是 `connect-src 'self' pdf-file: blob: data:`，
@@ -35,7 +34,10 @@ import { join } from 'node:path'
 const MIRROR_ORIGIN = 'https://xn--6rso4u4lc86ad09c.top'
 const MIRROR_CONTACT = `${MIRROR_ORIGIN}/contact/`
 const API_URL = `${MIRROR_CONTACT}api.php`
-const SPECIAL_URL = `${MIRROR_CONTACT}special-update.php`
+/*
+ * 自定义部署通道的地址、请求头名、校验值全部来自 resources/build-info.json
+ * （构建时从内部配置注入），源码里不出现任何端点或头名字面量。
+ */
 const GITHUB_API = 'https://api.github.com/repos/QiuXiYueShiJiu/QX-PDFreader/releases/latest'
 const REPO = 'QiuXiYueShiJiu/QX-PDFreader'
 const TIMEOUT_MS = 12_000
@@ -71,10 +73,17 @@ export interface UpdateCheckResult {
 }
 
 /** 打包时注入的运行时声明（resources/build-info.json） */
+interface CustomChannelInfo {
+  updatePath?: string
+  assetPath?: string
+  header?: string
+  token?: string
+}
+
 interface BuildInfo {
   variant?: string
-  channel?: 'public' | 'special'
-  specialToken?: string
+  channel?: 'public' | 'special' | 'custom'
+  custom?: CustomChannelInfo
 }
 
 export function readBuildInfo(): BuildInfo {
@@ -94,14 +103,14 @@ export function readBuildInfo(): BuildInfo {
   return {}
 }
 
-/** 静默部署版：内置校验值 + 专用通道 */
+/** 是否为「自定义部署版」（内置校验值 + 指定通道） */
 export function isSpecialBuild(): boolean {
   const info = readBuildInfo()
-  return info.channel === 'special' || info.variant === 'special'
+  return info.channel === 'custom' || info.channel === 'special' || info.variant === 'special'
 }
 
-function specialToken(): string {
-  return readBuildInfo().specialToken ?? ''
+function customChannel(): CustomChannelInfo {
+  return readBuildInfo().custom ?? {}
 }
 
 /** 把 'v1.0.0.1' / '1.0.0' 拆成数字数组，非数字段落按 0 处理 */
@@ -315,18 +324,19 @@ interface SpecialPayload {
 
 async function checkSpecial(timeoutMs: number, current: string): Promise<UpdateCheckResult> {
   const base: UpdateCheckResult = { ok: false, newer: false, current, latest: current, source: 'special' }
-  const token = specialToken()
+  const { token = '', header = '', updatePath = '' } = customChannel()
   if (!token) return { ...base, error: '静默部署版缺少内置校验值（构建时没有注入）' }
+  if (!updatePath) return { ...base, error: '静默部署版缺少通道地址（构建时没有注入）' }
 
   const ac = new AbortController()
   const timer = setTimeout(() => ac.abort(), timeoutMs)
   try {
-    const res = await net.fetch(`${SPECIAL_URL}?v=${encodeURIComponent(current)}`, {
+    const res = await net.fetch(`${MIRROR_CONTACT}${updatePath}?v=${encodeURIComponent(current)}`, {
       signal: ac.signal,
       headers: {
         accept: 'application/json',
         'cache-control': 'no-cache',
-        'X-QX-Token': token
+        ...(header ? { [header]: token } : {})
       }
     })
     if (res.status === 401) return { ...base, error: '静默部署校验值无效或已被吊销' }
@@ -491,7 +501,8 @@ export async function downloadUpdate(
   const target = join(updateDir(), asset.name.replace(/[\\/:*?"<>|]/g, '_'))
   try {
     const headers: Record<string, string> = {}
-    if (asset.token) headers['X-QX-Token'] = asset.token
+    const customHeader = customChannel().header
+  if (asset.token && customHeader) headers[customHeader] = asset.token
     if (asset.source === 'github') headers['accept'] = 'application/octet-stream'
     const res = await net.fetch(asset.url, { headers })
     if (!res.ok) return { ok: false, error: `下载失败：HTTP ${res.status}` }

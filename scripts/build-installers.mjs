@@ -52,8 +52,8 @@ const resolved = JSON.parse(readFileSync('build/.packaging-resolved.json', 'utf8
  * 产物输出目录：读 package.json 的 build.directories.output（单一来源）。
  *
  * 早先这里写死 `--config.directories.output=dist-installer`，
- * 于是 package.json 里配了别的目录也不生效 —— 所以改成跟着配置走，
- * 需要自定义时设 PDF_RELEASE_DIR 环境变量即可。
+ * 于是 package.json 里配了别的目录也不生效 —— 用户要求把安装包
+ * 放到自定义目录，所以改成跟着配置走（PDF_RELEASE_DIR 可覆盖）。
  */
 const OUT_DIR = pkgForOut.build?.directories?.output ?? 'dist-installer'
 

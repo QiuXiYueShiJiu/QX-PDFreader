@@ -201,7 +201,7 @@
   /*
    * 迁移：清掉**旧的安装目录**，避免同一个应用存在两份。
    *
-   * 背景：本版把默认安装位置从 `C:\Program Files\QiuXiPDFReader` 改成了
+   * 背景：本版把默认安装位置从 `<旧安装目录>` 改成了
    * `@@INSTALL_DIR@@`（少了个 QX）。老用户机器上可能还留着整个旧目录 ——
    * 不清会出现三个问题：
    *   ① 磁盘上两份 180MB 的 exe，用户分不清该点哪个；
@@ -209,8 +209,8 @@
    *   ③ 旧目录的快捷方式指向旧 exe，点开还是老版本。
    * 这些路径由 packaging.json 的 legacyInstallDirs 提供，源码里为空。
    *
-   * 安全前提：新目录与旧目录**不同**（C:\Program Files\QiuXiPDFReader vs
-   * C:\Program Files\QiuXiPDFReader），所以不会把正在安装的目标删掉。
+   * 安全前提：新目录与旧目录**不同**（<安装目录> vs
+   * <旧安装目录>），所以不会把正在安装的目标删掉。
    * 这里额外做一次比较，万一将来有人把它们配成同一个也不至于自毁。
    */
 @@LEGACY_DIR_CLEANUP@@
@@ -242,7 +242,7 @@
 ;
 ; ── 实测证据（判据）─────────────────────────────────────────
 ;   走完向导（下一步 → 安装）之后：
-;     期望 C:\Program Files\QiuXiPDFReader                           → false
+;     期望 <安装目录>                           → false
 ;     实际 %LOCALAPPDATA%\Programs\smartboard-pdf-reader   → true
 ;   而静默安装（/S）落点是对的。说明 GUI 路径上 customInit 设的值
 ;   被模板覆盖了 —— 因为模板自己也有一套目录初始化。
@@ -285,13 +285,50 @@
      *   模板的 instFilesPre（assistedInstaller.nsh:32-38）会强制保证
      *   $INSTDIR 里含 \${APP_FILENAME}，缺了就补一层。
      *   早先只种 "@@INSTALL_DIR@@"，结果装到
-     *   C:\Program Files\QiuXiPDFReader\smartboard-pdf-reader\ —— 多一层。
+     *   <安装目录>\smartboard-pdf-reader\ —— 多一层。
      *   把完整路径种进来，那个判断自然命中，不再追加。
      *   \${APP_FILENAME} 由 electron-builder 在编译期定义，
      *   现在等于 build.executableName = QXPDFReader。
      */
     WriteRegStr HKCU "${INSTALL_REGISTRY_KEY}" InstallLocation "@@INSTALL_DIR@@\${APP_FILENAME}"
   qx_pre_keep:
+!macroend
+
+; ============================================================
+; 图片格式关联：补写 ProgID 的图标 / 打开命令（2026-10-23 修）
+;
+; 缺陷现象（用户报「图片格式关联没有实现」）：装完后
+; HKCU\Software\Classes\QiuXiImage 下的 DefaultIcon、shell\open\command
+; 等键存在但值为空，双击 .png 毫无反应，「打开方式」里也找不到本程序。
+;
+; 原因：package.json 的 fileAssociations 里图片那一项 ext 是数组，
+; electron-builder 为它建了键却没有写入图标与命令（pdf 那项是单扩展名，完整）。
+;
+; 做法：在 customInstall 里按同一份清单显式补写（幂等）：
+;   · 图标 / 命令指向安装目录里的 exe；
+;   · 默认关联只在原本为空时才写，不抢用户已选好的看图软件；
+;   · 登记 OpenWithProgids，让「打开方式 → 更多应用」能选到本程序。
+; ============================================================
+!macro QX_IMAGE_ASSOC EXT
+  ; 每个图片扩展名一个独立 ProgID：QiuXi.Image.<ext>，各有自己的图标
+  /* 只有「空」或「指向我们自己（含旧版共用的 QiuXiImage）」时才改写；
+     用户自己选过的看图软件保持不动。旧版 1.0.6.0-1.0.6.3 把 .png 指到了
+     QiuXiImage，而新版会删掉那个键 —— 不覆盖就会变成悬空关联（双击无反应）。 */
+  ReadRegStr $R9 SHCTX "Software\Classes\.${EXT}" ""
+  StrCmp $R9 "" qx_img_write_${EXT}
+  StrCmp $R9 "QiuXiImage" qx_img_write_${EXT}
+  StrCmp $R9 "QiuXi.Image.${EXT}" qx_img_write_${EXT}
+    Goto qx_img_keep_${EXT}
+  qx_img_write_${EXT}:
+    WriteRegStr SHCTX "Software\Classes\.${EXT}" "" "QiuXi.Image.${EXT}"
+  qx_img_keep_${EXT}:
+  WriteRegStr SHCTX "Software\Classes\.${EXT}" "PerceivedType" "image"
+  WriteRegStr SHCTX "Software\Classes\QiuXi.Image.${EXT}" "" "${EXT} 图片（用秋夕-PDF阅读器打开）"
+  WriteRegStr SHCTX "Software\Classes\QiuXi.Image.${EXT}\DefaultIcon" "" "$INSTDIR\resources\file-icons\${EXT}.ico,0"
+  WriteRegStr SHCTX "Software\Classes\QiuXi.Image.${EXT}\shell" "" "open"
+  WriteRegStr SHCTX "Software\Classes\QiuXi.Image.${EXT}\shell\open" "" "用秋夕-PDF阅读器打开"
+  WriteRegStr SHCTX "Software\Classes\QiuXi.Image.${EXT}\shell\open\command" "" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" "%1"'
+  WriteRegStr SHCTX "Software\Classes\SystemFileAssociations\.${EXT}\OpenWithProgids" "QiuXi.Image.${EXT}" ""
 !macroend
 
 !macro customInstall
@@ -353,7 +390,7 @@
    *   · HKCU\Software\Classes\.pdf        默认值 = PDF 文档   ✔
    *   · HKCU\Software\Classes\PDF 文档\shell\open\command    ✔
    *   · HKCU\Software\Classes\PDF 文档\DefaultIcon =
-   *       C:\Program Files\QiuXiPDFReader\qiuxi-pdf-reader\resources\pdf-file.ico
+   *       <安装目录>\qiuxi-pdf-reader\resources\pdf-file.ico
    *   · resources\pdf-file.ico 存在且正常（8 个尺寸 16~256，用
    *     ExtractAssociatedIcon 取出来是红色 PDF 页图标）
    *   也就是说**注册表链路是通的**，缺的只有两点：
@@ -378,7 +415,54 @@
     WriteRegStr SHCTX "Software\Classes\PDF 文档\DefaultIcon" "" "$INSTDIR\${APP_EXECUTABLE_FILENAME},0"
   qx_icon_notify:
 
-  /* SHCNE_ASSOCCHANGED = 0x08000000；后三个参数（idlist/路径/名称）全 0 */
+  /*
+   * 图片格式：每种格式独立的 ProgID + 独立图标（build/file-icons/<ext>.ico）。
+   * 之前所有图片共用一个 QiuXiImage，只能有一个图标；而且 electron-builder
+   * 为数组型 ext 建的键值为空，双击毫无反应。
+   */
+  DeleteRegKey SHCTX "Software\Classes\QiuXiImage"
+  WriteRegStr SHCTX "Software\Classes\Applications\${APP_EXECUTABLE_FILENAME}\shell\open\command" "" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" "%1"'
+  WriteRegStr SHCTX "Software\Classes\Applications\${APP_EXECUTABLE_FILENAME}\SupportedTypes" ".pdf" ""
+  WriteRegStr SHCTX "Software\Classes\Applications\${APP_EXECUTABLE_FILENAME}\SupportedTypes" ".png" ""
+  WriteRegStr SHCTX "Software\Classes\Applications\${APP_EXECUTABLE_FILENAME}\SupportedTypes" ".jpg" ""
+  WriteRegStr SHCTX "Software\Classes\Applications\${APP_EXECUTABLE_FILENAME}\SupportedTypes" ".jpeg" ""
+  WriteRegStr SHCTX "Software\Classes\Applications\${APP_EXECUTABLE_FILENAME}\SupportedTypes" ".webp" ""
+  WriteRegStr SHCTX "Software\Classes\Applications\${APP_EXECUTABLE_FILENAME}\SupportedTypes" ".bmp" ""
+  WriteRegStr SHCTX "Software\Classes\Applications\${APP_EXECUTABLE_FILENAME}\SupportedTypes" ".gif" ""
+
+  !insertmacro QX_IMAGE_ASSOC png
+  !insertmacro QX_IMAGE_ASSOC jpg
+  !insertmacro QX_IMAGE_ASSOC jpeg
+  !insertmacro QX_IMAGE_ASSOC webp
+  !insertmacro QX_IMAGE_ASSOC bmp
+  !insertmacro QX_IMAGE_ASSOC gif
+
+  /*
+   * 「默认应用」注册（Capabilities + RegisteredApplications）。
+   *
+   * 为什么必须要这个：Windows 10/11 把默认打开方式存在
+   *   HKCU\...\Explorer\FileExts\.png\UserChoice
+   * 里，并且带一个防篡改的哈希。安装器**无法**直接改写它（写了也会被系统
+   * 还原或判定无效），所以"装完就接管双击"在 Windows 10+ 上做不到。
+   * 正规做法是把自己登记成一个"能打开这些格式的应用"，用户到
+   *   设置 → 应用 → 默认应用 → 按文件类型指定默认应用
+   * 里点一次即可；登记后该页面会列出 秋夕-PDF阅读器 与它能开的格式。
+   *
+   * 实测（2026-10-23）：.png/.jpg 的 UserChoice 指向系统"照片"，因此图标
+   * 与双击都由照片处理；只有用户改选后，我们 ProgID 里的 DefaultIcon
+   * （build/file-icons/<ext>.ico）才会生效。
+   */
+  WriteRegStr SHCTX "Software\${COMPANY_NAME}\${PRODUCT_NAME}\Capabilities" "ApplicationName" "${PRODUCT_NAME}"
+  WriteRegStr SHCTX "Software\${COMPANY_NAME}\${PRODUCT_NAME}\Capabilities" "ApplicationDescription" "面向课堂的本地 PDF 阅读器，可打开 PDF 与常见图片"
+  WriteRegStr SHCTX "Software\${COMPANY_NAME}\${PRODUCT_NAME}\Capabilities\FileAssociations" ".pdf" "PDF 文档"
+  WriteRegStr SHCTX "Software\${COMPANY_NAME}\${PRODUCT_NAME}\Capabilities\FileAssociations" ".png" "QiuXi.Image.png"
+  WriteRegStr SHCTX "Software\${COMPANY_NAME}\${PRODUCT_NAME}\Capabilities\FileAssociations" ".jpg" "QiuXi.Image.jpg"
+  WriteRegStr SHCTX "Software\${COMPANY_NAME}\${PRODUCT_NAME}\Capabilities\FileAssociations" ".jpeg" "QiuXi.Image.jpeg"
+  WriteRegStr SHCTX "Software\${COMPANY_NAME}\${PRODUCT_NAME}\Capabilities\FileAssociations" ".webp" "QiuXi.Image.webp"
+  WriteRegStr SHCTX "Software\${COMPANY_NAME}\${PRODUCT_NAME}\Capabilities\FileAssociations" ".bmp" "QiuXi.Image.bmp"
+  WriteRegStr SHCTX "Software\${COMPANY_NAME}\${PRODUCT_NAME}\Capabilities\FileAssociations" ".gif" "QiuXi.Image.gif"
+  WriteRegStr SHCTX "Software\RegisteredApplications" "${PRODUCT_NAME}" "Software\${COMPANY_NAME}\${PRODUCT_NAME}\Capabilities"
+  ; SHCNE_ASSOCCHANGED = 0x08000000，后三个参数（idlist/路径/名称）全 0
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, i 0, i 0)'
   /* 图标缓存：Win10/11 用 ie4uinit -show 强制重建；失败不影响安装 */
   nsExec::Exec '"$SYSDIR\ie4uinit.exe" -show'
@@ -438,7 +522,26 @@
   Delete "$SMPROGRAMS\智慧黑板PDF阅读器.lnk"
   Delete "$SMPROGRAMS\QXPDFReader.lnk"
 
-  ; ⑤ v2.1.3 起开始菜单用独立文件夹（安装时可选建/不建）；
+  ; ⑥ 图片格式关联：删 ProgID 与「打开方式」登记。
+  ;    不还原扩展名默认项 —— 安装时只在为空时写，用户改选过就不该被改回去。
+  DeleteRegKey SHCTX "Software\Classes\QiuXiImage"
+  DeleteRegKey SHCTX "Software\Classes\QiuXi.Image.png"
+  DeleteRegKey SHCTX "Software\Classes\QiuXi.Image.jpg"
+  DeleteRegKey SHCTX "Software\Classes\QiuXi.Image.jpeg"
+  DeleteRegKey SHCTX "Software\Classes\QiuXi.Image.webp"
+  DeleteRegKey SHCTX "Software\Classes\QiuXi.Image.bmp"
+  DeleteRegKey SHCTX "Software\Classes\QiuXi.Image.gif"
+  DeleteRegValue SHCTX "Software\Classes\SystemFileAssociations\.png\OpenWithProgids" "QiuXiImage"
+  DeleteRegValue SHCTX "Software\Classes\SystemFileAssociations\.jpg\OpenWithProgids" "QiuXiImage"
+  DeleteRegValue SHCTX "Software\Classes\SystemFileAssociations\.jpeg\OpenWithProgids" "QiuXiImage"
+  DeleteRegValue SHCTX "Software\Classes\SystemFileAssociations\.webp\OpenWithProgids" "QiuXiImage"
+  DeleteRegValue SHCTX "Software\Classes\SystemFileAssociations\.bmp\OpenWithProgids" "QiuXiImage"
+  DeleteRegValue SHCTX "Software\Classes\SystemFileAssociations\.gif\OpenWithProgids" "QiuXiImage"
+  DeleteRegKey SHCTX "Software\Classes\Applications\${APP_EXECUTABLE_FILENAME}"
+  DeleteRegKey SHCTX "Software\${COMPANY_NAME}\${PRODUCT_NAME}\Capabilities"
+  DeleteRegValue SHCTX "Software\RegisteredApplications" "${PRODUCT_NAME}"
+
+  ; ⑤ v2.1.3 起开始菜单用独立文件夹（安装时可选建/不建）；（安装时可选建/不建）；
   ;    先删文件夹里的 .lnk，再 RMDir（不带 /r）—— 顺手清掉空文件夹，
   ;    但不会误删用户自己往里放的其他东西。
   Delete "$SMPROGRAMS\秋夕-教学软件\秋夕-PDF阅读器.lnk"

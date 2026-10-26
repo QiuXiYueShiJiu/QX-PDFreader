@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "秋夕-PDF阅读器 插件市场清单",
+  "type": "object",
+  "required": ["schemaVersion", "items"],
+  "additionalProperties": true,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "count": { "type": "integer", "minimum": 0 },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "name", "version", "summary", "download", "sha256", "size"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,63}$" },
+          "kind": { "enum": ["theme", "plugin"] },
+          "name": { "type": "string", "maxLength": 40 },
+          "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+          "author": { "type": "string", "maxLength": 60 },
+          "summary": { "type": "string", "maxLength": 80 },
+          "homepage": { "type": "string", "format": "uri" },
+          "download": { "type": "string", "pattern": "^https://" },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "size": { "type": "integer", "minimum": 1, "maximum": 20971520 },
+          "tags": { "type": "array", "items": { "type": "string", "maxLength": 16 }, "maxItems": 8 },
+          "minAppVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+          "license": { "type": "string" },
+          "theme": {
+            "type": "object",
+            "required": ["theme", "themeLayout"],
+            "additionalProperties": false,
+            "properties": {
+              "theme": {
+                "enum": ["light", "sepia", "dark", "night", "forest", "warm", "contrast", "paper", "midnight", "plum", "glow", "metro", "glass"]
+              },
+              "themeLayout": { "enum": ["normal", "office"] }
+            }
+          }
+        }
+      }
+    }
+  }
+}

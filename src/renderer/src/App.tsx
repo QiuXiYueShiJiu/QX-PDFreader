@@ -463,6 +463,7 @@ export default function App(): JSX.Element {
       <TitleBar subtitle={fileName || undefined} />
       <TabBar />
       <Toolbar />
+      <DrawToolbar zone="edit" />
 
       <div className="app__body">
         {/* 左侧竖排工具条：批注工具 */}
@@ -473,7 +474,6 @@ export default function App(): JSX.Element {
 
         <div className="app__viewer" ref={viewerRef}>
           {/* 手绘模式下的 PPT 式墨迹工具条，悬浮在阅读区底部 */}
-          <DrawToolbar />
           {doc && viewSize.width > 0 ? (
             <DocumentView
               doc={doc}
@@ -502,6 +502,9 @@ export default function App(): JSX.Element {
 
       <StatusBar />
 
+
+      {/* 授课类工具：底部悬浮（颜色随主题） */}
+      <DrawToolbar zone="pen" />
       {/*
         课堂辅助遮罩（黑屏 / 聚光灯 / 放大镜）。
         放在最外层、层级最高，因为它要盖住包括工具栏在内的一切 ——
@@ -574,6 +577,7 @@ function EmptyState({
 
   return (
     <div className="empty">
+      <div className="empty__card">
       <h2 className="empty__title">秋夕-PDF阅读器</h2>
       <p className="empty__text">
         把 PDF 拖到这里，或
@@ -589,6 +593,7 @@ function EmptyState({
       <p className="empty__hint">
         提示：也可以在文件管理器里双击 PDF 直接用它打开（安装时已关联 .pdf）
       </p>
+      </div>
     </div>
   )
 }

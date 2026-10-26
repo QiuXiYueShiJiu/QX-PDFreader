@@ -18,8 +18,7 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = dirname(HERE)
-const arg = process.argv[2]
-const readmePath = arg ?? (existsSync(join(ROOT, 'README.md')) ? join(ROOT, 'README.md') : join(ROOT, 'README.github.md'))
+const readmePath = process.argv[2] ?? join(ROOT, 'README.md')
 
 let fail = 0
 const check = (name, ok, detail = '') => {

@@ -6,7 +6,7 @@
  *   · 圆角由 `--glass-radius` 统一驱动，设置里的滑块直接改它；
  *   · 模糊强度由 `--glass-blur` 驱动，0 就是纯半透明、越大越糊。
  *
- * 为什么不写进 base.css：8 个内置主题只换颜色变量，而这一套要额外覆盖
+ * 为什么不写进 base.css：8 个内置主题只换颜色校验值，而这一套要额外覆盖
  * 组件的背景/边框/阴影，单独一个文件更清楚，也方便以后整包下线。
  *
  * 变量由 store.ts 的 applyTheme() 写成行内变量（跟随设置实时变化），
@@ -24,7 +24,7 @@ html[data-theme='glass'] {
   --accent: 84 126 255;
   --reader-bg: 240 245 253;
 
-  /* 圆角变量整体跟着玻璃半径走：磁贴/卡片/输入框保持同一套比例 */
+  /* 圆角校验值整体跟着玻璃半径走：磁贴/卡片/输入框保持同一套比例 */
   --radius: var(--glass-radius);
   --radius-sm: calc(var(--glass-radius) * 0.55);
   --radius-lg: calc(var(--glass-radius) * 1.5);

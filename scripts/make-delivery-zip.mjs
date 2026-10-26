@@ -86,12 +86,13 @@ for (const d of DIRS) {
 }
 
 /* 安装包 */
-const releaseDir = process.env.PDF_RELEASE_DIR ?? pkg.build?.directories?.output ?? 'dist-installer'
+const releaseDir = 'D:\\DSH_Workstation\\PDFrelease'
 mkdirSync(join(stage, '安装包'), { recursive: true })
 for (const f of [
   `秋夕-PDF阅读器-${buildVersion}-安装程序.exe`,
-  /* 额外产物：用 DELIVERY_EXTRA 逗号分隔文件名，默认不加 */
-  ...String(process.env.DELIVERY_EXTRA ?? '').split(',').map((x) => x.trim()).filter(Boolean)
+  'PDF阅读器-学校快速安装.exe',
+  /* 静默部署版：带单位声明与内置校验值，只随内部交付走，绝不上公开仓库 */
+  `秋夕-PDF阅读器-${buildVersion}-静默部署版安装程序.exe`
 ]) {
   const p = join(releaseDir, f)
   if (!existsSync(p)) {

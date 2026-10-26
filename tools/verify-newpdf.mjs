@@ -60,7 +60,15 @@ const click = (selector) =>
   ev(`
     const el = document.querySelector(${JSON.stringify(selector)})
     if (!el) return false
-    el.click()
+    /* v1.0.9：按钮走的是 pointerdown/mousedown 这条链路，element.click() 不触发，
+       这里用真实的 MouseEvent 序列模拟一次左键点击。 */
+    const r = el.getBoundingClientRect()
+    const opt = { bubbles: true, cancelable: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2, button: 0 }
+    el.dispatchEvent(new PointerEvent('pointerdown', { ...opt, pointerId: 1, pointerType: 'mouse', isPrimary: true }))
+    el.dispatchEvent(new MouseEvent('mousedown', opt))
+    el.dispatchEvent(new PointerEvent('pointerup', { ...opt, pointerId: 1, pointerType: 'mouse', isPrimary: true }))
+    el.dispatchEvent(new MouseEvent('mouseup', opt))
+    el.dispatchEvent(new MouseEvent('click', opt))
     return true
   `)
 

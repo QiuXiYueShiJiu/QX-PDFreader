@@ -11,7 +11,7 @@
  *
  * 为什么单独一个文件：布局要能和任意配色组合（`html[data-layout='office']`
  * 与 `html[data-theme='...']` 互不干扰），放在 base/packs 里会很难读。
- * 这里只写"结构"，颜色一律引用主题变量（--surface / --accent / --border）。
+ * 这里只写"结构"，颜色一律引用主题校验值（--surface / --accent / --border）。
  */
 
 html[data-layout='office'] {

@@ -439,7 +439,7 @@ await evaluate(`(() => {
     notes: '修复若干问题；设置页可手动检查更新'
   })
   s.setUpdateProgress({ received: 106880224, total: 106880224, fraction: 1 })
-  s.setUpdateStage('ready', 'C:/<user>/秋夕-PDF阅读器-1.0.8.2-安装程序.exe')
+  s.setUpdateStage('ready', 'C:/<user>/秋夕-PDF阅读器-1.0.9.0-安装程序.exe')
   return true
 })()`)
 await sleep(900)

@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
  * Copyright 2026 秋夕月拾旧
  *
- * 插件市场浮层。配色全部走主题变量，切主题时自动跟着变。
+ * 插件市场浮层。配色全部走主题校验值，切主题时自动跟着变。
  */
 
 .market {

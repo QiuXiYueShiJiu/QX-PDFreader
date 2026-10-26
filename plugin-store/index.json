@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-26T04:00:00Z",
+  "count": 3,
+  "items": [
+    {
+      "id": "theme-qingyue",
+      "kind": "theme",
+      "name": "清月",
+      "version": "1.0.0",
+      "author": "秋夕月拾旧",
+      "summary": "纸感浅色 + 靛蓝强调色，白天与投影都稳。",
+      "homepage": "https://github.com/QiuXiYueShiJiu/QX-PDFreader",
+      "download": "https://github.com/QiuXiYueShiJiu/QX-PDFreader/releases/download/themes/theme-qingyue-1.0.0.zip",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size": 1,
+      "tags": ["浅色", "纸感"],
+      "minAppVersion": "1.0.9.0",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "theme": { "theme": "paper", "themeLayout": "normal" }
+    },
+    {
+      "id": "theme-yuebai",
+      "kind": "theme",
+      "name": "月白",
+      "version": "1.0.0",
+      "author": "秋夕月拾旧",
+      "summary": "冷白界面 + 青灰强调色，适合长时间批注。",
+      "homepage": "https://github.com/QiuXiYueShiJiu/QX-PDFreader",
+      "download": "https://github.com/QiuXiYueShiJiu/QX-PDFreader/releases/download/themes/theme-yuebai-1.0.0.zip",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size": 1,
+      "tags": ["冷白", "护眼"],
+      "minAppVersion": "1.0.9.0",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "theme": { "theme": "glow", "themeLayout": "normal" }
+    },
+    {
+      "id": "theme-yefeng",
+      "kind": "theme",
+      "name": "夜风",
+      "version": "1.0.0",
+      "author": "秋夕月拾旧",
+      "summary": "深蓝夜色 + 青色高光，关灯上课不刺眼。",
+      "homepage": "https://github.com/QiuXiYueShiJiu/QX-PDFreader",
+      "download": "https://github.com/QiuXiYueShiJiu/QX-PDFreader/releases/download/themes/theme-yefeng-1.0.0.zip",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size": 1,
+      "tags": ["深色", "夜间"],
+      "minAppVersion": "1.0.9.0",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "theme": { "theme": "midnight", "themeLayout": "normal" }
+    }
+  ]
+}

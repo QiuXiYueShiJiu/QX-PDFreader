@@ -101,15 +101,27 @@ await sleep(600)
 /* ---------- ① 颜色盘唯一性 ---------- */
 console.log('① 颜色盘唯一性')
 const palette = j(
-  cdp(`JSON.stringify({
-    绘图条颜色: document.querySelectorAll('.drawbar__color').length,
-    左栏颜色: document.querySelectorAll('.rail-color').length,
-    顶栏颜色: document.querySelectorAll('.draw-tools .anno-color').length,
-    合计: document.querySelectorAll('.drawbar__color, .rail-color, .draw-tools .anno-color').length
-  })`)
+  cdp(`JSON.stringify((() => {
+    const vis = (el) => el.offsetParent !== null;
+    const colors = Array.from(document.querySelectorAll('.drawbar__color'));
+    const wide = Array.from(document.querySelectorAll('.drawbar__color, .rail-color, .draw-tools .anno-color'));
+    return {
+      绘图条颜色: colors.length,
+      可见颜色: colors.filter(vis).length,
+      左栏颜色: document.querySelectorAll('.rail-color').length,
+      顶栏颜色: document.querySelectorAll('.draw-tools .anno-color').length,
+      合计: wide.length,
+      可见合计: wide.filter(vis).length
+    };
+  })())`)
 )
 console.log(`   ${JSON.stringify(palette)}`)
-check('颜色盘只有一处、共 6 色', palette && palette.合计 === 6 && palette.绘图条颜色 === 6)
+/* v1.0.9 起工具条拆两条：颜色盘只应出现在底部授课条里，可见 6 色。 */
+check(
+  '颜色盘只有一处可见、共 6 色',
+  palette && palette.可见合计 === 6 && palette.可见颜色 === 6,
+  palette ? `可见 ${palette.可见合计} / 共 ${palette.合计}` : '读取失败'
+)
 
 /* ---------- ② 粗细是连续滑块 ---------- */
 console.log('\n② 粗细控件形态')
@@ -287,7 +299,33 @@ const afterExit = j(
   })()`)
 )
 console.log(`   ${JSON.stringify(afterExit)}`)
-check('工具条与控件**没有隐藏**（用户要求不隐藏任何图标）', !!afterExit?.工具条仍在 && afterExit.颜色按钮数 === 6 && !!afterExit.粗细组存在)
+/* v1.0.9 契约：工具条拆成顶（备课）/底（授课）两条，分组不重复可见。 */
+const split = j(
+  cdp(`JSON.stringify((() => {
+    const bars = Array.from(document.querySelectorAll('.drawbar'));
+    const visGroups = (bar) =>
+      Array.from(bar.querySelectorAll('.drawbar__group'))
+        .filter((g) => getComputedStyle(g).display !== 'none')
+        .map((g) => g.getAttribute('data-group-name'));
+    return {
+      条数: bars.length,
+      顶栏组: bars[0] ? visGroups(bars[0]) : [],
+      底栏组: bars[1] ? visGroups(bars[1]) : [],
+      底栏定位: bars[1] ? getComputedStyle(bars[1]).position : null,
+      底栏可见: bars[1] ? (bars[1].getBoundingClientRect().height > 0 && getComputedStyle(bars[1]).display !== 'none') : false
+    };
+  })())`)
+)
+console.log(`   拆分 ${JSON.stringify(split)}`)
+check(
+  '工具条拆成顶/底两条，备课在上、授课在下',
+  !!split &&
+    split.条数 === 2 &&
+    split.顶栏组.join(',') === '插入,编辑' &&
+    split.底栏组.join(',') === '开始,颜色,画笔' &&
+    split.底栏定位 === 'fixed' &&
+    split.底栏可见 === true
+)
 check('颜色组置灰且按钮全禁用', afterExit?.颜色组置灰 === true && afterExit?.颜色按钮全禁用 === true)
 check('粗细组置灰且滑块禁用', afterExit?.粗细组置灰 === true && afterExit?.滑块禁用 === true)
 

@@ -2,7 +2,7 @@
  * Metro UI 主题（Windows 10 设计语言）
  *
  * 定位：这是**第四套主题**（light / dark / sepia / metro），
- *   变量在 base.css 的 `html[data-theme='metro']` 里定义，
+ *   校验值在 base.css 的 `html[data-theme='metro']` 里定义，
  *   本文件只做「Metro 特有的形态」—— 不是再定义一遍颜色。
  *
  * Metro 的三条硬特征（对照 Windows 10 的「设置」「开始菜单」）：

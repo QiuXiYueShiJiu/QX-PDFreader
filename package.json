@@ -1,6 +1,6 @@
 {
   "name": "qiuxi-pdf-reader",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "秋夕-PDF阅读器 —— 面向教学一体机的双栏批注式 PDF 阅读工具",
   "main": "./out/main/index.js",
   "author": "秋夕月拾旧",
@@ -90,7 +90,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "秋夕-PDF阅读器",
-      "artifactName": "秋夕-PDF阅读器-1.0.8.2-安装程序.${ext}",
+      "artifactName": "秋夕-PDF阅读器-1.0.9.0-安装程序.${ext}",
       "include": "build/installer.nsh"
     },
     "afterPack": "scripts/after-pack.mjs",
@@ -129,6 +129,6 @@
       }
     ]
   },
-  "buildVersion": "1.0.8.2",
+  "buildVersion": "1.0.9.0",
   "productName": "秋夕-PDF阅读器"
 }

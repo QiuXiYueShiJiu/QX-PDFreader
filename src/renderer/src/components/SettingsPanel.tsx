@@ -378,7 +378,16 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
                     title={pack.tip}
                     onClick={() => {
                       if (activePack.id === pack.id) return
-                      onChange({ theme: pack.fallback })
+                      /*
+                       * 1.0.8.3：布局不再是一个独立开关，而是**主题包自带属性**。
+                       * Metro（Windows 磁贴风）天生就是 Office 2019 那套功能区布局，
+                       * 其余包保持经典布局 —— 切包即切布局，用户不用再理解两个概念。
+                       * themeLayout 字段保留，只用于承载这个派生结果与旧设置迁移。
+                       */
+                      onChange({
+                        theme: pack.fallback,
+                        themeLayout: pack.id === 'metro' ? 'office' : 'normal',
+                      })
                     }}
                   >
                     {pack.label}
@@ -538,7 +547,8 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
 
 
             {/* 2026-10-24：布局与配色解耦，单独一门开关 */}
-            <div className="sb-field">
+            {/* 1.0.8.3：布局并入主题包（Metro = Office 2019 功能区），这里保留 DOM 只为兼容旧用例，已隐藏 */}
+            <div className="sb-field" hidden aria-hidden="true">
               <div className="sb-field-text">
                 <span className="sb-field-label">界面布局</span>
                 <span className="sb-field-hint">

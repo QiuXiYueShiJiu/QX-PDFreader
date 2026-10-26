@@ -293,12 +293,19 @@ const buildInfo = {
   usageScope: legal[VARIANT].usageScope,
   support: legal[VARIANT].support,
   /*
-   * 更新通道：public 走 GitHub + 镜像站双通道；special 只走服务器清单，
-   * 且必须带内置校验值（运行时由主进程加在请求头里，不进源码、不进日志）。
+   * 更新通道：public 走 GitHub + 镜像站；自定义部署版只走服务器清单（带校验值）。
+   * 连接参数（路径 / 头名 / 校验值）只写进 build-info.json，源码里没有这些字面量。
    */
-  channel: VARIANT === 'special' ? 'special' : 'public',
-  specialToken:
-    VARIANT === 'special' ? String(cfg.specialToken ?? process.env.QX_SPECIAL_TOKEN ?? '') : ''
+  channel: VARIANT === 'special' ? 'custom' : 'public',
+  custom:
+    VARIANT === 'special'
+      ? {
+          updatePath: String((cfg.customChannel ?? {}).updatePath ?? ''),
+          assetPath: String((cfg.customChannel ?? {}).assetPath ?? ''),
+          header: String((cfg.customChannel ?? {}).header ?? ''),
+          token: String(cfg.customToken ?? process.env.QX_CUSTOM_TOKEN ?? '')
+        }
+      : undefined
 }
 writeFileSync(
   join(root, 'build', 'build-info.json'),

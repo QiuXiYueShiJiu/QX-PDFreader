@@ -148,7 +148,13 @@ const EDIT_TOOLS: ReadonlyArray<{
   }
 ]
 
-export function DrawToolbar(): JSX.Element | null {
+/**
+ * 工具条拆两条（用户要求：备课类在顶栏，授课类在底部悬浮）：
+ *   zone='edit' —— 顶栏 Office 式工具带：文字 / 图片 / 涂白 / 矩形 / 椭圆 + 撤销重做 + 清屏
+ *   zone='pen'  —— 底部悬浮：漫游 / 画笔 / 橡皮 / 选择 + 颜色 + 粗细 + 撤销重做
+ * 两个实例共享 store 状态，互不干扰；editBar 只在顶栏渲染一次，避免两处重复。
+ */
+export function DrawToolbar({ zone = 'edit' }: { zone?: 'edit' | 'pen' } = {}): JSX.Element | null {
   const drawMode = useViewer((s) => s.drawMode)
   const drawColor = useViewer((s) => s.drawColor)
   const drawWidth = useViewer((s) => s.drawWidth)
@@ -244,7 +250,11 @@ export function DrawToolbar(): JSX.Element | null {
   const roaming = editTool === 'none' && !drawMode && !eraserMode
 
   return (
-    <div className="drawbar" role="toolbar" aria-label="批注工具">
+    <div
+      className={`drawbar drawbar--ribbon drawbar--zone-${zone}${zone === 'pen' ? ' drawbar--dock' : ''}`}
+      role="toolbar"
+      aria-label={zone === 'pen' ? '授课工具（画笔）' : '编辑工具（备课）'}
+    >
       {/*
         ---------- 内容编辑的功能区（合并到本工具条）----------
         用户要求：选择 / 文字 / 图片 / 涂白 / 矩形 / 椭圆 唤出的那条
@@ -258,7 +268,11 @@ export function DrawToolbar(): JSX.Element | null {
         内容由 edit/ContentEditBridge 注册进来（真实状态在 useContentEdit 里）。
         没有进入编辑态时渲染 null，这一行完全不存在、不多占高度。
       */}
-      {editBar ? <div className="drawbar__editdock" data-edit-dock="1">{editBar}</div> : null}
+      {zone === 'edit' && editBar ? (
+        <div className="drawbar__editdock" data-edit-dock="1">
+          {editBar}
+        </div>
+      ) : null}
 
       {/*
         ---------- 工具行（下面那一行）----------
@@ -287,7 +301,7 @@ export function DrawToolbar(): JSX.Element | null {
           没在画的时候它自己就是激活态，工具栏永远有且只有一个亮点。
       */}
       <button
-        className={`drawbar__tool drawbar__tool--roam ${roaming ? 'is-active' : ''}`}
+        className={`drawbar__roam-fab ${roaming ? 'is-active' : ''}`}
         onClick={() => setRoam()}
         title={
           roaming
@@ -302,7 +316,7 @@ export function DrawToolbar(): JSX.Element | null {
       </button>
 
       {/* ---------- 画笔 / 橡皮 切换 ---------- */}
-      <div className="drawbar__group">
+      <div data-group-name="开始" className="drawbar__group">
         <button
           /*
            * 画笔按钮的两种状态：
@@ -354,7 +368,7 @@ export function DrawToolbar(): JSX.Element | null {
         ★ 再点一次当前工具 = 回到漫游（与「漫游」按钮同一个出口），
           避免用户在编辑态里找不到退路 —— 触屏上多一步「先找漫游」很烦。
       */}
-      <div className="drawbar__group drawbar__group--edit" role="group" aria-label="内容编辑工具">
+      <div data-group-name="插入" className="drawbar__group drawbar__group--edit" role="group" aria-label="内容编辑工具">
         {EDIT_TOOLS.map((t) => {
           const Icon = t.icon
           const active = editTool === t.id
@@ -387,7 +401,7 @@ export function DrawToolbar(): JSX.Element | null {
           用 disabled 而不是隐藏 —— 用户明确要求不隐藏任何工具条图标。
       */}
       <div
-        className={`drawbar__group drawbar__group--colors ${!drawMode ? 'is-muted' : ''}`}
+        data-group-name="颜色" className={`drawbar__group drawbar__group--colors ${!drawMode ? 'is-muted' : ''}`}
         role="group"
         aria-label="画笔颜色"
       >
@@ -428,7 +442,7 @@ export function DrawToolbar(): JSX.Element | null {
          *   拖滑块时页面上的橡皮光标圆圈会同步变化（eraserSize 驱动），
          *   所以不用看数字也能判断大小是否合适。
          */
-        <div className="drawbar__group drawbar__group--width" role="group" aria-label="橡皮大小">
+        <div data-group-name="橡皮" className="drawbar__group drawbar__group--width" role="group" aria-label="橡皮大小">
           <span className="drawbar__group-label">橡皮</span>
           <span
             className="drawbar__preview drawbar__preview--eraser"
@@ -459,7 +473,7 @@ export function DrawToolbar(): JSX.Element | null {
          * disabled 负责可操作性），但不隐藏。
          */
         <div
-          className={`drawbar__group drawbar__group--width ${!drawMode ? 'is-muted' : ''}`}
+          data-group-name="画笔" className={`drawbar__group drawbar__group--width ${!drawMode ? 'is-muted' : ''}`}
           role="group"
           aria-label="画笔粗细"
         >
@@ -489,7 +503,7 @@ export function DrawToolbar(): JSX.Element | null {
       )}
 
       {/* ---------- 操作 ---------- */}
-      <div className="drawbar__group">
+      <div data-group-name="编辑" className="drawbar__group">
         <button
           className="drawbar__tool"
           onClick={() => undo()}

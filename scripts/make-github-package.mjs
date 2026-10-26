@@ -82,13 +82,17 @@ const SCRIPT_KEEP = [
 const REPLACEMENTS = [
   [/学校/g, '示例单位'],
   /*
-   * 反斜杠与正斜杠两种写法都算，且允许出现「双反斜杠」（JS 字符串里常见），
-   * 所以分隔符写成 [\\/]{1,2}，否则会漏掉一半路径。
+   * 反斜杠与正斜杠两种写法都算，且允许出现「双反斜杠」（JS 字符串里常见
+   * `D:\\DSH_...`）—— 所以分隔符写成 [\\/]{1,2}，否则会漏掉一半路径。
    */
-  [/[A-Za-z]:[\\/]{1,2}Program Files[\\/]{1,2}QiuXiPDFReader/gi, '<install-dir>'],
-  [/[A-Za-z]:[\\/]{1,2}(?:Users)[\\/]{1,2}[^"'\s)]*/gi, '~'],
-  [/[A-Za-z]:[\\/]{1,2}[^"'\s)]*[\\/]{1,2}(?:dist-installer|release)[\\/]{1,2}/gi, '<dist>\\'],
+  [/D:[\\/]{1,2}<安装目录>[\\/]{1,2}PDFReader/gi, 'C:\\Program Files\\QiuXiPDFReader'],
+  [/D:[\\/]{1,2}<安装目录>[\\/]{1,2}QXPDFReader/gi, 'C:\\Program Files\\QiuXiPDFReader'],
+  [/D:[\\/]{1,2}<安装目录>/gi, 'C:\\Program Files\\QiuXiPDFReader'],
+  [/D:[\\/]{1,2}DSH_WorkStation[\\/]{1,2}pdf-reader/gi, 'pdf-reader'],
+  [/D:[\\/]{1,2}DSH_WorkStation[\\/]{1,2}PDFrelease/gi, 'dist-installer'],
+  [/D:[\\/]{1,2}DSH_WorkStation/gi, '~'],
   [/Administrator/gi, 'user'],
+  [/PDFrelease/g, 'dist-installer'],
   [/QX-[0-9a-f]{32}/g, 'QX-REPLACE-ME']
 ]
 
@@ -137,11 +141,8 @@ for (const f of ROOT_FILES) {
   sanitize(join(STAGE, f))
 }
 
-/* README：公开仓库首页用 GitHub 版；发布指引改名去掉「GitHub」后缀 */
 cpSync(join(ROOT, 'README.github.md'), join(STAGE, 'README.md'))
 sanitize(join(STAGE, 'README.md'))
-cpSync(join(ROOT, '发布指引-GitHub.md'), join(STAGE, '发布指引.md'))
-sanitize(join(STAGE, '发布指引.md'))
 
 /* ---------- 3. 源码 / 夹具 / 工具 / 脚本 ---------- */
 copyTree(join(ROOT, 'src'), join(STAGE, 'src'))
@@ -204,7 +205,7 @@ if (existsSync(setupPath)) {
 }
 
 /* ---------- 7. 隐私自检 ---------- */
-const FORBIDDEN = [/[A-Za-z]:[\\/]{1,2}(?:Users|Program Files)/, /Administrator/, /QX-[0-9a-f]{32}/]
+const FORBIDDEN = [/学校/, /<安装目录>/, /DSH_WorkStation/, /Administrator/, /PDFrelease/, /QX-[0-9a-f]{32}/]
 const hits = []
 function scan(dir) {
   for (const name of readdirSync(dir)) {

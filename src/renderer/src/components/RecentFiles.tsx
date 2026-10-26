@@ -132,9 +132,7 @@ export function RecentFiles({ items, onOpen, onRemove }: RecentFilesProps): JSX.
                   <span className="sb-recent-name" title={item.name}>
                     {item.name}
                   </span>
-                  <span className="sb-recent-dir" title={item.path}>
-                    {dirOf(item.path)}
-                  </span>
+                  {/* 不显示完整目录：公开场景/截图里不该出现本机路径 */}
                 </span>
               </button>
 
@@ -237,8 +235,3 @@ function formatAbsolute(ts: number): string {
  * 目录过长时由 CSS 在中间打省略号：文件名往往比中间层级更有辨识度，
  * 所以保留开头的盘符/共享目录和结尾的文件夹名。
  */
-function dirOf(fullPath: string): string {
-  const trimmed = fullPath.replace(/[\\/]+$/, '')
-  const cut = Math.max(trimmed.lastIndexOf('\\'), trimmed.lastIndexOf('/'))
-  return cut > 0 ? trimmed.slice(0, cut) : trimmed
-}
