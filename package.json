@@ -95,12 +95,11 @@
       "description": "面向课堂的本地 PDF 阅读器：批注、画笔、选中改字、扫描页 OCR、触摸操作。",
       "maintainer": "秋夕月拾旧 <steamyueshijiu@outlook.com>",
       "desktop": {
-        "entry": {
-          "Name": "秋夕-PDF阅读器",
-          "Comment": "批注式 PDF 阅读器",
-          "Categories": "Office;Graphics;Viewer;",
-          "MimeType": "application/pdf;image/png;image/jpeg;image/webp;image/bmp;image/gif;"
-        }
+        "Name": "秋夕-PDF阅读器",
+        "Comment": "批注式 PDF 阅读器",
+        "Categories": "Office;Graphics;Viewer;",
+        "MimeType": "application/pdf;image/png;image/jpeg;image/webp;image/bmp;image/gif;",
+        "StartupNotify": true
       },
       "artifactName": "QX-PDFreader-${version}-x86_64.${ext}"
     },
