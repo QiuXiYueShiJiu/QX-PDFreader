@@ -428,6 +428,14 @@ function decodePathFromUrl(rawUrl: string): string | null {
     return null
   }
 
+  /*
+   * ★ 首选形式：路径放在 query 里 —— pdf-file:///?p=<编码后的绝对路径>。
+   *   原因见各渲染层 toPdfUrl 的注释：Chromium 会把 path 首段目录当 host 并小写化。
+   *   下面几条分支保留给旧格式（历史书签、旧版缓存里的 URL）。
+   */
+  const fromQuery = parsed.searchParams.get('p')
+  if (fromQuery) return normalize(fromQuery)
+
   // host 是盘符（规范化后的小写单字母），也可能是空（标准三段斜杠形式）
   const host = parsed.hostname
   const pathname = decodeURIComponent(parsed.pathname)

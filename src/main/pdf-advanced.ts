@@ -1024,21 +1024,12 @@ function parsePageSelection(range: string): number[] {
 function encodePdfFileUrl(filePath: string): string {
   const normalized = filePath.replace(/\\/g, '/')
   /*
-   * POSIX 绝对路径要整条压成一个路径段再编码。
-   *
-   * 踩坑：`pdf-file:///Projects/a.pdf` 这种三段斜杠会被 Chromium 折叠成两段，
-   * 首段目录变成 **host**，而 host 会被**小写化** —— `/Projects` 变成 `/projects`。
-   * Windows 不区分大小写、且有盘符分支，所以从未暴露；Linux 上等于每个 PDF 都 404。
+   * ★ 路径走 query 而不是 path。
+   *   Chromium 会把 URL 首段目录当 host 并**小写化**（/Projects → /projects），
+   *   Linux 区分大小写，于是每个 PDF 都 404；query 内容不会被改写，
+   *   Windows 盘符与 Linux 绝对路径都能原样带走。
    */
-  if (normalized.startsWith('/') && !/^\/[A-Za-z]:\//.test(normalized)) {
-    return `pdf-file:///${encodeURIComponent(normalized)}`
-  }
-
-  const encoded = normalized
-    .split('/')
-    .map((seg) => encodeURIComponent(seg).replace(/%3A/gi, ':'))
-    .join('/')
-  return `pdf-file:///${encoded}`
+  return `pdf-file:///?p=${encodeURIComponent(normalized)}`
 }
 
 /**

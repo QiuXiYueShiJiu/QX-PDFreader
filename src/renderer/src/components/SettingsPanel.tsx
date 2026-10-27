@@ -171,12 +171,8 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
   /** 背景图预览：与主界面走同一条 pdf-file 协议 */
   const readerImageUrl = useMemo(() => {
     if (!settings.readerImage) return ''
-    const encoded = settings.readerImage
-      .replace(/\\/g, '/')
-      .split('/')
-      .map((seg) => encodeURIComponent(seg).replace(/%3A/gi, ':'))
-      .join('/')
-    return `pdf-file:///${encoded}`
+    const normalized = settings.readerImage.replace(/\\/g, '/')
+    return `pdf-file:///?p=${encodeURIComponent(normalized)}`
   }, [settings.readerImage])
 
   const [picking, setPicking] = useState(false)
