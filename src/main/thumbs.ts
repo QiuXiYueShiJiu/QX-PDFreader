@@ -26,11 +26,17 @@ import { join, normalize } from 'node:path'
 const CACHE_DIR_NAME = 'QiuxiPdfThumbs'
 
 export function thumbRoot(): string {
+  /*
+   * Windows 用 %LOCALAPPDATA%（提供器里硬编码了同一套推导，改这里要同步改 C++）。
+   * Linux 上没有 LOCALAPPDATA，按 XDG 走 ~/.cache；两边只是缓存目录，丢了会自动重建。
+   */
   const base =
-    process.env.LOCALAPPDATA ??
-    process.env.APPDATA ??
-    process.env.USERPROFILE ??
-    process.cwd()
+    process.platform === 'win32'
+      ? process.env.LOCALAPPDATA ??
+        process.env.APPDATA ??
+        process.env.USERPROFILE ??
+        process.cwd()
+      : process.env.XDG_CACHE_HOME ?? join(process.env.HOME ?? process.cwd(), '.cache')
   return join(base, CACHE_DIR_NAME)
 }
 

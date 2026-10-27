@@ -165,16 +165,14 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
   /** 打开时把焦点移进来，关闭时还给原来的元素 —— 键盘和读屏用户才不会迷路 */
   const panelRef = useRef<HTMLDivElement | null>(null)
   const idPrefix = useId()
+  /* Linux 与 Windows 的「默认应用」路径不同，文案与按钮跟着平台走 */
+  const isWindows = /Windows/i.test(navigator.userAgent)
 
   /** 背景图预览：与主界面走同一条 pdf-file 协议 */
   const readerImageUrl = useMemo(() => {
     if (!settings.readerImage) return ''
-    const encoded = settings.readerImage
-      .replace(/\\/g, '/')
-      .split('/')
-      .map((seg) => encodeURIComponent(seg).replace(/%3A/gi, ':'))
-      .join('/')
-    return `pdf-file:///${encoded}`
+    const normalized = settings.readerImage.replace(/\\/g, '/')
+    return `pdf-file:///?p=${encodeURIComponent(normalized)}`
   }, [settings.readerImage])
 
   const [picking, setPicking] = useState(false)
@@ -783,23 +781,28 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
               <div className="sb-field-text">
                 <span className="sb-field-label">把图片交给秋夕打开</span>
                 <span className="sb-field-hint">
-                  安装时已登记 PDF 与常见图片格式。Windows 10/11 把「默认打开方式」锁在用户设置里，
-                  安装器改不了，需要你在设置页点一次「秋夕-PDF阅读器」。
+                  {isWindows
+                    ? '安装时已登记 PDF 与常见图片格式。Windows 10/11 把「默认打开方式」锁在用户设置里，安装器改不了，需要你在设置页点一次「秋夕-PDF阅读器」。'
+                    : '安装时已通过 .desktop 文件登记 PDF 与常见图片格式。Linux 的默认程序由桌面环境决定，可在文件属性里「设为默认」，或执行：xdg-mime default qx-pdfreader.desktop application/pdf'}
                 </span>
               </div>
               <div className="sb-row">
-                <button
-                  type="button"
-                  className="sb-btn sb-btn-primary"
-                  data-tb-id="settings-open-default-apps"
-                  onClick={() => {
-                    void window.pdfApp.app.openDefaultApps()
-                  }}
-                >
-                  打开默认应用设置
-                </button>
+                {isWindows ? (
+                  <button
+                    type="button"
+                    className="sb-btn sb-btn-primary"
+                    data-tb-id="settings-open-default-apps"
+                    onClick={() => {
+                      void window.pdfApp.app.openDefaultApps()
+                    }}
+                  >
+                    打开默认应用设置
+                  </button>
+                ) : null}
                 <span className="sb-field-hint">
-                  改完回到这里，双击 .png / .jpg 就会用秋夕打开。
+                  {isWindows
+                    ? '改完回到这里，双击 .png / .jpg 就会用秋夕打开。'
+                    : '改完回到这里，双击 .png / .jpg 就会用秋夕打开。'}
                 </span>
               </div>
             </div>

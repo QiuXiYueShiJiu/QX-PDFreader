@@ -1349,12 +1349,9 @@ function applyTheme(settings: ReaderSettings): void {
   // 自定义背景图：走 pdf-file 协议（与 PDF 同一条链路），冒号不编码
   const image = settings.readerImage
   if (image) {
-    const encoded = image
-      .replace(/\\/g, '/')
-      .split('/')
-      .map((seg) => encodeURIComponent(seg).replace(/%3A/gi, ':'))
-      .join('/')
-    root.style.setProperty('--reader-image', `url("pdf-file:///${encoded}")`)
+    const normalized = image.replace(/\\/g, '/')
+    // 路径走 query（Chromium 会把 path 首段当 host 并小写化，理由见 DocumentView.toPdfUrl）
+    root.style.setProperty('--reader-image', `url("pdf-file:///?p=${encodeURIComponent(normalized)}")`)
   } else {
     root.style.setProperty('--reader-image', 'none')
   }

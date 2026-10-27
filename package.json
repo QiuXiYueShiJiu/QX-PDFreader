@@ -74,13 +74,59 @@
       "icon": "build/icon.ico",
       "signAndEditExecutable": false
     },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icons",
+      "category": "Office",
+      "synopsis": "课堂 PDF 阅读器",
+      "description": "面向课堂的本地 PDF 阅读器：批注、画笔、选中改字、扫描页 OCR、触摸操作。",
+      "maintainer": "秋夕月拾旧 <steamyueshijiu@outlook.com>",
+      "desktop": {
+        "Name": "秋夕-PDF阅读器",
+        "Comment": "批注式 PDF 阅读器",
+        "Categories": "Office;Graphics;Viewer;",
+        "MimeType": "application/pdf;image/png;image/jpeg;image/webp;image/bmp;image/gif;",
+        "StartupNotify": true
+      },
+      "artifactName": "QX-PDFreader-${version}-x86_64.${ext}"
+    },
+    "appImage": {
+      "artifactName": "QX-PDFreader-${version}-x86_64.${ext}"
+    },
+    "deb": {
+      "artifactName": "qx-pdfreader_${version}_amd64.${ext}",
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0"
+      ]
+    },
     "fileAssociations": [
       {
         "ext": "pdf",
         "name": "PDF 文档",
         "description": "PDF 文档",
         "role": "Viewer",
-        "icon": "build/pdf-file.ico"
+        "icon": "build/pdf-file"
       }
     ],
     "nsis": {

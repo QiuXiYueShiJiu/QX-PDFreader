@@ -72,11 +72,13 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
  */
 function toPdfUrl(filePath: string): string {
   const normalized = filePath.replace(/\\/g, '/')
-  const encoded = normalized
-    .split('/')
-    .map((seg) => encodeURIComponent(seg).replace(/%3A/gi, ':'))
-    .join('/')
-  return `pdf-file:///${encoded}`
+  /*
+   * ★ 路径走 query 而不是 path。
+   *   Chromium 会把 URL 首段目录当 host 并**小写化**（/Projects → /projects），
+   *   Linux 区分大小写，于是每个 PDF 都 404；query 内容不会被改写，
+   *   Windows 盘符与 Linux 绝对路径都能原样带走。
+   */
+  return `pdf-file:///?p=${encodeURIComponent(normalized)}`
 }
 
 /** 判断路径是否可用于加载（空串与纯空白都算无效） */
