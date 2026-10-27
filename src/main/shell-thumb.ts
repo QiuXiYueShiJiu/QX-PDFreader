@@ -42,6 +42,11 @@ async function writeTree(root: string, dll: string, exe: string, appPath: string
 }
 
 export async function ensureShellThumb(): Promise<boolean> {
+  /*
+   * 缩略图提供器是 Windows COM（IThumbnailProvider + 注册表）专属实现，
+   * Linux 侧没有对应物，也不存在「移植」一说：直接跳过，不做静默降级。
+   */
+  if (process.platform !== 'win32') return false
   try {
     const { dll, exe } = paths()
     if (!existsSync(dll)) { console.warn('[thumb] 缺少组件：', dll); return false }
@@ -57,6 +62,7 @@ export async function ensureShellThumb(): Promise<boolean> {
 }
 
 export async function removeShellThumb(): Promise<void> {
+  if (process.platform !== 'win32') return
   for (const root of [HKCU, HKLM]) {
     await reg(['delete', root + '\\CLSID\\' + THUMB_CLSID, '/f'])
     await reg(['delete', root + '\\CLSID\\' + LEGACY_CLSID, '/f'])

@@ -1,0 +1,72 @@
+name: linux-build
+
+# Linux 产物（AppImage + deb）在 GitHub 的 runner 上构建。
+#
+# 为什么不放在生产服务器上打：一次完整构建要写 2~3 GB、跑满 CPU 数分钟，
+# 会触发 VPS 侧的看门狗（实测被宿主机强制重启过三次）。
+# runner 上打、下载回来只做「装得上、跑得起来」的验证，对生产机几乎零负载。
+
+on:
+  workflow_dispatch:
+    inputs:
+      label:
+        description: 产物标识（写进 artifact 名，便于区分版本）
+        required: false
+        default: dev
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci --no-audit --no-fund
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 复制运行时资源（pdf worker / OCR 语言包）
+        run: npm run prebuild
+
+      - name: 构建前端与主进程
+        run: npm run build
+
+      - name: 打包 AppImage 与 deb
+        run: npx electron-builder --linux AppImage deb --x64
+        env:
+          # electron-builder 在 Linux 上要写 .desktop 与图标，不需要代码签名
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: 改成约定的产物名（带四段版本号）
+        run: |
+          set -e
+          VER=$(node -p "require('./package.json').buildVersion")
+          cd release
+          for f in *.AppImage; do mv "$f" "QX-PDFreader-${VER}-x86_64.AppImage"; done
+          for f in *_amd64.deb; do mv "$f" "qx-pdfreader_${VER}_amd64.deb"; done
+          ls -l
+
+      - name: 计算哈希
+        run: |
+          set -e
+          cd release
+          sha256sum *.AppImage *.deb | tee SHA256SUMS-linux.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ inputs.label }}
+          path: |
+            release/*.AppImage
+            release/*.deb
+            release/SHA256SUMS-linux.txt
+          if-no-files-found: error

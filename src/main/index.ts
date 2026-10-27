@@ -1589,6 +1589,17 @@ function registerIpc(): void {
  */
 ipcMain.handle('app:open-default-apps', async () => {
   try {
+    /*
+     * ms-settings: 是 Windows 专有协议。Linux 上没有等价的统一入口：
+     * deb 安装后由 xdg-mime 决定默认程序，用户在文件管理器里「设为默认」
+     * 或跑 xdg-mime default 即可，所以这里只回一句可操作的提示，不假装成功。
+     */
+    if (process.platform !== 'win32') {
+      return {
+        ok: false,
+        err: 'Linux 下请用系统「设置 → 默认应用」，或执行：xdg-mime default qx-pdfreader.desktop application/pdf'
+      }
+    }
     await shell.openExternal('ms-settings:defaultapps')
     return { ok: true }
   } catch (error) {
