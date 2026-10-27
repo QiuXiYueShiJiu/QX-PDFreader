@@ -42,7 +42,7 @@ jobs:
         run: npm run build
 
       - name: 打包 AppImage 与 deb
-        run: npx electron-builder --linux AppImage deb --x64
+        run: npx electron-builder --linux AppImage deb --x64 --publish never
         env:
           # electron-builder 在 Linux 上要写 .desktop 与图标，不需要代码签名
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
