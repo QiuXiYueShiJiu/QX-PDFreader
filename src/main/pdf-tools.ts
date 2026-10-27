@@ -742,7 +742,7 @@ function inPath(name: string): string | null {
 /** PATH 与常见安装目录里找 soffice */
 function findSoffice(): string | null {
   /*
-   * Linux 上 soffice 通常在 PATH 里（或 /opt/libreoffice*/program）；
+   * Linux 上 soffice 通常在 PATH 里（或 /opt/libreoffice 下的 program 目录）；
    * 先按 PATH 找，再退到几个固定位置 —— 打包机与 UOS 上名字都是 soffice。
    */
   if (process.platform !== 'win32') {
