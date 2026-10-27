@@ -444,7 +444,22 @@ function decodePathFromUrl(rawUrl: string): string | null {
     return normalize(pathname.slice(1))
   }
 
-  // 情况三：普通绝对路径（非 Windows 盘符场景）
+  /*
+   * 情况三：POSIX 绝对路径。
+   *
+   * ★ 这里也有一个 Chromium 规范化问题：我们发的是 `pdf-file:///projects/a.pdf`
+   *   （三段斜杠），Chromium 把多余的斜杠折叠成两段，于是**第一段目录变成了 host**：
+   *       pdf-file://projects/a.pdf
+   *   此时 hostname="projects"、pathname="/a.pdf"，直接取 pathname 会丢掉一层
+   *   目录（实测打开 /projects/... 被解析成 /a.pdf，文件永远「不存在」）。
+   *   Windows 上因为盘符是单字母、有专门分支，才没暴露这个问题。
+   *
+   *   处理：host 不是单字母盘符时，把它当成路径的第一段拼回去。
+   */
+  if (host) {
+    return normalize(`/${host}${pathname}`)
+  }
+
   return normalize(pathname)
 }
 
