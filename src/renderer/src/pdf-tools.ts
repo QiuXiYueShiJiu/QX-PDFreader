@@ -24,6 +24,17 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
 /** 把磁盘路径转成 pdf-file:// URL（冒号不能编码，理由见 DocumentView.toPdfUrl） */
 function toPdfUrl(filePath: string): string {
   const normalized = filePath.replace(/\\/g, '/')
+  /*
+   * POSIX 绝对路径要整条压成一个路径段再编码。
+   *
+   * 踩坑：`pdf-file:///Projects/a.pdf` 这种三段斜杠会被 Chromium 折叠成两段，
+   * 首段目录变成 **host**，而 host 会被**小写化** —— `/Projects` 变成 `/projects`。
+   * Windows 不区分大小写、且有盘符分支，所以从未暴露；Linux 上等于每个 PDF 都 404。
+   */
+  if (normalized.startsWith('/') && !/^\/[A-Za-z]:\//.test(normalized)) {
+    return `pdf-file:///${encodeURIComponent(normalized)}`
+  }
+
   const encoded = normalized
     .split('/')
     .map((seg) => encodeURIComponent(seg).replace(/%3A/gi, ':'))

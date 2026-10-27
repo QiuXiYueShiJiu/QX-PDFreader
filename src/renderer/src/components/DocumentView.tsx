@@ -72,6 +72,17 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
  */
 function toPdfUrl(filePath: string): string {
   const normalized = filePath.replace(/\\/g, '/')
+  /*
+   * POSIX 绝对路径要整条压成一个路径段再编码。
+   *
+   * 踩坑：`pdf-file:///Projects/a.pdf` 这种三段斜杠会被 Chromium 折叠成两段，
+   * 首段目录变成 **host**，而 host 会被**小写化** —— `/Projects` 变成 `/projects`。
+   * 新建的目录名大小写不同时，Linux 上直接 404。
+   */
+  if (normalized.startsWith('/') && !/^\/[A-Za-z]:\//.test(normalized)) {
+    return `pdf-file:///${encodeURIComponent(normalized)}`
+  }
+
   const encoded = normalized
     .split('/')
     .map((seg) => encodeURIComponent(seg).replace(/%3A/gi, ':'))

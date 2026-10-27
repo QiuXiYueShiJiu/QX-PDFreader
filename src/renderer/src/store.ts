@@ -1349,11 +1349,15 @@ function applyTheme(settings: ReaderSettings): void {
   // 自定义背景图：走 pdf-file 协议（与 PDF 同一条链路），冒号不编码
   const image = settings.readerImage
   if (image) {
-    const encoded = image
-      .replace(/\\/g, '/')
-      .split('/')
-      .map((seg) => encodeURIComponent(seg).replace(/%3A/gi, ':'))
-      .join('/')
+    const normalized = image.replace(/\\/g, '/')
+    // POSIX 路径整条压成一段（理由见 DocumentView.toPdfUrl 的注释）
+    const encoded =
+      normalized.startsWith('/') && !/^\/[A-Za-z]:\//.test(normalized)
+        ? encodeURIComponent(normalized)
+        : normalized
+            .split('/')
+            .map((seg) => encodeURIComponent(seg).replace(/%3A/gi, ':'))
+            .join('/')
     root.style.setProperty('--reader-image', `url("pdf-file:///${encoded}")`)
   } else {
     root.style.setProperty('--reader-image', 'none')
