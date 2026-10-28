@@ -458,14 +458,15 @@
  * ============================================================ */
 
 @media (max-height: 980px) {
-  .rail { gap: 8px; padding: 10px 0; }
-  .rail-btn { width: 56px; height: 50px; }
+  /* 高度不够时按钮跟着视口缩 —— 写死 px 会在 940px 这类常见高度差几十像素溢出去 */
+  .rail { gap: clamp(3px, 0.8vh, 8px); padding: clamp(4px, 1vh, 10px) 0; }
+  .rail-btn { width: 56px; height: clamp(34px, 4.4vh, 50px); }
   .rail__divider { margin: 1px 0; }
 }
 
 @media (max-height: 860px) {
-  .rail { gap: 6px; padding: 8px 0; }
-  .rail-btn { width: 48px; height: 44px; gap: 0; }
+  .rail { gap: clamp(3px, 0.7vh, 6px); padding: clamp(3px, 0.8vh, 8px) 0; }
+  .rail-btn { width: 48px; gap: 0; }
   .rail-btn__label { display: none; }
   .rail__group { gap: 2px; }
   .rail__divider { width: 24px; margin: 0; }
@@ -474,8 +475,8 @@
 }
 
 @media (max-height: 760px) {
-  .rail-btn { height: 40px; }
-  .rail { gap: 5px; padding: 6px 0; }
+  .rail-btn { height: clamp(30px, 4.2vh, 40px); }
+  .rail { gap: clamp(2px, 0.5vh, 5px); padding: clamp(2px, 0.6vh, 6px) 0; }
   /* 极矮时状态栏仍然显示页码与缩放百分比，右栏这两处文字让位 */
   .rail__page,
   .rail__scale { display: none; }

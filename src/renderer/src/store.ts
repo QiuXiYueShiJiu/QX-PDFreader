@@ -26,13 +26,25 @@ import {
 import { DEFAULT_SETTINGS, themePackOf } from '@shared/settings'
 
 /** 更新检查结果（渲染层只用到这几个字段） */
-/** 插件市场里的一条主题扩展包（服务器 plugins.php 的 items[] 子集） */
+/**
+ * 一条主题包（清单 index.json / 服务器 plugins.php 的 items[] 子集）。
+ *
+ * 2.0.0 起清单能带的不只是七个颜色：主题包形态、背景图、预览图、版本门槛。
+ * 全部可选 —— 只有七个颜色是硬要求，少一个整条丢弃；可选项坏了就当没写，
+ * 这样老的清单（1.9.0.0 时代只有配色）照样能用。
+ */
 export interface MarketItem {
   id: string
   name: string
   version?: string
   author?: string
   desc?: string
+  /** 分类（商店左侧筛选用），缺省归入「其它」 */
+  category?: string
+  tags?: string[]
+  /** 商店卡片上的效果图 */
+  preview?: string
+  minAppVersion?: string
   theme: {
     accent: string
     bg: string
@@ -42,6 +54,17 @@ export interface MarketItem {
     border: string
     readerBg: string
   }
+  /** 主题包形态：装了以后连圆角/模糊/面板透明度一起换 */
+  pack?: {
+    radius: number
+    blur: number
+    panelAlpha: number
+    shadow?: string
+    toolbarHeight?: number
+    gap?: number
+  }
+  /** 阅读区背景图（下载后存本地，靠 sha256 校验） */
+  background?: { url: string; sha256?: string; size?: number }
 }
 /**
  * 已安装插件（渲染层只关心展示用的字段，目录与 manifest 细节留在主进程）。
@@ -70,6 +93,17 @@ export interface PluginShopItem {
   minAppVersion?: string
   permissions?: string[]
   icon?: string
+  /** 分类（商店筛选用） */
+  category?: string
+  tags?: string[]
+  /** 详情页的效果图，可多张 */
+  preview?: string[]
+  /** 插件对宿主的要求，例如 node 版本、网络权限以外的依赖 */
+  requires?: string[]
+  /** 这个插件依赖的其它插件 id */
+  deps?: string[]
+  /** 版本历史（详情页显示），新→旧 */
+  versions?: { version: string; date?: string; note?: string }[]
 }
 
 /** 插件注册的命令（上栏「工具 → 插件」组用） */
@@ -1276,7 +1310,16 @@ export const useViewer = create<ViewerState>((set, get) => ({
     }
     const state = get()
     const rest = state.settings.customThemes.filter((x) => x.id !== pack.id)
-    await state.patchSettings({ customThemes: [...rest, pack], customThemeId: pack.id, theme: 'custom' })
+    /* 清单里带了主题包形态就连圆角/模糊/面板透明度一起套上（B9）；
+       没带就只换配色，别把用户当前调好的形态冲掉 */
+    const shape = item.pack
+      ? {
+          glassRadius: item.pack.radius,
+          glassBlur: item.pack.blur,
+          panelAlpha: item.pack.panelAlpha
+        }
+      : {}
+    await state.patchSettings({ customThemes: [...rest, pack], customThemeId: pack.id, theme: 'custom', ...shape })
   },
 
   dismissDisclaimer: () => set({ disclaimerDismissed: true }),

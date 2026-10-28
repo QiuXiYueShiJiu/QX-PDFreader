@@ -356,3 +356,98 @@ html[data-pack='glass'] .plugin-store__card {
   opacity: 0.72;
   word-break: break-all;
 }
+/*
+ * 分类筛选与详情抽屉（2.0.0 B10）。
+ * 分类是一排小胶囊，横向可滚但不换行 —— 分类多了换行会把卡片区顶下去。
+ */
+.plugin-store__cats {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px 0 8px;
+  scrollbar-width: none;
+}
+
+.plugin-store__cat {
+  flex: 0 0 auto;
+  border: 1px solid rgb(var(--line));
+  background: transparent;
+  color: rgb(var(--muted));
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.plugin-store__cat:hover {
+  color: rgb(var(--text));
+  border-color: rgb(var(--text) / 0.3);
+}
+
+.plugin-store__cat.is-active {
+  background: rgb(var(--accent));
+  border-color: rgb(var(--accent));
+  color: rgb(var(--accent-fg, 255 255 255));
+}
+
+.plugin-store__detail {
+  margin-top: 12px;
+  border-top: 1px solid rgb(var(--line));
+  padding-top: 12px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.plugin-store__detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.plugin-store__shots {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 6px 0;
+}
+
+.plugin-store__shot {
+  height: 92px;
+  border-radius: calc(var(--radius) * 0.7);
+  border: 1px solid rgb(var(--line));
+  object-fit: cover;
+}
+
+.plugin-store__meta {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 4px 10px;
+  margin: 8px 0;
+  font-size: 12px;
+}
+
+.plugin-store__meta dt {
+  color: rgb(var(--muted));
+}
+
+.plugin-store__meta dd {
+  margin: 0;
+  color: rgb(var(--text));
+}
+
+.plugin-store__versions {
+  margin: 8px 0;
+  padding-left: 16px;
+  font-size: 12px;
+  color: rgb(var(--muted));
+}
+
+.plugin-store__versions li {
+  margin-bottom: 3px;
+}
+
+.plugin-store__date {
+  margin: 0 8px;
+  opacity: 0.7;
+}

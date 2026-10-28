@@ -31,6 +31,7 @@ import {
   diffLines
 } from './pdf-compare'
 import { batchPdfToImages } from './batch-images'
+import { clampNumber, normalizeMarketItem, normalizeMarketList, toRgbTriple } from './market-validate'
 import './styles/base.css'
 import './styles/viewer.css'
 import './styles/viewer-compat.css'
@@ -116,6 +117,13 @@ if (exposeTestHooks) {
   }
   /* 批量导图（多份 PDF → 图片）开放给验证脚本 */
   w.__pdfBatch = { batchPdfToImages }
+  /*
+   * 主题商店清单的归一函数也挂出来（2.0.0 B9）。
+   * 清单里有「可选项坏掉只当没写、配色缺一个就整条丢弃」这类规则，
+   * 只验界面看不出「坏包到底是被丢了还是被修好了」；把纯函数交给脚本，
+   * 就能对着真实输入断言输出，而不用为了测试在界面里造一堆假数据。
+   */
+  w.__marketNormalize = { list: normalizeMarketList, item: normalizeMarketItem, toRgbTriple, clampNumber }
   /*
    * ★ 这个标记给组件读：只有它是 true 时，组件才会把自己的内部对象
    *   （目前是 pdf.js 的 PDFDocumentProxy）挂到 window 上。

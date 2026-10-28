@@ -86,6 +86,10 @@ const DEFAULT_SUITE = [
   'verify-content-edit.mjs', // 内容编辑入口冒烟：工具接线 / 画-选-删链路 / 文字层让位 / 漫游态不误建物件
   'verify-edit-shapes.mjs', // 直线 / 箭头：方向不丢、零厚度撑热区、箭头三笔画、可拉伸
   'verify-page-edit.mjs',
+  'verify-rail-height.mjs', // 右栏随高度降档、永不滚动（B4）
+  'verify-image-float.mjs', // 图片工具入口在上栏、面板可拖动（B5）
+  'verify-theme-store.mjs', // 主题商店：入口在设置里 + 清单新字段（B9）
+  'verify-store-detail.mjs', // 插件商店：分类/详情/一键更新（B10）
   'verify-plugin-store.mjs', // 插件商店：安装 / 权限闸门 / 命令 / 启停 / 卸载
   'verify-compare.mjs', // 分屏对比：右侧参考窗 / 独立滚动 / 关闭还原
   'verify-rollback.mjs', // 紧急回滚：列表 / 同版本防呆 / 启动计数 / 设置页区块

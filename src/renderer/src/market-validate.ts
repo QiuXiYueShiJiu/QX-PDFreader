@@ -44,6 +44,9 @@ export function toRgbTriple(value: unknown): string | null {
 /**
  * 把一条原始清单项归一成可用主题包；任何一条不合法就返回 null（整包丢弃）。
  * 不做「部分字段可用」的宽容：半坏的主题会让界面出现一处黑一块白。
+ *
+ * 2.0.0 起多认四个可选项（主题包形态 / 背景图 / 预览图 / 版本门槛）：
+ * 可选项坏掉只当没写，不影响整条 —— 老清单没有这些字段照样能用。
  */
 export function normalizeMarketItem(raw: unknown): MarketItem | null {
   if (!raw || typeof raw !== 'object') return null
@@ -78,8 +81,73 @@ export function normalizeMarketItem(raw: unknown): MarketItem | null {
     desc,
     ...(version ? { version } : {}),
     ...(author ? { author } : {}),
+    ...optionalBits(item),
     theme
   }
+}
+
+/** 可选项：解析失败就整块丢掉，不抛错、不影响配色 */
+function optionalBits(item: Record<string, unknown>): Partial<MarketItem> {
+  const out: Partial<MarketItem> = {}
+
+  const category = typeof item.category === 'string' ? item.category.trim().slice(0, 16) : ''
+  if (category) out.category = category
+
+  if (Array.isArray(item.tags)) {
+    const tags = item.tags.filter((t): t is string => typeof t === 'string' && t.trim() !== '').map((t) => t.trim().slice(0, 12)).slice(0, 6)
+    if (tags.length > 0) out.tags = tags
+  }
+
+  const preview = typeof item.preview === 'string' ? item.preview.trim() : ''
+  if (/^https?:\/\//i.test(preview)) out.preview = preview
+
+  const minAppVersion = typeof item.minAppVersion === 'string' ? item.minAppVersion.trim().slice(0, 16) : ''
+  if (minAppVersion) out.minAppVersion = minAppVersion
+
+  const packRaw = item.pack
+  if (packRaw && typeof packRaw === 'object') {
+    const p = packRaw as Record<string, unknown>
+    const radius = clampNumber(p.radius, 0, 40)
+    const blur = clampNumber(p.blur, 0, 40)
+    const panelAlpha = clampNumber(p.panelAlpha, 0.2, 1)
+    if (radius !== null && blur !== null && panelAlpha !== null) {
+      const shadow = typeof p.shadow === 'string' ? p.shadow.trim().slice(0, 80) : ''
+      const toolbarHeight = clampNumber(p.toolbarHeight, 32, 80)
+      const gap = clampNumber(p.gap, 0, 24)
+      out.pack = {
+        radius,
+        blur,
+        panelAlpha,
+        ...(shadow ? { shadow } : {}),
+        ...(toolbarHeight !== null ? { toolbarHeight } : {}),
+        ...(gap !== null ? { gap } : {})
+      }
+    }
+  }
+
+  const bgRaw = item.background
+  if (bgRaw && typeof bgRaw === 'object') {
+    const b = bgRaw as Record<string, unknown>
+    const url = typeof b.url === 'string' ? b.url.trim() : ''
+    if (/^https?:\/\//i.test(url)) {
+      const sha = typeof b.sha256 === 'string' ? b.sha256.trim().toLowerCase() : ''
+      const size = clampNumber(b.size, 1, 64 * 1024 * 1024)
+      out.background = {
+        url,
+        ...(/^[0-9a-f]{64}$/.test(sha) ? { sha256: sha } : {}),
+        ...(size !== null ? { size: Math.round(size) } : {})
+      }
+    }
+  }
+
+  return out
+}
+
+/** 数字区间裁剪：不是有限数就返回 null（当没写），超范围夹到边界 */
+export function clampNumber(value: unknown, min: number, max: number): number | null {
+  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+  if (!Number.isFinite(n)) return null
+  return Math.min(max, Math.max(min, n))
 }
 
 /** 整份清单：逐条归一 + 按 id 去重（后来的覆盖先前的），保持原顺序 */

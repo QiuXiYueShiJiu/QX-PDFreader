@@ -60,6 +60,14 @@ export function PluginStore(): JSX.Element | null {
    */
   const [keyword, setKeyword] = useState('')
   const [sortBy, setSortBy] = useState<'default' | 'name' | 'author'>('default')
+  /*
+   * 分类筛选与详情页（B10）。
+   * 分类直接取清单里出现过的值，不预设一套固定分类 —— 插件库的分类会变，
+   * 写死的话作者就得反过来迁就客户端。详情页放在右侧抽屉里，
+   * 因为卡片高度有限，塞不下截图和版本历史。
+   */
+  const [category, setCategory] = useState('全部')
+  const [detailId, setDetailId] = useState('')
 
   useEffect(() => {
     if (!open) return
@@ -81,9 +89,10 @@ export function PluginStore(): JSX.Element | null {
   const installedIds = new Set(installed.map((p) => p.id))
   const installedMap = new Map(installed.map((p) => [p.id, p]))
 
-  /* 搜索 + 排序后的清单（只影响「发现」页的展示，不动原始数据） */
+  /* 搜索 + 分类 + 排序后的清单（只影响「发现」页的展示，不动原始数据） */
   const visible = (shopItems ?? [])
     .filter((item) => {
+      if (category !== '全部' && (item.category ?? '其它') !== category) return false
       const k = keyword.trim().toLowerCase()
       if (!k) return true
       return (
@@ -98,11 +107,24 @@ export function PluginStore(): JSX.Element | null {
       return 0
     })
 
+  /** 清单里出现过的分类，按出现顺序去重（第一项恒为「全部」） */
+  const categories = ['全部', ...new Set((shopItems ?? []).map((item) => item.category ?? '其它'))]
+
   /** 已装版本比商店版本旧 → 有更新 */
   const hasUpdate = (id: string, version: string): boolean => {
     const local = installedMap.get(id)
     if (!local) return false
     return local.version !== version
+  }
+
+  /** 有更新的插件（「一键更新全部」用） */
+  const updatable = (shopItems ?? []).filter((item) => hasUpdate(item.id, item.version))
+
+  const detail = detailId ? (shopItems ?? []).find((item) => item.id === detailId) : undefined
+
+  /** 顺序装完所有可更新项（串行：主进程一次只处理一个安装） */
+  const updateAll = async (): Promise<void> => {
+    for (const item of updatable) await installFromShop(item)
   }
 
   return (
@@ -224,7 +246,37 @@ export function PluginStore(): JSX.Element | null {
                   <option value="author">作者</option>
                 </select>
               </label>
+              {updatable.length > 0 ? (
+                <button
+                  type="button"
+                  className="plugin-store__ghost"
+                  data-tb-id="plugin-update-all"
+                  onClick={() => void updateAll()}
+                  disabled={Boolean(installing)}
+                  title="把这个清单里所有已装且有新版本的插件依次更新"
+                >
+                  <RefreshCw size={14} /> 更新全部 ({updatable.length})
+                </button>
+              ) : null}
             </div>
+
+            {/* 分类筛选（B10）：分类来自清单本身，作者加新分类不用改客户端 */}
+            {categories.length > 1 ? (
+              <div className="plugin-store__cats" role="group" aria-label="插件分类">
+                {categories.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    className={`plugin-store__cat ${category === cat ? 'is-active' : ''}`}
+                    data-tb-id={`plugin-cat-${cat}`}
+                    aria-pressed={category === cat}
+                    onClick={() => setCategory(cat)}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            ) : null}
 
             {shopError ? (
               <p className="plugin-store__note" data-plugin-shop-error="1">
@@ -266,6 +318,14 @@ export function PluginStore(): JSX.Element | null {
                     </p>
                     <div className="plugin-store__item-foot">
                       <span className="plugin-store__author">{item.author ?? '佚名'}</span>
+                      <button
+                        type="button"
+                        className="plugin-store__ghost"
+                        data-tb-id={`plugin-detail-${item.id}`}
+                        onClick={() => setDetailId(item.id)}
+                      >
+                        详情
+                      </button>
                       <button
                         type="button"
                         className="plugin-store__install"
@@ -324,6 +384,81 @@ export function PluginStore(): JSX.Element | null {
             ))}
           </div>
         )}
+
+        {/* 详情抽屉（B10）：截图、说明、版本历史、依赖都放这儿 */}
+        {detail ? (
+          <aside className="plugin-store__detail" data-plugin-detail={detail.id} role="dialog" aria-label={`${detail.name} 详情`}>
+            <header className="plugin-store__detail-head">
+              <h3 className="plugin-store__name">
+                {detail.name} <span className="plugin-store__ver">v{detail.version}</span>
+              </h3>
+              <button
+                type="button"
+                className="plugin-store__ghost"
+                data-tb-id="plugin-detail-close"
+                aria-label="关闭详情"
+                onClick={() => setDetailId('')}
+              >
+                <X size={15} />
+              </button>
+            </header>
+            <p className="plugin-store__desc">{detail.description ?? '这个插件没有写说明。'}</p>
+            {(detail.preview ?? []).length > 0 ? (
+              <div className="plugin-store__shots">
+                {(detail.preview ?? []).map((src) => (
+                  <img key={src} className="plugin-store__shot" src={src} alt={`${detail.name} 效果图`} />
+                ))}
+              </div>
+            ) : null}
+            <dl className="plugin-store__meta">
+              <dt>作者</dt>
+              <dd>{detail.author ?? '佚名'}</dd>
+              <dt>分类</dt>
+              <dd>{detail.category ?? '其它'}</dd>
+              <dt>权限</dt>
+              <dd>{permText(detail.permissions)}</dd>
+              {detail.minAppVersion ? (
+                <>
+                  <dt>最低版本</dt>
+                  <dd>{detail.minAppVersion}</dd>
+                </>
+              ) : null}
+              {(detail.requires ?? []).length > 0 ? (
+                <>
+                  <dt>依赖环境</dt>
+                  <dd>{(detail.requires ?? []).join('、')}</dd>
+                </>
+              ) : null}
+              {(detail.deps ?? []).length > 0 ? (
+                <>
+                  <dt>依赖插件</dt>
+                  <dd>{(detail.deps ?? []).join('、')}</dd>
+                </>
+              ) : null}
+            </dl>
+            {(detail.versions ?? []).length > 0 ? (
+              <ul className="plugin-store__versions">
+                {(detail.versions ?? []).map((v) => (
+                  <li key={v.version}>
+                    <span className="plugin-store__ver">v{v.version}</span>
+                    {v.date ? <span className="plugin-store__date">{v.date}</span> : null}
+                    {v.note ? <span>{v.note}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <button
+              type="button"
+              className="plugin-store__install"
+              data-tb-id={`plugin-detail-install-${detail.id}`}
+              disabled={installing === detail.id}
+              onClick={() => void installFromShop(detail)}
+            >
+              <Download size={14} />{' '}
+              {installing === detail.id ? '安装中…' : hasUpdate(detail.id, detail.version) ? '更新' : installedIds.has(detail.id) ? '重新安装' : '安装'}
+            </button>
+          </aside>
+        ) : null}
       </div>
     </div>
   )

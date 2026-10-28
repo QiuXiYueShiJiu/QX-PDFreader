@@ -547,6 +547,13 @@ export interface PluginIndexItem {
   minAppVersion?: string
   permissions?: PluginPermission[]
   icon?: string
+  /** 2.0.0 B9：分类、标签、效果图、依赖、版本历史（原样透传给商店） */
+  category?: string
+  tags?: string[]
+  preview?: string[]
+  requires?: string[]
+  deps?: string[]
+  versions?: { version: string; date?: string; note?: string }[]
 }
 
 /**
