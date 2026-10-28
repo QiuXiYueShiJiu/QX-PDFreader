@@ -23,7 +23,7 @@ import {
   type ViewMode,
   type ZoomSpec
 } from '@shared/types'
-import { DEFAULT_SETTINGS } from '@shared/settings'
+import { DEFAULT_SETTINGS, themePackOf } from '@shared/settings'
 
 /** 更新检查结果（渲染层只用到这几个字段） */
 /** 插件市场里的一条主题扩展包（服务器 plugins.php 的 items[] 子集） */
@@ -43,6 +43,42 @@ export interface MarketItem {
     readerBg: string
   }
 }
+/**
+ * 已安装插件（渲染层只关心展示用的字段，目录与 manifest 细节留在主进程）。
+ */
+export interface InstalledPluginLike {
+  id: string
+  name: string
+  version: string
+  author: string
+  description: string
+  permissions: string[]
+  enabled: boolean
+  error?: string
+}
+
+/** 插件商店里的一条（独立插件库 index.json 的 items[]） */
+export interface PluginShopItem {
+  id: string
+  name: string
+  version: string
+  author?: string
+  description?: string
+  download: string
+  sha256?: string
+  size?: number
+  minAppVersion?: string
+  permissions?: string[]
+  icon?: string
+}
+
+/** 插件注册的命令（上栏「工具 → 插件」组用） */
+export interface PluginCommandLike {
+  id: string
+  label: string
+  pluginId: string
+}
+
 export interface UpdateInfo {
   ok: boolean
   newer: boolean
@@ -209,11 +245,44 @@ interface ViewerState {
    * 同时打开会互相遮挡；App 里保证「开其中一个就关掉另一个」。
    */
   showTools: boolean
-  /** 插件市场面板是否打开 */
-  showMarket: boolean
-  /** 市场清单（主题扩展包），null 表示还没拉过 */
+  /**
+   * 主题商店是否打开。
+   *
+   * 2026-10-28 起「主题商店」和「插件商店」彻底分家（用户第 2、7 条）：
+   *   · 主题商店 = 配色包/主题扩展，入口在「设置 → 外观」里；
+   *   · 插件商店 = 能执行代码的插件，入口在右栏。
+   * 两者内容、权限、风险完全不同，混在一个面板里既误导用户也没法分权。
+   */
+  showThemeStore: boolean
+  /** 插件商店是否打开（右栏入口） */
+  showPluginStore: boolean
+  /** 图片工具浮层（2026-10-28 起入口在上栏「工具」选项卡，不再是右侧悬浮按钮） */
+  showImageTools: boolean
+  /** 主题商店清单（配色包），null 表示还没拉过 */
   marketItems: MarketItem[] | null
   marketError: string
+  /** 已安装插件（来自主进程扫描，含启用状态与加载错误） */
+  installedPlugins: InstalledPluginLike[]
+  /** 插件注册的命令，上栏「工具 → 插件」组照它渲染 */
+  pluginCommands: PluginCommandLike[]
+  /** 安装/卸载进行中，按钮转圈防连点 */
+  pluginBusy: boolean
+  /** 插件操作结果提示（成功/失败文案） */
+  pluginNote: string
+  /** 还留着的旧安装包（回滚用） */
+  rollbackVersions: { version: string; path: string; size: number; savedAt: string }[]
+  /** 分屏对比：右侧参考窗是否打开 */
+  compareOpen: boolean
+  /** 参考窗里的文件路径（空串 = 还没选文件） */
+  comparePath: string
+  /** 插件商店清单（发现页），null 表示还没拉过 */
+  pluginShopItems: PluginShopItem[] | null
+  pluginShopError: string
+  /** 插件商店清单来源：github 默认 / mirror 镜像 */
+  pluginShopSource: 'github' | 'mirror'
+  /** 插件商店加载中 + 正在装哪一条 */
+  pluginShopLoading: boolean
+  pluginInstalling: string
   /**
    * 启动声明是否已在**本次启动**里被关掉。
    *
@@ -334,6 +403,25 @@ interface ViewerState {
   openFile: (filePath: string, page?: number, titleName?: string) => Promise<void>
   pickFile: () => Promise<void>
 
+  /* ---------- 页面结构编辑（插入空白页 / 删除本页） ---------- */
+  /**
+   * 在当前页前面插入一张空白页。
+   *
+   * 页面结构只能改 PDF 本体，而阅读器又是「按文件渲染」的，所以流程是：
+   * 主进程在 userData/pages 里改工作副本 → 关掉当前标签 → 重开副本，
+   * 页码落到新插入的那一页。原文件不会被改动，用户要留存就用「导出 PDF」。
+   */
+  insertBlankPage: () => Promise<void>
+  /** 删除当前页（最后一页不允许删，主进程会拒绝） */
+  deleteCurrentPage: () => Promise<void>
+  /** 页面结构编辑后重开文档用的内部方法（不做用户提示，只负责换标签） */
+  reopenActiveTab: (
+    filePath: string,
+    page: number,
+    titleName: string,
+    expectedPages?: number
+  ) => Promise<void>
+
   /* ---------- 标签页 ---------- */
   /** 已打开的标签（按打开顺序，第一个在最左） */
   tabs: Tab[]
@@ -377,10 +465,43 @@ interface ViewerState {
   setShowSettings: (v: boolean) => void
   /** 打开 / 关闭 PDF 工具箱（与设置面板互斥，见 App） */
   setShowTools: (v: boolean) => void
-  /** 打开 / 关闭插件市场 */
-  setShowMarket: (v: boolean) => void
+  /** 打开 / 关闭主题商店（入口在「设置 → 外观」，与插件商店分家） */
+  setShowThemeStore: (v: boolean) => void
+  /** 打开 / 关闭插件商店（右栏入口） */
+  setShowPluginStore: (v: boolean) => void
+  setShowImageTools: (v: boolean) => void
+  /** 重新扫描已安装插件 + 取命令表 */
+  loadPlugins: () => Promise<void>
+  /** 执行一条插件命令（失败时主进程已弹过「禁用 / 重试」） */
+  runPluginCommand: (commandId: string) => Promise<void>
+  /** 弹文件选择框安装 .qxplugin */
+  installPlugin: () => Promise<void>
+  /** 卸载插件 */
+  uninstallPlugin: (pluginId: string) => Promise<void>
+  /** 启用 / 停用插件（重启后生效） */
+  setPluginEnabled: (pluginId: string, enabled: boolean) => Promise<void>
+  /** 清掉插件提示 */
+  clearPluginNote: () => void
+  /** 刷新可回滚版本列表 */
+  loadRollback: () => Promise<void>
+  /** 回滚到指定版本 */
+  applyRollback: (version: string) => Promise<void>
+  /** 打开分屏对比（可带路径） */
+  openComparePane: (filePath?: string) => void
+  /** 打开分屏但先不选文件（拖到右半区时用） */
+  closeComparePane: () => void
+  /** 拉插件商店清单*/
+  loadPluginShop: () => Promise<void>
+  /** 换插件商店清单来源并立刻重拉 */
+  setPluginShopSource: (s: 'github' | 'mirror') => Promise<void>
+  /** 从商店装一条（下载 + 校验 + 安装） */
+  installPluginFromShop: (item: PluginShopItem) => Promise<void>
+  /** 卸载后刷新商店里的已装标记 */
+  refreshPluginShop: () => Promise<void>
   /** 拉取市场清单（失败只记文案，不抛） */
   loadMarket: () => Promise<void>
+  /** 切换插件市场清单来源（github 默认 / mirror 镜像），切完立刻重拉 */
+  setMarketSource: (source: 'github' | 'mirror') => Promise<void>
   /** 安装主题包并立刻切过去 */
   installTheme: (item: MarketItem) => Promise<void>
 
@@ -421,6 +542,12 @@ interface ViewerState {
     fontSize?: number
     image?: string
     strokeWidth?: number
+    /** 直线 / 箭头的归一化端点（0~1，相对 rects[0]） */
+    line?: [number, number, number, number]
+    /** 填充色（矩形/椭圆）：rgba 串，带 22% 透明度 */
+    fill?: string
+    /** 虚线描边 */
+    dash?: boolean
     rotation?: number
     /* v2.1.3：改文字继承原文的字体长相 */
     fontWeight?: number
@@ -560,9 +687,23 @@ export const useViewer = create<ViewerState>((set, get) => ({
   showRightPanel: DEFAULT_SETTINGS.showRightPanel,
   showSettings: false,
   showTools: false,
-  showMarket: false,
+  showThemeStore: false,
+  showPluginStore: false,
+  showImageTools: false,
   marketItems: null,
   marketError: '',
+  installedPlugins: [],
+  pluginCommands: [],
+  pluginBusy: false,
+  pluginNote: '',
+  rollbackVersions: [],
+  compareOpen: false,
+  comparePath: '',
+  pluginShopItems: null,
+  pluginShopError: '',
+  pluginShopSource: 'github',
+  pluginShopLoading: false,
+  pluginInstalling: '',
   disclaimerDismissed: false,
   updateInfo: null,
   updateProgress: { received: 0, total: 0, fraction: 0 },
@@ -612,7 +753,9 @@ export const useViewer = create<ViewerState>((set, get) => ({
         showRightPanel: settings.showRightPanel,
         zoom: settings.defaultZoom
       })
-      applyTheme(settings)
+      const packSwitchPatch = applyTheme(settings)
+      /* 首启用的是用户上次存的包，理论上不会触发；留着是为了「设置文件里换了包」这类边角情况 */
+      if (packSwitchPatch) void get().patchSettings(packSwitchPatch)
     } catch (error) {
       console.error('[viewer] 初始化失败：', error)
     }
@@ -625,6 +768,14 @@ export const useViewer = create<ViewerState>((set, get) => ({
     // （教学场景常连点两次同一个文件，开两个标签只会让人迷惑）
     const opened = before.tabs.find((t) => t.path === filePath)
     if (opened) {
+      /*
+       * 页面结构编辑会「关标签 → 重开工作副本」，而主进程的开文件回执有可能
+       * 抢在前面，先把副本按哈希文件名建成标签。此时这里要把调用方给的名字
+       * 补回去，否则标题栏会显示 `447b2a2971e5213e.pdf` 这种哈希名。
+       */
+      if (titleName && opened.name !== titleName) {
+        set({ tabs: before.tabs.map((t) => (t.id === opened.id ? { ...t, name: titleName } : t)) })
+      }
       get().switchTab(opened.id)
       return
     }
@@ -662,7 +813,8 @@ export const useViewer = create<ViewerState>((set, get) => ({
       ],
       activeTabId,
       filePath: result.path,
-      fileName: result.path.split(/[\\/]/).pop() ?? result.path,
+      /* 页面结构编辑打开的是哈希工作副本，界面上一律显示原文件名 */
+      fileName: titleName ?? result.title ?? result.path.split(/[\\/]/).pop() ?? result.path,
       page: page ?? 1,
       zoom: 'fit-width',
       // 换文档了，上一份的批注与未保存标记不能留下
@@ -674,8 +826,66 @@ export const useViewer = create<ViewerState>((set, get) => ({
     })
   },
 
-  pickFile: async () => {
-    const result = await window.pdfApp.open.pick()
+  /* ---------- 页面结构编辑（插入空白页 / 删除本页） ---------- */
+
+  /*
+   * 重新打开工作副本，并停到指定页。
+   *
+   * 为什么不能只把 page 传给 openFile：新文档的滚动容器从顶部开始，页面节点
+   * 登记完之后 DocumentView 的 IntersectionObserver 会按「可见面积最大的页」
+   * 把页码覆盖成 1。实测从第 3 页插入一张空白页，插入后停在 1/21 而不是 3/21。
+   * 所以这里等新文档的页数落定（= 加载完、节点登记完）再补一次 setPage，
+   * 让「页码变化 → 滚动到该页」的 useLayoutEffect 真正生效。
+   */
+  reopenActiveTab: async (filePath, page, titleName, expectedPages) => {
+    const state = get()
+    const tab = state.tabs.find((t) => t.id === state.activeTabId)
+    if (tab) get().closeTab(tab.id)
+    await get().openFile(filePath, page, titleName)
+    if (typeof expectedPages !== 'number' || page <= 1) return
+    for (let i = 0; i < 40; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      if (get().pageCount === expectedPages) break
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250))
+    if (get().pageCount === expectedPages && get().page !== page) get().setPage(page)
+  },
+
+  insertBlankPage: async () => {
+    const state = get()
+    const tab = state.tabs.find((t) => t.id === state.activeTabId)
+    if (!tab) return
+    set({ loading: '正在插入空白页…' })
+    const result = await window.pdfApp.pages.insertBlank(tab.path, state.page - 1)
+    if (!result.ok || !result.path) {
+      set({ loading: null })
+      get().showToast(result.ok ? '插入失败' : result.error, 3200)
+      return
+    }
+    /* 新页落在 result.index（0 起始），页码是 1 起始 */
+    await get().reopenActiveTab(result.path, result.index + 1, tab.name, result.pages)
+    set({ loading: null })
+    get().showToast(`已在第 ${result.index + 1} 页插入空白页，共 ${result.pages} 页`, 2600)
+  },
+
+  deleteCurrentPage: async () => {
+    const state = get()
+    const tab = state.tabs.find((t) => t.id === state.activeTabId)
+    if (!tab) return
+    set({ loading: '正在删除本页…' })
+    const result = await window.pdfApp.pages.remove(tab.path, state.page - 1)
+    if (!result.ok || !result.path) {
+      set({ loading: null })
+      get().showToast(result.ok ? '删除失败' : result.error, 3200)
+      return
+    }
+    /* 删完之后停在被删页原来的位置（末页被删就落到新的末页） */
+    await get().reopenActiveTab(result.path, result.index + 1, tab.name, result.pages)
+    set({ loading: null })
+    get().showToast(`已删除该页，还剩 ${result.pages} 页`, 2600)
+  },
+
+  pickFile: async () => {    const result = await window.pdfApp.open.pick()
     if (!result) return // 用户取消
     if (!result.ok || !result.path) {
       set({ error: result.error ?? '打开失败' })
@@ -846,13 +1056,189 @@ export const useViewer = create<ViewerState>((set, get) => ({
   setShowSettings: (v) => set(v ? { showSettings: true, showTools: false } : { showSettings: false }),
 
   /* 工具箱与设置面板互斥：两个都是右侧抽屉，同时开会互相遮挡 */
-  setShowTools: (v) => set(v ? { showTools: true, showSettings: false, showMarket: false } : { showTools: false }),
+  setShowTools: (v) =>
+    set(
+      v
+        ? { showTools: true, showSettings: false, showThemeStore: false, showPluginStore: false }
+        : { showTools: false }
+    ),
 
-  setShowMarket: (v) => set(v ? { showMarket: true, showSettings: false, showTools: false } : { showMarket: false }),
+  setShowThemeStore: (v) =>
+    set(
+      v
+        ? { showThemeStore: true, showTools: false, showImageTools: false, showPluginStore: false }
+        : { showThemeStore: false }
+    ),
+
+  /*
+   * 插件商店是独立浮层，与设置/工具箱互斥（都是要盖在阅读区上的面板）。
+   * 但**不**关主题商店：主题商店挂在设置面板里，开插件商店时设置本来就该让位。
+   */
+  setShowPluginStore: (v) =>
+    set(
+      v
+        ? { showPluginStore: true, showSettings: false, showTools: false, showImageTools: false, showThemeStore: false }
+        : { showPluginStore: false }
+    ),
+
+  setShowImageTools: (v) =>
+    set(
+      v
+        ? { showImageTools: true, showSettings: false, showTools: false, showThemeStore: false, showPluginStore: false }
+        : { showImageTools: false }
+    ),
+
+  /* ---------- 插件 ---------- */
+
+  loadPlugins: async () => {
+    try {
+      const [list, commands] = await Promise.all([
+        window.pdfApp.plugins.list(),
+        window.pdfApp.plugins.commands()
+      ])
+      set({
+        installedPlugins: (list ?? []) as InstalledPluginLike[],
+        pluginCommands: (commands ?? []) as PluginCommandLike[]
+      })
+    } catch (error) {
+      set({ pluginNote: `读取插件列表失败：${(error as Error).message}` })
+    }
+  },
+
+  runPluginCommand: async (commandId) => {
+    try {
+      const result = await window.pdfApp.plugins.run(commandId)
+      if (!result.ok) set({ pluginNote: result.error ?? '插件命令执行失败' })
+    } catch (error) {
+      set({ pluginNote: `插件命令执行失败：${(error as Error).message}` })
+    }
+  },
+
+  installPlugin: async () => {
+    set({ pluginBusy: true, pluginNote: '' })
+    try {
+      const result = await window.pdfApp.plugins.install()
+      if (result.canceled) {
+        set({ pluginBusy: false })
+        return
+      }
+      if (!result.ok) {
+        set({ pluginBusy: false, pluginNote: result.error ?? '安装失败' })
+        return
+      }
+      await get().loadPlugins()
+      set({ pluginBusy: false, pluginNote: '插件已安装，重启应用后生效。' })
+    } catch (error) {
+      set({ pluginBusy: false, pluginNote: `安装失败：${(error as Error).message}` })
+    }
+  },
+
+  uninstallPlugin: async (pluginId) => {
+    set({ pluginBusy: true, pluginNote: '' })
+    try {
+      const result = await window.pdfApp.plugins.uninstall(pluginId)
+      await get().loadPlugins()
+      set({
+        pluginBusy: false,
+        pluginNote: result.ok ? '插件已卸载，重启应用后彻底生效。' : result.error ?? '卸载失败'
+      })
+    } catch (error) {
+      set({ pluginBusy: false, pluginNote: `卸载失败：${(error as Error).message}` })
+    }
+  },
+
+  setPluginEnabled: async (pluginId, enabled) => {
+    try {
+      await window.pdfApp.plugins.setEnabled(pluginId, enabled)
+      await get().loadPlugins()
+      set({ pluginNote: enabled ? '已启用，重启应用后生效。' : '已停用，重启应用后生效。' })
+    } catch (error) {
+      set({ pluginNote: `操作失败：${(error as Error).message}` })
+    }
+  },
+
+  loadRollback: async () => {
+    try {
+      const list = await window.pdfApp.rollback.list()
+      set({ rollbackVersions: list })
+    } catch {
+      set({ rollbackVersions: [] })
+    }
+  },
+
+  applyRollback: async (version) => {
+    const result = await window.pdfApp.rollback.apply(version)
+    if (!result.ok) set({ error: result.error ?? '回滚失败' })
+  },
+
+  openComparePane: (filePath) =>
+    set({
+      compareOpen: true,
+      ...(filePath ? { comparePath: filePath } : {})
+    }),
+
+  closeComparePane: () => set({ compareOpen: false }),
+
+  clearPluginNote: () => set({ pluginNote: '' }),
+
+  loadPluginShop: async () => {
+    set({ pluginShopLoading: true, pluginShopError: '' })
+    try {
+      const res = await window.pdfApp.plugins.index(get().pluginShopSource)
+      if (!res.ok) {
+        set({ pluginShopLoading: false, pluginShopItems: [], pluginShopError: res.error ?? '插件清单不可用' })
+        return
+      }
+      set({
+        pluginShopLoading: false,
+        pluginShopItems: (res.items ?? []) as PluginShopItem[],
+        pluginShopError: res.source && res.source !== get().pluginShopSource ? '首选源连不上，已用备用源' : ''
+      })
+    } catch (error) {
+      set({
+        pluginShopLoading: false,
+        pluginShopItems: [],
+        pluginShopError: `拉取失败：${(error as Error).message}`
+      })
+    }
+  },
+
+  setPluginShopSource: async (source) => {
+    if (get().pluginShopSource === source) return
+    set({ pluginShopSource: source, pluginShopItems: null })
+    await get().loadPluginShop()
+  },
+
+  refreshPluginShop: async () => {
+    if (get().pluginShopItems !== null) await get().loadPluginShop()
+  },
+
+  installPluginFromShop: async (item) => {
+    set({ pluginInstalling: item.id, pluginNote: '' })
+    try {
+      const result = await window.pdfApp.plugins.installUrl(item.download, item.sha256)
+      await get().loadPlugins()
+      set({
+        pluginInstalling: '',
+        pluginNote: result.ok
+          ? `${result.verified ? '已校验' : '未校验来源'}安装完成：${item.name}，重启应用后生效。`
+          : result.error ?? '安装失败'
+      })
+    } catch (error) {
+      set({
+        pluginInstalling: '',
+        pluginNote: `安装失败：${(error as Error).message}`
+      })
+    }
+  },
 
   loadMarket: async () => {
     try {
-      const res = await window.pdfApp.market.list()
+      /*
+       * 按用户设置里的偏好先问一个源（默认 GitHub），主进程会用另一个兜底。
+       * 偏好变了要清一次缓存，否则 10 分钟内还是上一个源的清单。
+       */
+      const res = await window.pdfApp.market.list(get().settings.marketSource)
       /*
        * 清单在这里过一遍校验：服务器/镜像/raw 上的 JSON 都可能被人手改坏，
        * 半坏的主题会让界面一处黑一处白，所以坏包整条丢弃（不截断、不补默认值）。
@@ -860,11 +1246,20 @@ export const useViewer = create<ViewerState>((set, get) => ({
       const items = normalizeMarketList(res.items)
       const rawCount = Array.isArray(res.items) ? res.items.length : 0
       const note =
-        res.ok && rawCount > 0 && items.length === 0 ? '清单里没有合法的主题包（七色校验值缺失或颜色越界）' : ''
+        res.ok && rawCount > 0 && items.length === 0 ? '清单里没有合法的主题包（七色变量缺失或颜色越界）' : ''
       set({ marketItems: items, marketError: res.ok ? note : res.error ?? '市场不可用' })
     } catch (error) {
       set({ marketItems: [], marketError: '连不上市场服务器' })
     }
+  },
+
+  setMarketSource: async (source) => {
+    if (get().settings.marketSource === source) return
+    await get().patchSettings({ marketSource: source })
+    /* 缓存按源分桶，但界面上的旧清单也要清掉，否则切过去还看到上一个源的内容 */
+    await window.pdfApp.market.clearCache()
+    set({ marketItems: null })
+    await get().loadMarket()
   },
 
   installTheme: async (item) => {
@@ -945,7 +1340,19 @@ export const useViewer = create<ViewerState>((set, get) => ({
   patchSettings: async (patch) => {
     const next = await window.pdfApp.settings.patch(patch)
     set({ settings: next })
-    applyTheme(next)
+    const packSwitchPatch = applyTheme(next)
+    /*
+     * 换包：把新包的圆角/模糊/透明度写回设置。
+     *
+     * applyTheme 已经按新包默认值画到 CSS 变量上了，这里补一次落库，
+     * 否则设置页的滑块还停在旧包的数字上（界面与滑块对不上）。
+     * 第二次 patch 时 appliedPackId 已是新包，不会再触发，不存在递归。
+     */
+    if (packSwitchPatch) {
+      const synced = await window.pdfApp.settings.patch(packSwitchPatch)
+      set({ settings: synced })
+      applyTheme(synced)
+    }
   },
 
   refreshRecent: async () => {
@@ -1008,6 +1415,9 @@ export const useViewer = create<ViewerState>((set, get) => ({
     if (input.fontSize !== undefined) item.fontSize = input.fontSize
     if (input.image !== undefined) item.image = input.image
     if (input.strokeWidth !== undefined) item.strokeWidth = input.strokeWidth
+    if (input.line !== undefined) item.line = input.line
+    if (input.fill !== undefined) item.fill = input.fill
+    if (input.dash !== undefined) item.dash = input.dash
     if (input.rotation !== undefined) item.rotation = input.rotation
     if (input.fontWeight !== undefined) item.fontWeight = input.fontWeight
     if (input.fontStyle !== undefined) item.fontStyle = input.fontStyle
@@ -1286,7 +1696,36 @@ function hexToRgbTriple(hex: string): string | null {
   return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`
 }
 
-function applyTheme(settings: ReaderSettings): void {
+/**
+ * 强调色上的前景色（`--accent-fg`）。
+ *
+ * 之前这个值在 CSS 里按主题写死成白色：Metro 的标题栏是「整条强调色 + 白字」，
+ * 用户一旦把强调色换成浅色（黄、浅绿、浅灰），立刻变成白字贴浅底，标题栏整条
+ * 看不见（2026-10-28 用户报的「部分主题标题栏不显示」）。
+ *
+ * 改成像 WPS / Office 那样按亮度算：底色够亮就用深字，够暗就用白字。
+ * 0.42 是白字与深字对比度相等的分界点（白字 1.05/(L+0.05) 与深字 (L+0.05)/0.05 相等）。
+ */
+function accentForeground(triple: string): string | null {
+  const parts = triple.trim().split(/\s+/).map(Number)
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return null
+  const [r, g, b] = parts.map((n) => {
+    const c = Math.min(255, Math.max(0, n)) / 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  })
+  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+  return luminance > 0.42 ? '18 22 30' : '255 255 255'
+}
+
+/*
+ * 上一次真正套用过的主题包（classic / metro / glass）。
+ *
+ * 只在**换包**时把圆角/模糊/透明度重置成新包的默认值；同一个包内换配色不动用户的值。
+ * 首次调用（应用启动）只记录、不重置 —— 否则用户调好的玻璃参数每次重启都会被冲掉。
+ */
+let appliedPackId: string | null = null
+
+function applyTheme(settings: ReaderSettings): Partial<ReaderSettings> | null {
   const root = document.documentElement
   root.dataset.theme = settings.theme
   /* 2026-10-24：布局（office = Office 2019 风格的功能区）与配色解耦，各自独立切换 */
@@ -1296,20 +1735,90 @@ function applyTheme(settings: ReaderSettings): void {
   root.style.setProperty('--reader-bg', settings.pageBackground)
 
   /*
-   * 液态玻璃主题包的两个可调参数。
+   * 主题包的三组可调参数（圆角 / 模糊 / 面板透明度）。
    *
    * 用行内变量而不是 data 属性：滑块拖动时要立刻生效，走 CSS 变量
-   * 不触发任何 React 重渲染；切到别的主题时保留值也无害（那套规则
-   * 只写在 html[data-theme='glass'] 作用域里）。
+   * 不触发任何 React 重渲染。写的是「实时字段」而不是包的默认值 ——
+   * 用户在界面上改过的值，切包之后不会因为包默认值而回滚。
+   *
+   * `--radius` 系列也在这里统一下发：一次改圆角，按钮、卡片、输入框、
+   * 外壳全部跟着变，这是「一整套视觉」而不是只换一个滑块。
    */
-  root.style.setProperty('--glass-radius', `${settings.glassRadius}px`)
-  root.style.setProperty('--glass-blur', `${settings.glassBlur}px`)
+  /*
+   * 三组参数由「包默认值 + 用户实时改动」共同决定，优先级如下：
+   *   · 用户没动过滑块（仍等于 classic 的出厂值 10/0/1）⇒ 用**当前包**的默认值
+   *     （Metro 必须直角 0、玻璃必须 22/18/0.55，不能继承上一包的数字）
+   *   · 用户动过滑块 ⇒ 尊重用户的手动值，切包不给他回滚
+   * 这正是之前「切到 Metro 圆角还是 14px」「玻璃看不出材质」的病根：
+   * 直接 patchSettings({theme}) 时没有经过设置页那层「套用包默认值」。
+   */
+  const packForStyle = settings.packDefaults?.[themePackOf(settings.theme)] ?? DEFAULT_SETTINGS.packDefaults[themePackOf(settings.theme)]
+
+  /*
+   * 「换包」时把三件套改成新包的默认值。
+   *
+   * 为什么要单独记一个当前包：`untouched` 那套判定只解决「用户从没动过滑块」的情况，
+   * 但用户只要在玻璃包里调过圆角（比如 14px），再切到 Metro 时会命中「动过滑块 ⇒ 尊重用户值」，
+   * 于是 Metro 依旧 14px 圆角 —— 这正是用户报过两次的「切到 Metro 圆角还是 14px」。
+   *
+   * 正确的粒度是**包**而不是滑块：
+   *   · 同一个包内换配色（classic 的 11 档）⇒ 保留用户调好的圆角/模糊/透明度；
+   *   · 换包（classic → metro → glass）⇒ 这是换整套视觉，必须套用新包形态。
+   * 首次调用只记录当前包、不做重置，否则每次启动都会把用户调好的玻璃参数冲掉。
+   */
+  const packId = themePackOf(settings.theme)
+  let packSwitchPatch: Partial<ReaderSettings> | null = null
+  if (appliedPackId === null) {
+    appliedPackId = packId
+  } else if (appliedPackId !== packId) {
+    appliedPackId = packId
+    const target = {
+      glassRadius: packForStyle.radius,
+      glassBlur: packForStyle.blur,
+      panelAlpha: packForStyle.panelAlpha
+    }
+    if (
+      target.glassRadius !== settings.glassRadius ||
+      target.glassBlur !== settings.glassBlur ||
+      target.panelAlpha !== settings.panelAlpha
+    ) {
+      packSwitchPatch = target
+    }
+  }
+
+  const untouched =
+    settings.glassRadius === DEFAULT_SETTINGS.glassRadius &&
+    settings.glassBlur === DEFAULT_SETTINGS.glassBlur &&
+    settings.panelAlpha === DEFAULT_SETTINGS.panelAlpha
+  const radius = packSwitchPatch ? packForStyle.radius : untouched ? packForStyle.radius : settings.glassRadius
+  const blur = packSwitchPatch ? packForStyle.blur : untouched ? packForStyle.blur : settings.glassBlur
+  const alpha = packSwitchPatch ? packForStyle.panelAlpha : untouched ? packForStyle.panelAlpha : settings.panelAlpha
+
+  root.style.setProperty('--glass-radius', `${radius}px`)
+  root.style.setProperty('--glass-blur', `${blur}px`)
+  root.style.setProperty('--radius', `${radius}px`)
+  root.style.setProperty('--radius-sm', `${Math.round(radius * 0.55)}px`)
+  root.style.setProperty('--radius-lg', `${Math.round(radius * 1.5)}px`)
+  root.style.setProperty('--panel-alpha', String(alpha))
+
+  /*
+   * 主题包：形态（圆角以外的投影 / 玻璃缝隙 / 工具栏高度）来自包默认值。
+   *
+   * `data-pack` 是包级 CSS 的钩子（html[data-pack='glass'] ...），配色仍然
+   * 只由 data-theme 决定 —— 于是「液态玻璃 + 任意一档配色」都成立，
+   * 而不是把半透明写死在 html[data-theme='glass'] 上。
+   */
+  const pack = settings.packDefaults?.[packId] ?? DEFAULT_SETTINGS.packDefaults[packId]
+  root.dataset.pack = packId
+  root.style.setProperty('--panel-shadow', pack.shadow || 'none')
+  root.style.setProperty('--glass-gap', `${pack.gap}px`)
+  root.style.setProperty('--toolbar-h', `${pack.toolbarHeight}px`)
 
   /*
    * 插件市场装的主题包（theme='custom'）。
    *
    * 内置主题靠 base.css 的 `html[data-theme=...]` 规则，主题包不能改 CSS 文件，
-   * 所以这里把校验值写成**行内变量**覆盖：行内优先级高于样式表，切走时再清掉。
+   * 所以这里把变量写成**行内变量**覆盖：行内优先级高于样式表，切走时再清掉。
    */
   const tokens = [
     '--bg',
@@ -1346,15 +1855,33 @@ function applyTheme(settings: ReaderSettings): void {
   const accent = hexToRgbTriple(settings.accentColor)
   if (accent) root.style.setProperty('--accent', accent)
 
+  /*
+   * 强调色上的字色（`--accent-fg`）。
+   *
+   * 强调色可能来自三处：用户设的 accentColor（上面刚写进行内）、市场主题包的
+   * accent（再往上的行内变量）、以及 CSS 里各主题自带的默认值。前两种在行内，
+   * 第三种只能问计算样式 —— 所以这里先读行内、读不到再读计算值。
+   * 行内写法还保证「换回默认强调色」时前景色跟着重算，不会留着上一次的深字。
+   */
+  const accentNow = root.style.getPropertyValue('--accent') || getComputedStyle(root).getPropertyValue('--accent')
+  const accentFg = accentForeground(accentNow)
+  if (accentFg) root.style.setProperty('--accent-fg', accentFg)
+
   // 自定义背景图：走 pdf-file 协议（与 PDF 同一条链路），冒号不编码
   const image = settings.readerImage
   if (image) {
-    const normalized = image.replace(/\\/g, '/')
-    // 路径走 query（Chromium 会把 path 首段当 host 并小写化，理由见 DocumentView.toPdfUrl）
-    root.style.setProperty('--reader-image', `url("pdf-file:///?p=${encodeURIComponent(normalized)}")`)
+    const encoded = image
+      .replace(/\\/g, '/')
+      .split('/')
+      .map((seg) => encodeURIComponent(seg).replace(/%3A/gi, ':'))
+      .join('/')
+    root.style.setProperty('--reader-image', `url("pdf-file:///${encoded}")`)
   } else {
     root.style.setProperty('--reader-image', 'none')
   }
   root.style.setProperty('--reader-image-dim', image ? String(settings.readerImageDim) : '0')
   root.style.setProperty('--reader-image-blur', `${settings.readerImageBlur}px`)
+
+  /* 换包时要写回的三件套（调用方负责落库，见 patchSettings / init） */
+  return packSwitchPatch
 }

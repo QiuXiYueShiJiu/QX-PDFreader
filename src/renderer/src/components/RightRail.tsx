@@ -9,10 +9,24 @@
  * 这样在触屏上左右手各管一边，不用来回找。
  *
  * 同样砍掉一体机系统级功能（应用、应用切换等），只留阅读相关的。
+ *
+ * ★ 2026-10-28（需求清单 B4）：这一栏**永远不能滚动**。
+ *   1.9.0.0 里为了修「退出应用被裁」给它加了 `overflow-y: auto`，
+ *   结果一体机 150% 缩放（CSS 视口高约 680px）时右栏自己出滚动条，
+ *   用户得先滚一栏才点得到设置 —— 这正是用户说的「右栏又能滑动了」。
+ *
+ *   现在的做法是「按高度分档，越矮越紧」：
+ *     · 高于 980px：图标 + 文字，按钮 60×56（触屏最好点）
+ *     · 980–860px：缩小按钮与间距，文字仍在
+ *     · 860–680px：只留图标（文字藏起来，靠 title 提示）
+ *     · 低于 680px：翻页与缩放收进一个弹出面板，右栏只留 4 组
+ *   分档靠 CSS 的 max-height 媒体查询（见 rails.css），只有「要不要收进弹窗」
+ *   这一档需要 JS 判一次，因为要少渲染两组 DOM。
  */
 
+import { useEffect, useState } from 'react'
 import {
-  Briefcase,
+  Store,
   ChevronLeft,
   ChevronRight,
   CircleDot,
@@ -23,9 +37,13 @@ import {
   RotateCw,
   Settings,
   StretchHorizontal,
+  X,
   ZoomIn
 } from 'lucide-react'
 import { useViewer } from '../store'
+
+/** 低于这个视口高度，翻页与缩放两组收进弹出面板（CSS 分档同步用 680） */
+const RAIL_TINY_HEIGHT = 680
 
 /*
  * 连续缩放滑条的量程已随控件一起移到状态栏（见 Toolbar.tsx 的 StatusBar）——
@@ -96,7 +114,8 @@ export function RightRail(): JSX.Element {
   const setZoom = useViewer((s) => s.setZoom)
   const rotate = useViewer((s) => s.rotate)
   const setShowSettings = useViewer((s) => s.setShowSettings)
-  const setShowTools = useViewer((s) => s.setShowTools)
+  const setShowPluginStore = useViewer((s) => s.setShowPluginStore)
+  const showPluginStore = useViewer((s) => s.showPluginStore)
   // 课堂辅助遮罩（黑屏 / 聚光灯 / 放大镜）
   const maskMode = useViewer((s) => s.maskMode)
   const setMaskMode = useViewer((s) => s.setMaskMode)
@@ -104,66 +123,89 @@ export function RightRail(): JSX.Element {
   /** 是否处于适应宽度（用于高亮该按钮） */
   const fitWidth = zoom === 'fit-width'
 
+  const [tiny, setTiny] = useState(() => window.innerHeight < RAIL_TINY_HEIGHT)
+  const [popover, setPopover] = useState(false)
+
+  useEffect(() => {
+    const onResize = (): void => setTiny(window.innerHeight < RAIL_TINY_HEIGHT)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  /* 窗口重新变高后弹层没意义了，随手关掉，避免它挂在屏幕角落 */
+  useEffect(() => {
+    if (!tiny) setPopover(false)
+  }, [tiny])
+
+  const pagerGroup = (
+    <div className="rail__group" data-rail-group="pager">
+      <RailButton
+        icon={<ChevronLeft size={20} />}
+        label="上一页"
+        disabled={!hasDoc || page <= 1}
+        onClick={prevPage}
+        title="上一页（← / PageUp）"
+      />
+      <span className="rail__page" title={`第 ${page} / ${pageCount || '—'} 页`}>
+        {hasDoc ? `${page}/${pageCount || '—'}` : '—'}
+      </span>
+      <RailButton
+        icon={<ChevronRight size={20} />}
+        label="下一页"
+        disabled={!hasDoc || page >= pageCount}
+        onClick={nextPage}
+        title="下一页（→ / PageDown）"
+      />
+    </div>
+  )
+
+  const zoomGroup = (
+    <div className="rail__group" data-rail-group="zoom">
+      <RailButton
+        icon={<Plus size={20} />}
+        label="放大"
+        disabled={!hasDoc}
+        onClick={zoomIn}
+        title="放大（Ctrl++，触屏可双指捏合）"
+      />
+      <span className="rail__scale" title={`当前 ${Math.round(actualScale * 100)}%`}>
+        {Math.round(actualScale * 100)}%
+      </span>
+      <RailButton
+        icon={<Minus size={20} />}
+        label="缩小"
+        disabled={!hasDoc}
+        onClick={zoomOut}
+        title="缩小（Ctrl+滚轮可连续调，触屏可双指捏合）"
+      />
+
+      {/*
+        连续缩放滑条已移到右下角状态栏 ——
+        这里原本是竖排滑块，但竖排在触屏上很难拖准、
+        还占掉一整行高度。状态栏是横向的，更自然。
+      */}
+
+      <RailButton
+        icon={<StretchHorizontal size={20} />}
+        label="适宽"
+        active={fitWidth}
+        disabled={!hasDoc}
+        onClick={() => setZoom('fit-width')}
+        title="适应宽度（Ctrl+0）"
+      />
+    </div>
+  )
+
   return (
-    <aside className="rail rail--right" aria-label="视图工具">
-      <div className="rail__group">
-        <RailButton
-          icon={<ChevronLeft size={20} />}
-          label="上一页"
-          disabled={!hasDoc || page <= 1}
-          onClick={prevPage}
-          title="上一页（← / PageUp）"
-        />
-        <span className="rail__page" title={`第 ${page} / ${pageCount || '—'} 页`}>
-          {hasDoc ? `${page}/${pageCount || '—'}` : '—'}
-        </span>
-        <RailButton
-          icon={<ChevronRight size={20} />}
-          label="下一页"
-          disabled={!hasDoc || page >= pageCount}
-          onClick={nextPage}
-          title="下一页（→ / PageDown）"
-        />
-      </div>
-
-      <div className="rail__divider" aria-hidden="true" />
-
-      <div className="rail__group">
-        <RailButton
-          icon={<Plus size={20} />}
-          label="放大"
-          disabled={!hasDoc}
-          onClick={zoomIn}
-          title="放大（Ctrl++，触屏可双指捏合）"
-        />
-        <span className="rail__scale" title={`当前 ${Math.round(actualScale * 100)}%`}>
-          {Math.round(actualScale * 100)}%
-        </span>
-        <RailButton
-          icon={<Minus size={20} />}
-          label="缩小"
-          disabled={!hasDoc}
-          onClick={zoomOut}
-          title="缩小（Ctrl+滚轮可连续调，触屏可双指捏合）"
-        />
-
-        {/*
-          连续缩放滑条已移到右下角状态栏 ——
-          这里原本是竖排滑块，但竖排在触屏上很难拖准、
-          还占掉一整行高度。状态栏是横向的，更自然。
-        */}
-
-        <RailButton
-          icon={<StretchHorizontal size={20} />}
-          label="适宽"
-          active={fitWidth}
-          disabled={!hasDoc}
-          onClick={() => setZoom('fit-width')}
-          title="适应宽度（Ctrl+0）"
-        />
-      </div>
-
-      <div className="rail__divider" aria-hidden="true" />
+    <aside className="rail rail--right" data-rail={tiny ? 'tiny' : 'normal'} aria-label="视图工具">
+      {tiny ? null : (
+        <>
+          {pagerGroup}
+          <div className="rail__divider" aria-hidden="true" />
+          {zoomGroup}
+          <div className="rail__divider" aria-hidden="true" />
+        </>
+      )}
 
       {/*
         ---------- 课堂辅助工具 ----------
@@ -175,7 +217,7 @@ export function RightRail(): JSX.Element {
         π6 里的时钟/骰子/大转盘属于课堂活动道具，
         学科模拟器（物理化学实验）属于整机生态，都不并入。
       */}
-      <div className="rail__group">
+      <div className="rail__group" data-rail-group="mask">
         <RailButton
           icon={<CircleDot size={20} />}
           label="聚光"
@@ -201,7 +243,7 @@ export function RightRail(): JSX.Element {
 
       <div className="rail__divider" aria-hidden="true" />
 
-      <div className="rail__group">
+      <div className="rail__group" data-rail-group="misc">
         <RailButton
           icon={<RotateCw size={20} />}
           label="旋转"
@@ -209,11 +251,20 @@ export function RightRail(): JSX.Element {
           onClick={() => rotate(90)}
           title="顺时针旋转 90°（Ctrl+R）"
         />
+        {/*
+          「工具箱」入口已从右栏删除（2026-10-27 用户要求）：
+            工具全部搬进了上栏功能区的「工具」选项卡，右栏再留一个入口
+            等于同一件事两个门，还占掉一格触屏按钮。
+          这里放「插件商店」（2026-10-28 起与主题商店彻底分家）：
+            插件商店 = 能执行代码的第三方插件，装在这里；
+            主题商店 = 配色包，入口在「设置 → 外观」。
+        */}
         <RailButton
-          icon={<Briefcase size={20} />}
-          label="工具箱"
-          onClick={() => setShowTools(true)}
-          title="PDF 工具箱：点开查看全部工具"
+          icon={<Store size={20} />}
+          label="插件商店"
+          active={showPluginStore}
+          onClick={() => setShowPluginStore(true)}
+          title="插件商店：安装能扩展功能的第三方插件"
         />
         <RailButton
           icon={<Settings size={20} />}
@@ -222,6 +273,22 @@ export function RightRail(): JSX.Element {
           title="设置（Ctrl+S）"
         />
       </div>
+
+      {/* 窗口太矮：翻页与缩放不删功能，收进这个面板 */}
+      {tiny ? (
+        <>
+          <div className="rail__divider" aria-hidden="true" />
+          <div className="rail__group" data-rail-group="pager-pop">
+            <RailButton
+              icon={<ChevronRight size={20} />}
+              label="页码"
+              active={popover}
+              onClick={() => setPopover((v) => !v)}
+              title="页码与缩放：窗口太矮时收在这里"
+            />
+          </div>
+        </>
+      ) : null}
 
       {/*
         ---------- 退出应用 ----------
@@ -235,7 +302,7 @@ export function RightRail(): JSX.Element {
         所以这里只负责把请求发出去，不再自己渲染确认框。
       */}
       <div className="rail__divider" aria-hidden="true" />
-      <div className="rail__group">
+      <div className="rail__group" data-rail-group="exit">
         <RailButton
           icon={<Power size={20} />}
           label="退出应用"
@@ -246,6 +313,25 @@ export function RightRail(): JSX.Element {
           title="退出应用（会弹出确认）"
         />
       </div>
+
+      {tiny && popover ? (
+        <div className="rail-pop" role="dialog" aria-label="页码与缩放">
+          <div className="rail-pop__head">
+            <span className="rail-pop__title">页码与缩放</span>
+            <button
+              type="button"
+              className="rail-pop__close"
+              aria-label="关闭"
+              onClick={() => setPopover(false)}
+            >
+              <X size={16} />
+            </button>
+          </div>
+          {pagerGroup}
+          <div className="rail__divider" aria-hidden="true" />
+          {zoomGroup}
+        </div>
+      ) : null}
     </aside>
   )
 }

@@ -1,9 +1,9 @@
 /**
- * 全局基础样式与设计校验值。
+ * 全局基础样式与设计变量。
  *
  * 约定：
- *   · 颜色校验值写成 `R G B` 三数字，用 `rgb(var(--text))` 或
- *     `rgb(var(--text) / 0.6)` 使用，同一个校验值可复用于任意透明度。
+ *   · 颜色变量写成 `R G B` 三数字，用 `rgb(var(--text))` 或
+ *     `rgb(var(--text) / 0.6)` 使用，同一个变量可复用于任意透明度。
  *   · 主题切换靠 `html[data-theme='light'|'dark'|'sepia']`（由 App 写入）。
  *   · 界面缩放靠 `html { font-size }` + 组件使用 rem/em 实现，
  *     这样滑块调一个变量就能整体缩放，不必改每个组件。
@@ -34,6 +34,28 @@
   --radius: 10px;
   --radius-sm: 6px;
   --radius-lg: 16px;
+
+  /*
+   * 主题包（classic / metro / glass）驱动的形态变量。
+   *
+   * 真正生效的值由 store.ts 的 applyTheme() 写成**行内变量**（跟随设置实时变化，
+   * 切包 / 拖滑块都会重写）；这里的 :root 值只是兜底，保证设置还没加载完、
+   * 或者某个变量名拼错时界面不会塌成直角 + 全透明。
+   *
+   *   · --panel-alpha   面板不透明度（1 = 纯色，越小越透背景）
+   *   · --panel-shadow  外壳投影（none = 无阴影，Metro 包就是 none）
+   *   · --panel-highlight / --panel-edge  玻璃厚度的两道 1px 边（上亮下暗）
+   *   · --glass-blur    背景模糊半径（只有液态玻璃包会真的去糊）
+   *   · --glass-gap     页面四周的玻璃缝隙
+   *   · --toolbar-h     顶部工具栏高度（Metro 包更紧凑）
+   */
+  --panel-alpha: 1;
+  --panel-shadow: 0 10px 24px rgb(0 0 0 / 0.12);
+  --panel-highlight: rgb(255 255 255 / 0.55);
+  --panel-edge: rgb(0 0 0 / 0.08);
+  --glass-blur: 0px;
+  --glass-gap: 0px;
+  --toolbar-h: 46px;
 
   /* 标题栏与状态栏高度（自绘） */
   --titlebar-h: 40px;
@@ -84,8 +106,8 @@ html[data-theme='sepia'] {
  *    · 强调色 #0078D4（系统默认「蓝色」磁贴）
  *    · 底色 #F2F4F8（设置页背景）
  *    · 文字 #1A1A1A / 次要 #5F6A79
- *  形态特征全部落实在校验值与 metro.css 里：
- *    · 直角（圆角校验值归零）—— 磁贴、按钮、面板都不描圆角
+ *  形态特征全部落实在变量与 metro.css 里：
+ *    · 直角（圆角变量归零）—— 磁贴、按钮、面板都不描圆角
  *    · 平直色块，不叠阴影、不用渐变
  *    · Segoe UI 字体
  *    · 单一强调色做「选中 / 当前」的唯一提示
@@ -101,7 +123,7 @@ html[data-theme='metro'] {
   --accent-fg: 255 255 255;
   --reader-bg: 245 247 250;
 
-  /* 直角是 Metro 的第一特征：圆角校验值归零，全站控件跟着变方 */
+  /* 直角是 Metro 的第一特征：圆角变量归零，全站控件跟着变方 */
   --radius: 0px;
   --radius-sm: 0px;
   --radius-lg: 0px;

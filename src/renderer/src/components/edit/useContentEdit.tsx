@@ -23,7 +23,7 @@ import { useViewer } from '../../store'
 import type { FloatingAnchor } from '../AnnotationLayer'
 import { EditBar } from './EditBar'
 import { setEditBarRenderer } from './ContentEditBridge'
-import { EditLayer, type EditDraft, type ShapeDraft, type TextDraft } from './EditLayer'
+import { EditLayer, normalizeLine, type EditDraft, type ShapeDraft, type TextDraft } from './EditLayer'
 import { SelectionBar } from './SelectionBar'
 import {
   DEFAULT_FONT_SIZE,
@@ -33,12 +33,16 @@ import {
   IMAGE_MAX_RATIO,
   LINE_HEIGHT,
   MIN_ITEM_SIZE,
+  MIN_LINE_THICKNESS,
   MIN_SHAPE_SIZE,
   clampRect,
   imageNaturalSize,
   moveRect,
+  padRect,
   rectFromPoints,
   resizeRect,
+  SHAPE_FILL_ALPHA,
+  withAlpha,
   type Corner,
   type PageBounds
 } from './edit-common'
@@ -87,7 +91,7 @@ interface DragSession {
   aspect: number | null
   startX: number
   startY: number
-  type: 'whiteout' | 'rect' | 'ellipse' | null
+  type: 'whiteout' | 'rect' | 'ellipse' | 'line' | 'arrow' | null
   /** 是否真的移动过：没动过就是一次点选，不该写回位置 */
   moved: boolean
 }
@@ -111,6 +115,9 @@ export function useContentEdit(options: ContentEditOptions): ContentEditApi {
   const [pendingImage, setPendingImage] = useState<string | null>(null)
   const [fontSize, setFontSize] = useState<number>(DEFAULT_FONT_SIZE)
   const [strokeWidth, setStrokeWidth] = useState<number>(DEFAULT_STROKE_WIDTH)
+  /* 填充与虚线是「新画出来的图形」的默认形态；选中已有图形时点这两个按钮直接改它 */
+  const [fillOn, setFillOn] = useState(false)
+  const [dashOn, setDashOn] = useState(false)
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null)
   const [exporting, setExporting] = useState(false)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
@@ -119,8 +126,8 @@ export function useContentEdit(options: ContentEditOptions): ContentEditApi {
    * 事件回调活在 window 上（拖动/粘贴/键盘），它们的闭包可能比一次渲染更长寿，
    * 所以凡是"回调里要读的最新值"都过一次 ref —— 否则会拿到按下那一刻的旧状态。
    */
-  const stateRef = useRef({ tool, scale: options.scale, drawColor, strokeWidth, fontSize })
-  stateRef.current = { tool, scale: options.scale, drawColor, strokeWidth, fontSize }
+  const stateRef = useRef({ tool, scale: options.scale, drawColor, strokeWidth, fontSize, fillOn, dashOn })
+  stateRef.current = { tool, scale: options.scale, drawColor, strokeWidth, fontSize, fillOn, dashOn }
 
   const boundsRef = useRef<PageBounds>({ width: 0, height: 0 })
   boundsRef.current = {
@@ -267,9 +274,41 @@ export function useContentEdit(options: ContentEditOptions): ContentEditApi {
       sessionRef.current = null
 
       if (session.kind === 'shape') {
-        const rect = shapeRef.current?.rect ?? null
+        const draftShape = shapeRef.current
+        const rect = draftShape?.rect ?? null
         setShapeDraft(null)
         if (!rect || !session.type) return
+
+        /* 直线/箭头：判「长度」而不是「外接框面积」——水平线高度为 0，
+           用外接框判会被当成「点了一下」直接丢掉。 */
+        if (session.type === 'line' || session.type === 'arrow') {
+          const from = draftShape?.from
+          const to = draftShape?.to
+          if (!from || !to) return
+          const length = Math.hypot(to.x - from.x, to.y - from.y)
+          if (length < MIN_SHAPE_SIZE) {
+            if (length > 0.5) showToast('拖长一点再松手', 1600)
+            return
+          }
+          /*
+           * 外接框至少留 6px：完全水平/垂直的线外接框会退化成 0 厚度，
+           * 选中手柄和命中测试都无处落脚，连自己都点不中。
+           */
+          const box = padRect(rect, MIN_LINE_THICKNESS)
+          void addAnnotation({
+            page: session.page,
+            type: session.type,
+            rects: [box],
+            color: stateRef.current.drawColor,
+            quote: '',
+            note: '',
+            strokeWidth: stateRef.current.strokeWidth,
+            line: normalizeLine(box, from, to),
+            ...(draftShape?.dash ? { dash: true } : {})
+          })
+          return
+        }
+
         if (rect.width < MIN_SHAPE_SIZE || rect.height < MIN_SHAPE_SIZE) {
           // 只是点了一下：不产生看不见的小方块，给个提示
           if (rect.width > 0.5 || rect.height > 0.5) showToast('拖大一点再松手', 1600)
@@ -284,7 +323,13 @@ export function useContentEdit(options: ContentEditOptions): ContentEditApi {
           color: white ? '#ffffff' : stateRef.current.drawColor,
           quote: '',
           note: '',
-          ...(white ? {} : { strokeWidth: stateRef.current.strokeWidth })
+          ...(white
+            ? {}
+            : {
+                strokeWidth: stateRef.current.strokeWidth,
+                ...(draftShape?.fill ? { fill: draftShape.fill } : {}),
+                ...(draftShape?.dash ? { dash: true } : {})
+              })
         })
         return
       }
@@ -332,7 +377,13 @@ export function useContentEdit(options: ContentEditOptions): ContentEditApi {
         }
         if (s.kind === 'shape') {
           setShapeDraft((prev) =>
-            prev ? { ...prev, rect: rectFromPoints(s.startX, s.startY, p.x, p.y) } : prev
+            prev
+              ? {
+                  ...prev,
+                  rect: rectFromPoints(s.startX, s.startY, p.x, p.y),
+                  ...(prev.from ? { to: { x: p.x, y: p.y } } : {})
+                }
+              : prev
           )
         }
       }
@@ -419,7 +470,7 @@ export function useContentEdit(options: ContentEditOptions): ContentEditApi {
   const beginShape = useCallback(
     (
       e: React.PointerEvent<HTMLDivElement>,
-      type: 'whiteout' | 'rect' | 'ellipse',
+      type: 'whiteout' | 'rect' | 'ellipse' | 'line' | 'arrow',
       page: number,
       p: { x: number; y: number }
     ): void => {
@@ -439,12 +490,20 @@ export function useContentEdit(options: ContentEditOptions): ContentEditApi {
         type,
         moved: false
       })
+      const colorNow = type === 'whiteout' ? '#ffffff' : stateRef.current.drawColor
       setShapeDraft({
         page,
         type,
         rect: { x: p.x, y: p.y, width: 0, height: 0 },
-        color: type === 'whiteout' ? '#ffffff' : stateRef.current.drawColor,
-        strokeWidth: stateRef.current.strokeWidth
+        color: colorNow,
+        strokeWidth: stateRef.current.strokeWidth,
+        /* 直线/箭头记下起点：外接框会丢方向，端点得单独存 */
+        ...(type === 'line' || type === 'arrow' ? { from: { x: p.x, y: p.y }, to: { x: p.x, y: p.y } } : {}),
+        /* 填充只对矩形/椭圆有意义（涂白本身就是填充），虚线四种都能用 */
+        ...(stateRef.current.fillOn && (type === 'rect' || type === 'ellipse')
+          ? { fill: withAlpha(colorNow, SHAPE_FILL_ALPHA) }
+          : {}),
+        ...(stateRef.current.dashOn ? { dash: true } : {})
       })
     },
     [attachSession]
@@ -587,7 +646,13 @@ export function useContentEdit(options: ContentEditOptions): ContentEditApi {
         void placeImage(page, p)
         return true
       }
-      if (current === 'whiteout' || current === 'rect' || current === 'ellipse') {
+      if (
+        current === 'whiteout' ||
+        current === 'rect' ||
+        current === 'ellipse' ||
+        current === 'line' ||
+        current === 'arrow'
+      ) {
         beginShape(e, current, page, p)
         e.preventDefault()
         e.stopPropagation()
@@ -650,12 +715,48 @@ export function useContentEdit(options: ContentEditOptions): ContentEditApi {
       const id = selectedRef.current
       if (!id) return
       const item = annotationsRef.current.find((a) => a.id === id)
-      if (item && (item.type === 'rect' || item.type === 'ellipse')) {
+      if (item && (item.type === 'rect' || item.type === 'ellipse' || item.type === 'line' || item.type === 'arrow')) {
         void updateAnnotation(id, { strokeWidth: width })
       }
     },
     [updateAnnotation]
   )
+
+  /*
+   * 填充 / 虚线：既改「下一笔的默认形态」，也改当前选中的那一个。
+   * 两件事必须一起做 —— 否则选中一个实心矩形点「虚线」，只换了默认值、
+   * 眼前这个一点反应都没有，用户会以为按钮坏了。
+   */
+  const toggleFill = useCallback((): void => {
+    setFillOn((prev) => {
+      const next = !prev
+      const id = selectedRef.current
+      if (id) {
+        const item = annotationsRef.current.find((a) => a.id === id)
+        if (item && (item.type === 'rect' || item.type === 'ellipse')) {
+          void updateAnnotation(id, { fill: next ? withAlpha(item.color, SHAPE_FILL_ALPHA) : undefined })
+        }
+      }
+      return next
+    })
+  }, [updateAnnotation])
+
+  const toggleDash = useCallback((): void => {
+    setDashOn((prev) => {
+      const next = !prev
+      const id = selectedRef.current
+      if (id) {
+        const item = annotationsRef.current.find((a) => a.id === id)
+        if (
+          item &&
+          (item.type === 'rect' || item.type === 'ellipse' || item.type === 'line' || item.type === 'arrow')
+        ) {
+          void updateAnnotation(id, { dash: next })
+        }
+      }
+      return next
+    })
+  }, [updateAnnotation])
 
   /* ---------------- 选择工具的复制 / 高亮 / 下划线 ---------------- */
 
@@ -1175,6 +1276,8 @@ export function useContentEdit(options: ContentEditOptions): ContentEditApi {
         color={drawColor}
         fontSize={fontSize}
         strokeWidth={strokeWidth}
+        fillOn={fillOn}
+        dashOn={dashOn}
         exportDirty={exportDirty}
         exporting={exporting}
         progress={progress}
@@ -1184,6 +1287,8 @@ export function useContentEdit(options: ContentEditOptions): ContentEditApi {
         onColor={changeColor}
         onFontSize={changeFontSize}
         onStrokeWidth={changeStrokeWidth}
+        onToggleFill={toggleFill}
+        onToggleDash={toggleDash}
         onPickImage={() => fileRef.current?.click()}
         onDelete={deleteSelected}
         onExport={() => void runExport()}
@@ -1196,6 +1301,8 @@ export function useContentEdit(options: ContentEditOptions): ContentEditApi {
     drawColor,
     fontSize,
     strokeWidth,
+    fillOn,
+    dashOn,
     exportDirty,
     exporting,
     progress,
@@ -1205,6 +1312,8 @@ export function useContentEdit(options: ContentEditOptions): ContentEditApi {
     changeColor,
     changeFontSize,
     changeStrokeWidth,
+    toggleFill,
+    toggleDash,
     deleteSelected,
     runExport,
     setEditTool

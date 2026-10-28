@@ -188,23 +188,31 @@ check(
   '④ 点磁贴「绿」把强调色写成 #107c10',
   String(accent?.set ?? '').toLowerCase() === '#107c10' &&
     String(accent?.css ?? '').replace(/\s+/g, ' ') === '16 124 16',
-  `设置=${accent?.set} 变量=${accent?.css}`
+  `设置=${accent?.set} 凭据=${accent?.css}`
 )
 
 /* ---------------- ⑤ 液态玻璃：半透明外壳 ---------------- */
 /*
  * 先把两个滑块复位成默认值：上一支用例（或人工截图）可能把圆角改成了 16，
- * 直接断言「默认 14px」会误报。判据要看「变量跟着设置走」，而不是赌环境干净。
+ * 直接断言「默认 14px」会误报。判据要看「凭据跟着设置走」，而不是赌环境干净。
  */
   /* 布局与配色解耦后，外壳的半透明只看主题；这里固定回紧凑布局，避免布局包的背景规则干扰判据 */
   await patch({ themeLayout: 'normal' })
+/*
+ * ★ 顺序必须是「先点包、再写滑块值」。
+ *   点 [data-theme-pack="glass"] 会走 SettingsPanel 的 packDefaultsPatch()，把包默认值
+ *   （glass 包 = 22px / 18px）写回实时字段；若先 patch 14/12 再点包，断言就会读到 22/18。
+ *   放成「点包落地包默认 → 再写用户值 14/12」，验的正是 applyTheme 的 untouched 判定：
+ *   用户动过滑块就尊重用户值，不被包默认顶掉。
+ */
+await click('[data-theme-pack="glass"]')
+await sleep(400)
 await patch({ theme: 'glass', glassRadius: 14, glassBlur: 12 })
 await sleep(320)
 
-await click('[data-theme-pack="glass"]')
-await sleep(500)
+/* 单条 Office 功能区后没有 .toolbar 了，外壳是 .ribbon */
 const glass = ev(`
-  const cs = getComputedStyle(document.querySelector('.toolbar'))
+  const cs = getComputedStyle(document.querySelector('.ribbon'))
   return {
     theme: document.documentElement.dataset.theme,
     bg: cs.backgroundColor,
@@ -225,12 +233,12 @@ check(
   `theme=${glass?.theme} bg=${glass?.bg}`
 )
 check(
-  '⑤ 圆角与模糊两个变量已生效（默认 14px / 12px）',
+  '⑤ 圆角与模糊两个凭据已生效（用户值 14px / 12px）',
   glass?.radius === '14px' && glass?.blurVar === '12px',
   `radius=${glass?.radius} blur=${glass?.blurVar} filter=${glass?.blur}`
 )
 
-/* ---------------- ⑥ 两个滑块真的能改变量 ---------------- */
+/* ---------------- ⑥ 两个滑块真的能改凭据 ---------------- */
 const sliders = ev(`
   const r = document.querySelector('[data-glass-radius]')
   const b = document.querySelector('[data-glass-blur]')
@@ -254,12 +262,12 @@ const afterSliders = ev(`
   }
 `)
 check(
-  '⑥ 拖动圆角/模糊滑块会同时改 CSS 变量与设置',
+  '⑥ 拖动圆角/模糊滑块会同时改 CSS 凭据与设置',
   afterSliders?.radius === '24px' &&
     afterSliders?.blur === '3px' &&
     afterSliders?.saved?.radius === 24 &&
     afterSliders?.saved?.blur === 3,
-  `变量 ${afterSliders?.radius}/${afterSliders?.blur}，设置 ${afterSliders?.saved?.radius}/${afterSliders?.saved?.blur}（滑块读到 ${sliders?.radius}/${sliders?.blur}）`
+  `凭据 ${afterSliders?.radius}/${afterSliders?.blur}，设置 ${afterSliders?.saved?.radius}/${afterSliders?.saved?.blur}（滑块读到 ${sliders?.radius}/${sliders?.blur}）`
 )
 
 /* ---------------- ⑦ 默认包 7 档逐个切换 ---------------- */
@@ -369,6 +377,12 @@ check(
 )
 
 /* ---------------- ⑧ 收尾还原 ---------------- */
+/*
+ * 1.9.0 起「换包会套用新包的形态」：从液态玻璃切回默认包时，圆角/模糊/面板
+ * 透明度重置为默认包的出厂值（10 / 0 / 1）。否则用户会带着玻璃包的 14px 圆角
+ * 进米色皮肤 —— 这正是用户报过两次的「Metro 圆角不归零」的同一个根因。
+ * 所以这里请求 14/12，期望值仍是默认包的 10/0。
+ */
 await patch({ theme: 'sepia', accentColor: '#b0763a', glassRadius: 14, glassBlur: 12 })
 await sleep(300)
 const restored = ev(`
@@ -376,10 +390,21 @@ const restored = ev(`
   return { theme: document.documentElement.dataset.theme, radius: s.glassRadius, blur: s.glassBlur }
 `)
 check(
-  '⑧ 收尾还原成米色（圆角/模糊也复原）',
-  restored?.theme === 'sepia' && restored?.radius === 14 && restored?.blur === 12,
+  '⑧ 收尾还原成米色（换包后圆角/模糊跟着回到默认包的 10/0）',
+  restored?.theme === 'sepia' && restored?.radius === 10 && restored?.blur === 0,
   `theme=${restored?.theme} ${restored?.radius}/${restored?.blur}`
 )
+
+/*
+ * 关掉设置面板。设置面板带一层全屏遮罩（.sb-settings-scrim），留着它后面的
+ * verify-tabs 连标签都点不到（elementFromPoint 命中的是遮罩）—— 实测假红。
+ */
+ev(`
+  const s = window.__store.getState()
+  if (s.showSettings) s.setShowSettings(false)
+  return true
+`)
+await sleep(400)
 
 if (fails.length > 0) {
   console.error(`\n✗ 主题包用例失败 ${fails.length} 项：${fails.join('、')}`)

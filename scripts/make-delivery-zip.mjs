@@ -85,15 +85,26 @@ for (const d of DIRS) {
   copyTree(p, join(stage, d))
 }
 
-/* 安装包 */
-const releaseDir = 'D:\\DSH_Workstation\\PDFrelease'
+/*
+ * 安装包：名字以 build/packaging.json 为准。三包的名字都带单位口径（快速版、
+ * 定向发布版），写死在脚本里的话只要换一次单位名就会「少包」而不报错 —— 那次
+ * 交付包只装进了标准版，就是因为这里还写着旧名字。
+ */
+const releaseDir = join(process.cwd(), 'release')
+const packCfgPath = join(process.cwd(), 'build', 'packaging.json')
+const packCfg = existsSync(packCfgPath)
+  ? JSON.parse(readFileSync(packCfgPath, 'utf8'))
+  : {}
+const fillName = (tpl) => tpl.replace(/\$\{buildVersion\}/g, buildVersion).replace(/\$\{ext\}/g, 'exe')
+const packageNames = [
+  fillName(packCfg.artifactName ?? `秋夕-PDF阅读器-${buildVersion}-安装程序.\${ext}`),
+  packCfg.quickArtifactName ? fillName(packCfg.quickArtifactName) : null,
+  /* 定向发布版：带单位声明与内置凭据，只随内部交付走，绝不上公开仓库 */
+  packCfg.specialArtifactName ? fillName(packCfg.specialArtifactName) : null
+].filter(Boolean)
+
 mkdirSync(join(stage, '安装包'), { recursive: true })
-for (const f of [
-  `秋夕-PDF阅读器-${buildVersion}-安装程序.exe`,
-  'PDF阅读器-学校快速安装.exe',
-  /* 静默部署版：带单位声明与内置校验值，只随内部交付走，绝不上公开仓库 */
-  `秋夕-PDF阅读器-${buildVersion}-静默部署版安装程序.exe`
-]) {
+for (const f of packageNames) {
   const p = join(releaseDir, f)
   if (!existsSync(p)) {
     console.log(`  [warn] 缺安装包：${f}`)

@@ -72,6 +72,13 @@ const DEFAULT_FONT_SIZE = 16
 
 /** 默认线宽，与 shared/types 的注释一致 */
 const DEFAULT_STROKE_WIDTH = 2
+/*
+ * 虚线节拍（3 实 2 虚）与 edit-common.ts 的 DASH_ON / DASH_OFF 必须一致：
+ * 这个文件被导出链路直接引用，不 import edit-common（那边带 JSX 常量），
+ * 所以两个常量在这里复制了一份 —— 改一处务必改另一处。
+ */
+const DASH_ON = 3
+const DASH_OFF = 2
 
 export interface ExportAnnotatedResult {
   ok: boolean
@@ -274,11 +281,14 @@ async function paintAnnotation(ctx: CanvasRenderingContext2D, item: Annotation):
 
     case 'rect':
     case 'ellipse': {
-      const w = Math.max(1, item.strokeWidth ?? DEFAULT_STROKE_WIDTH) * s
+      const raw = Math.max(1, item.strokeWidth ?? DEFAULT_STROKE_WIDTH)
+      const w = raw * s
       ctx.save()
       ctx.strokeStyle = item.color
       ctx.lineWidth = w
       ctx.lineJoin = 'round'
+      // 虚线节拍与界面一致：3 实 2 虚（按线宽倍数），换算到设备像素
+      if (item.dash) ctx.setLineDash([raw * DASH_ON * s, raw * DASH_OFF * s])
       for (const r of item.rects) {
         const x = r.x * s
         const y = r.y * s
@@ -299,7 +309,53 @@ async function paintAnnotation(ctx: CanvasRenderingContext2D, item: Annotation):
             Math.PI * 2
           )
         }
+        if (item.fill) {
+          // 先填后描：填充色自带 22% 透明度，压在原文上仍能读
+          ctx.fillStyle = item.fill
+          ctx.fill()
+        }
         ctx.stroke()
+      }
+      ctx.restore()
+      return
+    }
+
+    case 'line':
+    case 'arrow': {
+      const raw = Math.max(1, item.strokeWidth ?? DEFAULT_STROKE_WIDTH)
+      const w = raw * s
+      ctx.save()
+      ctx.strokeStyle = item.color
+      ctx.lineWidth = w
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+      if (item.dash) ctx.setLineDash([raw * DASH_ON * s, raw * DASH_OFF * s])
+      for (const r of item.rects) {
+        const [nx1, ny1, nx2, ny2] = item.line ?? [0, 0, 1, 1]
+        const x1 = (r.x + nx1 * r.width) * s
+        const y1 = (r.y + ny1 * r.height) * s
+        const x2 = (r.x + nx2 * r.width) * s
+        const y2 = (r.y + ny2 * r.height) * s
+        ctx.beginPath()
+        ctx.moveTo(x1, y1)
+        ctx.lineTo(x2, y2)
+        ctx.stroke()
+        if (item.type === 'arrow') {
+          /*
+           * 箭头头部与 EditLayer 的 SVG 版保持同一套几何（尺寸随线长收敛、
+           * 张角 ≈26°），否则会出现「界面上有箭头、导出后变成光秃秃一条线」。
+           */
+          const len = Math.hypot(x2 - x1, y2 - y1)
+          const size = Math.min(Math.max(8 * s, w * 4), Math.max(8 * s, len * 0.4))
+          const angle = Math.atan2(y2 - y1, x2 - x1)
+          const spread = 0.45
+          ctx.beginPath()
+          ctx.moveTo(x2, y2)
+          ctx.lineTo(x2 - size * Math.cos(angle - spread), y2 - size * Math.sin(angle - spread))
+          ctx.moveTo(x2, y2)
+          ctx.lineTo(x2 - size * Math.cos(angle + spread), y2 - size * Math.sin(angle + spread))
+          ctx.stroke()
+        }
       }
       ctx.restore()
       return

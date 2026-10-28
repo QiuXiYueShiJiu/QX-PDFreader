@@ -6,8 +6,8 @@
  *
  * 判据（DOM 层，不依赖截图，隐藏窗口下也稳定）：
  *   ① 主题共 13 档（默认包 11 档 + Metro + 液态玻璃），面板里渲染出默认包的 11 个按钮
- *   ② 逐个切换：html[data-theme] 与 --bg 变量都跟着变
- *   ③ Metro 主题把圆角变量归零（直角是它的形态特征）
+ *   ② 逐个切换：html[data-theme] 与 --bg 凭据都跟着变
+ *   ③ Metro 主题把圆角凭据归零（直角是它的形态特征）
  *   ④ 深色类主题的 --text 比 --bg 亮；浅色类相反
  *   ⑤ 自定义背景图：设置绝对路径后 --reader-image 变成 pdf-file URL
  *   ⑥ 背景图真的能解码（<img> onload，宽度 > 0）
@@ -131,7 +131,7 @@ for (const t of themes) {
 const attrOk = seen.every((x) => x.attr === x.theme)
 check('② 每档 html[data-theme] 都写对', attrOk, seen.map((x) => x.attr).join(','))
 const distinct = new Set(seen.map((x) => x.bg)).size
-check('② 每档 --bg 变量互不相同', distinct === 13, `${distinct}/13 个不同底色`)
+check('② 每档 --bg 凭据互不相同', distinct === 13, `${distinct}/13 个不同底色`)
 const contrastOk = seen.every((x) => Math.abs(x.textLum - x.bgLum) > 40)
 check('④ 每档文字与底色对比足够', contrastOk, seen.map((x) => `${x.theme}:${Math.round(Math.abs(x.textLum - x.bgLum))}`).join(' '))
 const metro = seen.find((x) => x.theme === 'metro')

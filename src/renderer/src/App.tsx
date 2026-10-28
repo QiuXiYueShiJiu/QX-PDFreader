@@ -32,11 +32,14 @@ import { RecentFiles } from './components/RecentFiles'
 import { LeftRail } from './components/LeftRail'
 import { RightRail } from './components/RightRail'
 import { DrawToolbar } from './components/DrawToolbar'
+import { BottomDock } from './components/BottomDock'
 import { ToolsPanel } from './components/ToolsPanel'
 import { ScreenMask } from './components/ScreenMask'
-import { DisclaimerToast } from './components/DisclaimerToast'
 import { UpdateToast } from './components/UpdateToast'
 import { MarketPanel } from './components/MarketPanel'
+import { PluginStore } from './components/PluginStore'
+import { ComparePane } from './components/ComparePane'
+import { ImageToolsPanel } from './components/ImageToolsPanel'
 import { useDropZone } from './hooks/useDropZone'
 import { guardUnsaved, installCloseGuard, registerExporter } from './close-guard'
 
@@ -57,6 +60,9 @@ export default function App(): JSX.Element {
   const setError = useViewer((s) => s.setError)
   const openFile = useViewer((s) => s.openFile)
   const patchSettings = useViewer((s) => s.patchSettings)
+  /* ---------- 分屏对比 ---------- */
+  const compareOpen = useViewer((s) => s.compareOpen)
+
 
   /* ---------- 批注 ---------- */
   const annotations = useViewer((s) => s.annotations)
@@ -226,10 +232,16 @@ export default function App(): JSX.Element {
 
   /* ---------- 阅读区尺寸（用于计算自适应缩放） ---------- */
   const viewerRef = useRef<HTMLDivElement>(null)
+  /*
+   * 开分屏对比时，主窗格只占左半区，缩放要按**主窗格**的宽高算，
+   * 不能再用整个 app__viewer 的尺寸 —— 否则页面按全宽排版，
+   * 右边参考窗一开就被挤掉一半内容。
+   */
+  const mainRef = useRef<HTMLDivElement>(null)
   const [viewSize, setViewSize] = useState({ width: 0, height: 0 })
 
   useLayoutEffect(() => {
-    const el = viewerRef.current
+    const el = compareOpen ? mainRef.current : viewerRef.current
     if (!el) return
     const update = (): void => {
       const rect = el.getBoundingClientRect()
@@ -239,7 +251,7 @@ export default function App(): JSX.Element {
     const observer = new ResizeObserver(update)
     observer.observe(el)
     return () => observer.disconnect()
-  }, [showSidebar])
+  }, [showSidebar, compareOpen])
 
   /* ---------- 键盘快捷键 ---------- */
   useEffect(() => {
@@ -456,14 +468,32 @@ export default function App(): JSX.Element {
    *     facing-continuous  双栏滚动：左右成对 + 纵向铺开
    */
   const singlePage = viewMode === 'single'
+  /*
+   * 回滚用的「启动成功」信号（B13）。
+   * 主进程在进程起来时就把失败计数 +1，这里等文档真的渲染出来再清零 ——
+   * 只有「能进到界面并画出内容」才算这次启动是好的。
+   */
+  useEffect(() => {
+    if (!doc) return
+    void window.pdfApp.rollback.bootOk()
+  }, [doc])
   const facing = viewMode === 'facing' || viewMode === 'facing-continuous'
 
   return (
     <div className={`app ${dragging ? 'is-dragging' : ''}`}>
       <TitleBar subtitle={fileName || undefined} />
       <TabBar />
+      {/*
+        工具条挂载顺序（2026-10-27 定稿）：
+          · <Toolbar /> 是空占位（返回 null），只为兼容旧调用；
+          · <DrawToolbar /> 是**上栏**：Office 式功能区，position: static、宽 100%，
+            只放文档级操作（漫游 / 插入 / 页面结构 / 撤销重做）；
+          · <BottomDock /> 是**下栏**：底部悬浮画笔条，放手上正在用的东西
+            （画笔 / 橡皮 / 调色盘 / 粗细 / 滑动清屏）。
+        用户明确要求过「画笔类在下栏悬浮、其余在上栏」，两条各司其职、不是重复。
+      */}
       <Toolbar />
-      <DrawToolbar zone="edit" />
+      <DrawToolbar />
 
       <div className="app__body">
         {/* 左侧竖排工具条：批注工具 */}
@@ -473,6 +503,14 @@ export default function App(): JSX.Element {
         {showSidebar ? <Sidebar doc={doc} width={210} /> : null}
 
         <div className="app__viewer" ref={viewerRef}>
+          {/*
+            分屏对比（2026-10-28，B12）：主窗格 + 右侧参考窗并排。
+            `.app__split` 只承担布局，DocumentView 拿到的宽高仍来自
+            viewSize（ResizeObserver 测的是 app__viewer），所以主窗格的
+            滚动与缩放行为一点没变。
+          */}
+          <div className="app__split" data-compare={compareOpen ? '1' : '0'}>
+          <div className="app__main" ref={mainRef}>
           {/* 手绘模式下的 PPT 式墨迹工具条，悬浮在阅读区底部 */}
           {doc && viewSize.width > 0 ? (
             <DocumentView
@@ -494,6 +532,9 @@ export default function App(): JSX.Element {
               onPick={() => void useViewer.getState().pickFile()}
             />
           )}
+          </div>
+            {compareOpen ? <ComparePane /> : null}
+          </div>
         </div>
 
         {/* 右侧竖排工具条：视图与页面控制 */}
@@ -502,9 +543,11 @@ export default function App(): JSX.Element {
 
       <StatusBar />
 
+      {/* 下栏：底部悬浮画笔条（画笔 / 橡皮 / 调色盘 / 粗细 / 清屏） */}
+      <BottomDock />
 
-      {/* 授课类工具：底部悬浮（颜色随主题） */}
-      <DrawToolbar zone="pen" />
+
+      
       {/*
         课堂辅助遮罩（黑屏 / 聚光灯 / 放大镜）。
         放在最外层、层级最高，因为它要盖住包括工具栏在内的一切 ——
@@ -513,11 +556,18 @@ export default function App(): JSX.Element {
       <ScreenMask />
 
       {/* 启动声明：右下角浮层，可见主题自适应，可勾选不再提示 */}
-      <DisclaimerToast />
 
       {/* 版本更新：右下角浮层，自动下载、下完再问装不装 */}
       <UpdateToast />
       <MarketPanel />
+      {/* 插件商店：右栏入口打开，与主题商店（设置→外观）分家 */}
+      <PluginStore />
+
+      {/*
+        图片工具（编辑 / 调色 / 滤镜 / 格式转换 / 批量压缩）。
+        自带右下角开关与右侧滑出抽屉，这里只挂载，不传 props。
+      */}
+      <ImageToolsPanel />
 
 
       {/*

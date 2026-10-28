@@ -78,11 +78,17 @@ const before = ev(`
 `)
 
 /* ---------------- ① 入口 ---------------- */
+/*
+ * 1.0.9.x 契约：单条功能区只渲染当前页签的按钮，「新建」在**文件**页里。
+ * 上一支脚本可能停在开始/工具/视图页，所以先点回文件页再找按钮。
+ */
+await click('[data-tb-id="ribbon-tab-file"]')
+await sleep(400)
 const entry = ev(`
   const b = document.querySelector('[data-tb-id="new-pdf"]')
-  return { found: !!b, label: b ? (b.textContent || '').trim() : '' }
+  return { found: !!b, label: b ? (b.textContent || '').trim() : '', tab: document.querySelector('.ribbon__tab.is-active')?.dataset.tbId ?? '' }
 `)
-check('① 工具栏有「新建」按钮', entry?.found === true, `文案「${entry?.label ?? ''}」`)
+check('① 功能区有「新建」按钮', entry?.found === true, `文案「${entry?.label ?? ''}」页签=${entry?.tab ?? ''}`)
 
 await click('[data-tb-id="new-pdf"]')
 await sleep(450)

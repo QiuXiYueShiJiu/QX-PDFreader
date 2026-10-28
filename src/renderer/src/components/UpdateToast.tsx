@@ -19,7 +19,7 @@ import { useViewer } from '../store'
  *   和启动声明同一个理由：更新不阻塞翻页/批注。用户正在讲题时弹个
  *   必须点掉的框很讨厌，右下角浮层不挡正文，也随时能关。
  *
- * 颜色取主题校验值（--surface/--text/--border/--muted/--accent），
+ * 颜色取主题变量（--surface/--text/--border/--muted/--accent），
  * 三套主题下自动适配，不单独维护配色。
  */
 export function UpdateToast(): JSX.Element | null {
@@ -116,7 +116,7 @@ export function UpdateToast(): JSX.Element | null {
             {updateInfo.source === 'github'
               ? '来自 GitHub'
               : updateInfo.source === 'special'
-                ? '来自静默部署服务器'
+                ? '来自部署服务器'
                 : '来自镜像站'}
           </span>
         ) : null}

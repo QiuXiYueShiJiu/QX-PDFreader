@@ -33,6 +33,15 @@ export const MIN_ITEM_SIZE = 8
 /** 拖拽绘制图形的最小有效尺寸：太小的一次抖动不该产生一条看不见的矩形 */
 export const MIN_SHAPE_SIZE = 4
 
+/**
+ * 直线/箭头外接框的最小厚度。
+ *
+ * 完全水平或垂直的线，外接框会退化成 0 厚度 —— 选中手柄挤成一条缝、
+ * 命中测试也点不中，用户会觉得"画完就没了"。撑到 6px 后视觉上看不出区别
+ * （线本身仍画在正确位置，端点靠 line 的归一化坐标还原）。
+ */
+export const MIN_LINE_THICKNESS = 6
+
 /** 图片放置时最多占页面宽/高的比例，避免一张桌面截图把整页盖住 */
 export const IMAGE_MAX_RATIO = 0.6
 
@@ -93,6 +102,23 @@ export function rectFromPoints(
 }
 
 /**
+ * 把矩形向四周撑到至少 min 厚（中心不动）。
+ *
+ * 只用于直线/箭头：它们的「外接框」只是选中与拖动用的热区，
+ * 撑开不影响线的实际位置（端点存的是归一化坐标）。
+ */
+export function padRect(rect: AnnotationRect, min: number): AnnotationRect {
+  const width = Math.max(min, rect.width)
+  const height = Math.max(min, rect.height)
+  return {
+    x: rect.x - (width - rect.width) / 2,
+    y: rect.y - (height - rect.height) / 2,
+    width,
+    height
+  }
+}
+
+/**
  * 四角缩放。
  *
  * 被拖的那个角跟手，**对角保持不动** —— 这是所有绘图软件的行为，
@@ -146,3 +172,39 @@ export function imageNaturalSize(src: string): Promise<{ width: number; height: 
 
 /** 小于一个中文字宽度的拖动视为"点选"，不产生位移批注（避免手抖改掉位置） */
 export const DRAG_THRESHOLD = 1.5
+
+/**
+ * 填充色的不透明度。
+ *
+ * 22% 是「一眼看出这块被圈住了」和「底下的字还读得清」之间的折中：
+ * 再淡就看不出来，再浓就变成遮罩。导出到 PDF 用同一个值，界面与成品一致。
+ */
+export const SHAPE_FILL_ALPHA = 0.22
+
+/** 虚线节拍（相对线宽的倍数）：3 实 2 虚，粗线也保持同样的疏密感 */
+export const DASH_ON = 3
+export const DASH_OFF = 2
+
+/**
+ * 把 `#rrggbb` 转成带透明度的 `rgba()`。
+ *
+ * 为什么不直接用 `#rrggbb33`：pdf-lib 与 part 的 fill 解析对 8 位十六进制支持
+ * 不一致，统一成 rgba 字符串后界面（CSS/SVG）与导出（pdf-lib）都能吃。
+ * 非 #rrggbb 的输入原样返回，避免把 rgba/色名改坏。
+ */
+export function withAlpha(color: string, alpha: number): string {
+  const m = /^#([0-9a-f]{6})$/i.exec(color.trim())
+  if (!m) return color
+  const n = parseInt(m[1], 16)
+  const r = (n >> 16) & 255
+  const g = (n >> 8) & 255
+  const b = n & 255
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+/** 虚线节拍换算成 SVG 的 strokeDasharray（页面坐标，跟线宽走） */
+export function dashArray(strokeWidth: number): string {
+  const sw = Math.max(1, strokeWidth)
+  return `${sw * DASH_ON} ${sw * DASH_OFF}`
+}
+

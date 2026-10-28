@@ -17,24 +17,19 @@
   flex-direction: column;
   align-items: center;
   /*
-   * ★ 2026-10-16 修「退出应用按钮显示不出来」：
+   * ★ 2026-10-28（需求清单 B4）：「永不滚动」。
    *
-   *   原来是 `justify-content: center` 且没有 overflow。右栏内容实测
-   *   ≈884px（5 组按钮 + 4 条分隔线 + gap + padding），而 1440×940 的
-   *   默认窗口可用高度只有 940-40(标题栏)-30(状态栏)=870px —— 一开始就
-   *   溢出 14px，居中后上下各裁一半，底部「退出应用」被切；
-   *   窗口再矮（一体机 150% 缩放时 CSS 视口高只有 ~680px）就整个裁没了。
-   *   裁切发生在祖先 `.app__body { overflow: hidden }`，不是被谁遮住。
+   *   2026-10-16 为了修「退出应用被裁」在这里加了 `overflow-y: auto` 兜底，
+   *   代价是一体机 150% 缩放（CSS 视口高约 680px）时右栏自己冒出滚动条，
+   *   用户必须先把这一栏滚到底才点得到设置 —— 实测被用户判为 bug。
    *
-   *   现在：`safe center` 让「装得下就居中、装不下就从顶部排」，
-   *   再加纵向滚动兜底 —— 任何窗口高度下最后一个按钮都点得到。
-   *   滚动条隐藏（宽度 0），因为这是一条 68px 宽的图标栏，
-   *   多一条滚动条会挤掉按钮宽度；触屏直接上下拖即可。
+   *   现在改成「按高度分档，越矮越紧」（见本文件末尾的 max-height 分档），
+   *   680px 以上保证全部按钮一屏摆得下；低于 680px 时翻页与缩放会由
+   *   RightRail.tsx 收进弹出面板，所以这里不需要滚动兜底。
+   *   把 overflow 设成 hidden 是为了任何意外都不会再出现第二条滚动条。
    */
   justify-content: safe center;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: none;
+  overflow: hidden;
   gap: 10px;
 
   /*
@@ -446,4 +441,121 @@
 @media (hover: none) and (pointer: coarse) {
   .statusbar__zoom-slider { width: 180px; height: 22px; }
   .statusbar__zoom-slider::-webkit-slider-thumb { width: 20px; height: 20px; margin-top: -8px; }
+}
+
+/* ============================================================
+ * 右栏高度分档（2026-10-28，需求清单 B4）
+ *
+ * 目标：任何窗口高度下右栏都**不出现滚动条**。
+ *   > 980px   图标 + 文字，按钮 60×56（触屏最舒服，默认值在文件开头）
+ *   980–860   缩到 56×50，间距与内边距同步收紧
+ *   860–680   只留图标（文字藏起来，靠 title 提示），按钮 44 高
+ *   < 680     翻页与缩放由 RightRail.tsx 收进弹出面板，这里只负责把剩下的组挤紧
+ *
+ * 为什么用 max-height 而不是 JS 量高度：分档改动的是纯视觉，交给 CSS 最稳，
+ * 窗口拖动时不会因为一帧延迟闪一下。只有「要不要少渲染两组 DOM」这一档
+ * 非得用 JS（见 RightRail.tsx 的 RAIL_TINY_HEIGHT = 680）。
+ * ============================================================ */
+
+@media (max-height: 980px) {
+  .rail { gap: 8px; padding: 10px 0; }
+  .rail-btn { width: 56px; height: 50px; }
+  .rail__divider { margin: 1px 0; }
+}
+
+@media (max-height: 860px) {
+  .rail { gap: 6px; padding: 8px 0; }
+  .rail-btn { width: 48px; height: 44px; gap: 0; }
+  .rail-btn__label { display: none; }
+  .rail__group { gap: 2px; }
+  .rail__divider { width: 24px; margin: 0; }
+  .rail__page,
+  .rail__scale { font-size: 10px; }
+}
+
+@media (max-height: 760px) {
+  .rail-btn { height: 40px; }
+  .rail { gap: 5px; padding: 6px 0; }
+  /* 极矮时状态栏仍然显示页码与缩放百分比，右栏这两处文字让位 */
+  .rail__page,
+  .rail__scale { display: none; }
+}
+
+/* 弹出面板里的页面/缩放数值要照常显示，否则「收进面板」等于把信息也收没了 */
+.rail-pop .rail__page,
+.rail-pop .rail__scale { display: inline; font-size: 12px; }
+
+/* ---------- 弹出面板：窗口太矮时收容翻页与缩放 ---------- */
+
+.rail-pop {
+  position: fixed;
+  right: calc(var(--rail-w) + 10px);
+  bottom: 56px;
+  z-index: 70;
+  width: 132px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+
+  background: rgb(var(--surface) / var(--panel-alpha, 1));
+  color: rgb(var(--text));
+  border: 1px solid rgb(var(--border));
+  border-radius: var(--radius);
+  box-shadow: var(--panel-shadow, 0 12px 28px rgb(0 0 0 / 0.18));
+  -webkit-backdrop-filter: blur(var(--glass-blur, 0px));
+  backdrop-filter: blur(var(--glass-blur, 0px));
+}
+
+.rail-pop__head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgb(var(--border));
+}
+
+.rail-pop__title {
+  font-size: 12px;
+  color: rgb(var(--muted));
+}
+
+.rail-pop__close {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  color: rgb(var(--muted));
+}
+
+.rail-pop__close:hover {
+  background: rgb(var(--text) / 0.08);
+  color: rgb(var(--text));
+}
+
+/* 面板里的按钮走横排，比竖排省高度 */
+.rail-pop .rail__group {
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+}
+
+.rail-pop .rail-btn {
+  width: 44px;
+  height: 40px;
+}
+
+.rail-pop .rail-btn__label {
+  display: block;
+  font-size: 9px;
+}
+
+.rail-pop .rail__divider {
+  width: 100%;
+  margin: 0;
 }

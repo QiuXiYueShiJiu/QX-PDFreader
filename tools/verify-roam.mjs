@@ -61,10 +61,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
  * 统一探针：工具条三个按钮 + store 状态 + 视口类名 + 滚动量。
  * 激活数/激活工具是从 DOM 里数出来的，不是从 store 推的 ——
  * 「界面上到底亮着几个、亮的是谁」才是用户看到的东西。
+ *
+ * 1.0.9.x 契约：画笔三件套在**单条功能区**的「开始」页里，
+ * data-tb-id 分别是 roam / pen / eraser（旧的 .drawbar__tool 已不存在）。
  */
+/* 漫游在上栏「插入」组里，画笔/橡皮在下栏悬浮条里（用户 2026-10-27 的分工），
+ * 所以两个容器都要找 —— 只查 .ribbon__body 会漏掉画笔与橡皮。 */
+const TOOL_SEL =
+  '.ribbon__body [data-tb-id="roam"], .dock [data-tb-id="pen"], .dock [data-tb-id="eraser"], .ribbon__body [data-tb-id="pen"]'
 const SNAP = `(() => {
-  const btns = Array.from(document.querySelectorAll('.drawbar__tool'))
+  const btns = Array.from(document.querySelectorAll('${TOOL_SEL}'))
   const info = btns.map((b) => ({
+    标识: b.dataset.tbId || '',
     文字: (b.textContent || '').trim(),
     名称: b.getAttribute('aria-label') || '',
     激活: b.classList.contains('is-active'),
@@ -76,9 +84,9 @@ const SNAP = `(() => {
   return JSON.stringify({
     工具: info,
     激活数: info.filter((i) => i.激活).length,
-    激活工具: info.filter((i) => i.激活).map((i) => i.名称 || i.文字).join('|'),
-    有退出绘画: /退出绘画/.test(document.querySelector('.drawbar')?.textContent || ''),
-    退出类数: document.querySelectorAll('.drawbar__exit').length,
+    激活工具: info.filter((i) => i.激活).map((i) => i.标识).join('|'),
+    有退出绘画: /退出绘画/.test(document.querySelector('.ribbon')?.textContent || ''),
+    退出类数: document.querySelectorAll('.drawbar__exit, [data-tb-id="exit-draw"]').length,
     drawMode: s.drawMode,
     eraserMode: s.eraserMode,
     视口类: sc ? sc.className : '',
@@ -89,11 +97,15 @@ const SNAP = `(() => {
 
 const snap = () => parseObj(cdp(SNAP))
 
-/** 点工具条上的某个工具（按 aria-label 找，找不到/禁用都返回原文） */
-function clickTool(name) {
+/**
+ * 点工具条上的某个工具。
+ *
+ * 按 data-tb-id 找，不按 aria-label —— 画笔激活后按钮文案会变成「绘画中」，
+ * 用文案找的话「再点一次画笔（不退出）」那一步永远 NOT_FOUND（这是假红）。
+ */
+function clickTool(id) {
   return cdp(`(() => {
-    const b = Array.from(document.querySelectorAll('.drawbar__tool'))
-      .find((x) => (x.getAttribute('aria-label') || '') === ${JSON.stringify(name)})
+    const b = document.querySelector('[data-tb-id="' + ${JSON.stringify(id)} + '"]')
     if (!b) return 'NOT_FOUND'
     if (b.disabled) return 'DISABLED'
     b.click()
@@ -173,6 +185,8 @@ console.log('=== 漫游工具验证 ===\n')
 
 /* ---------- 0. 复位：回到漫游 + 缩放 2 倍（保证有可滚动的余量）+ 造一条笔迹 ---------- */
 await cdp(`(async () => {
+  const tab = document.querySelector('[data-tb-id="ribbon-tab-home"]')
+  if (tab) tab.click()
   const s = window.__store.getState()
   s.setRoam()
   s.setZoom(2)
@@ -198,57 +212,57 @@ await sleep(200)
 console.log('① 工具条构成')
 let s = snap()
 const tools = s?.工具 ?? []
-const roam = tools.find((t) => t.名称 === '漫游')
+const roam = tools.find((t) => t.标识 === 'roam')
 check(!!roam, '存在「漫游」按钮')
 check(/lucide-hand/.test(roam?.图标 ?? ''), '漫游按钮图标是手形（lucide-hand）', roam?.图标 ?? '(无 svg)')
-check(tools.some((t) => t.名称 === '画笔'), '画笔按钮仍在')
-check(tools.some((t) => t.名称 === '橡皮'), '橡皮按钮仍在')
+check(tools.some((t) => t.标识 === 'pen'), '画笔按钮仍在')
+check(tools.some((t) => t.标识 === 'eraser'), '橡皮按钮仍在')
 check(s?.有退出绘画 === false, '不再有「退出绘画」按钮')
 check(s?.退出类数 === 0, '旧的 .drawbar__exit 节点已移除', `找到 ${s?.退出类数} 个`)
 
 /* ---------- ② 复位后恰好一个工具激活，且是漫游 ---------- */
 console.log('\n② 复位后的默认工具')
 check(s?.激活数 === 1, '恰好一个工具处于激活', `激活数=${s?.激活数}`)
-check(s?.激活工具 === '漫游', '默认激活的是漫游', `激活=${s?.激活工具}`)
+check(s?.激活工具 === 'roam', '默认激活的是漫游', `激活=${s?.激活工具}`)
 check(s?.drawMode === false && s?.eraserMode === false, 'store：既没在画也没在擦')
 check(/is-roaming/.test(s?.视口类 ?? ''), '视口带 is-roaming（抓手光标）')
 
 /* ---------- ③ 画笔：点一次进入，再点一次**不退出** ---------- */
 console.log('\n③ 画笔（再点不退出）')
-check(clickTool('画笔') === 'ok', '点「画笔」')
+check(clickTool('pen') === 'ok', '点「画笔」')
 await sleep(250)
 s = snap()
-check(s?.激活数 === 1 && s?.激活工具 === '画笔', '激活切到画笔', `激活=${s?.激活工具} 数=${s?.激活数}`)
+check(s?.激活数 === 1 && s?.激活工具 === 'pen', '激活切到画笔', `激活=${s?.激活工具} 数=${s?.激活数}`)
 check(s?.drawMode === true && s?.eraserMode === false, 'store：drawMode=true / eraserMode=false')
 check(/is-drawing/.test(s?.视口类 ?? '') && !/is-roaming/.test(s?.视口类 ?? ''), '视口切到 is-drawing')
 
-check(clickTool('画笔') === 'ok', '再点一次「画笔」')
+check(clickTool('pen') === 'ok', '再点一次「画笔」')
 await sleep(250)
 s = snap()
-check(s?.激活数 === 1 && s?.激活工具 === '画笔', '仍然停在画笔（不再退回谁都不激活）', `激活=${s?.激活工具} 数=${s?.激活数}`)
+check(s?.激活数 === 1 && s?.激活工具 === 'pen', '仍然停在画笔（不再退回谁都不激活）', `激活=${s?.激活工具} 数=${s?.激活数}`)
 check(s?.drawMode === true, 'store 仍是 drawMode=true')
 
 /* ---------- ④ 橡皮：同样点两次都停在橡皮 ---------- */
 console.log('\n④ 橡皮（再点不退出）')
-check(clickTool('橡皮') === 'ok', '点「橡皮」')
+check(clickTool('eraser') === 'ok', '点「橡皮」')
 await sleep(250)
 s = snap()
-check(s?.激活数 === 1 && s?.激活工具 === '橡皮', '激活切到橡皮', `激活=${s?.激活工具} 数=${s?.激活数}`)
+check(s?.激活数 === 1 && s?.激活工具 === 'eraser', '激活切到橡皮', `激活=${s?.激活工具} 数=${s?.激活数}`)
 check(s?.drawMode === true && s?.eraserMode === true, 'store：drawMode=true / eraserMode=true')
 check(/is-erasing/.test(s?.视口类 ?? ''), '视口切到 is-erasing')
 
-check(clickTool('橡皮') === 'ok', '再点一次「橡皮」')
+check(clickTool('eraser') === 'ok', '再点一次「橡皮」')
 await sleep(250)
 s = snap()
-check(s?.激活数 === 1 && s?.激活工具 === '橡皮', '仍然停在橡皮', `激活=${s?.激活工具} 数=${s?.激活数}`)
+check(s?.激活数 === 1 && s?.激活工具 === 'eraser', '仍然停在橡皮', `激活=${s?.激活工具} 数=${s?.激活数}`)
 check(s?.eraserMode === true, 'store 仍是 eraserMode=true')
 
 /* ---------- ⑤ 漫游：唯一的出口，两个开关一起清 ---------- */
 console.log('\n⑤ 漫游（出口）')
-check(clickTool('漫游') === 'ok', '点「漫游」')
+check(clickTool('roam') === 'ok', '点「漫游」')
 await sleep(250)
 s = snap()
-check(s?.激活数 === 1 && s?.激活工具 === '漫游', '激活切回漫游', `激活=${s?.激活工具} 数=${s?.激活数}`)
+check(s?.激活数 === 1 && s?.激活工具 === 'roam', '激活切回漫游', `激活=${s?.激活工具} 数=${s?.激活数}`)
 check(s?.drawMode === false && s?.eraserMode === false, 'store：两个开关一起清（不变式）')
 check(!/is-drawing|is-erasing/.test(s?.视口类 ?? ''), '视口退出绘画/橡皮类名')
 
@@ -314,26 +328,25 @@ if (!glyph.point) {
 
 /* ---------- ⑧ Esc 回到漫游 ---------- */
 console.log('\n⑧ Esc 回到漫游')
-check(clickTool('画笔') === 'ok', '先进入画笔')
+check(clickTool('pen') === 'ok', '先进入画笔')
 await sleep(200)
 await cdp(`(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return 'ok' })()`)
 await sleep(250)
 s = snap()
 check(s?.drawMode === false && s?.eraserMode === false, 'Esc 后 store 回到漫游态')
-check(s?.激活数 === 1 && s?.激活工具 === '漫游', 'Esc 后界面上亮的是漫游', `激活=${s?.激活工具} 数=${s?.激活数}`)
+check(s?.激活数 === 1 && s?.激活工具 === 'roam', 'Esc 后界面上亮的是漫游', `激活=${s?.激活工具} 数=${s?.激活数}`)
 
 /* ---------- ⑨ 不变式扫描：任何状态下都恰好一个激活 ---------- */
 console.log('\n⑨ 不变式（三选一，永远有且只有一个）')
 let invariantOk = true
 const seen = []
-for (const name of ['画笔', '橡皮', '漫游', '画笔', '漫游']) {
-  clickTool(name)
+for (const id of ['pen', 'eraser', 'roam', 'pen', 'roam']) {
+  clickTool(id)
   await sleep(180)
   const cur = snap()
-  seen.push(`${name}→${cur?.激活工具}(${cur?.激活数})`)
+  seen.push(`${id}→${cur?.激活工具}(${cur?.激活数})`)
   if (cur?.激活数 !== 1) invariantOk = false
-  const expect = name === '画笔' ? '画笔' : name === '橡皮' ? '橡皮' : '漫游'
-  if (cur?.激活工具 !== expect) invariantOk = false
+  if (cur?.激活工具 !== id) invariantOk = false
 }
 check(invariantOk, '连续切换 5 次，每次都恰好一个激活且与点击一致', seen.join(' '))
 

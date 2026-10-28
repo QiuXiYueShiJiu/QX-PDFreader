@@ -17,7 +17,13 @@
  */
 
 import type { Annotation, AnnotationRect } from '@shared/types'
-import { CORNERS, DEFAULT_FONT_SIZE, DEFAULT_STROKE_WIDTH, LINE_HEIGHT } from './edit-common'
+import {
+  CORNERS,
+  DEFAULT_FONT_SIZE,
+  DEFAULT_STROKE_WIDTH,
+  LINE_HEIGHT,
+  dashArray
+} from './edit-common'
 
 /** 拖动中物件的临时矩形（松手前不写 store，避免每帧一次批注更新） */
 export interface EditDraft {
@@ -28,10 +34,17 @@ export interface EditDraft {
 /** 拖拽绘制中的新图形预览 */
 export interface ShapeDraft {
   page: number
-  type: 'whiteout' | 'rect' | 'ellipse'
+  type: 'whiteout' | 'rect' | 'ellipse' | 'line' | 'arrow'
   rect: AnnotationRect
   color: string
   strokeWidth: number
+  /** 直线/箭头：起点与终点（页面坐标），预览与落库都用它算归一化端点 */
+  from?: { x: number; y: number }
+  to?: { x: number; y: number }
+  /** 填充色（矩形/椭圆）：rgba 串；不填表示只描边 */
+  fill?: string
+  /** 虚线描边：预览时就要看得出是虚线，不然落库前后观感不一样 */
+  dash?: boolean
 }
 
 /** 文本框的就地编辑态：id 为 null 表示新建（还没落库） */
@@ -179,7 +192,12 @@ export function EditLayer(props: EditLayerProps): JSX.Element {
             shapeDraft.type,
             shapeDraft.rect,
             shapeDraft.color,
-            shapeDraft.strokeWidth
+            shapeDraft.strokeWidth,
+            shapeDraft.from && shapeDraft.to
+              ? normalizeLine(shapeDraft.rect, shapeDraft.from, shapeDraft.to)
+              : undefined,
+            shapeDraft.fill,
+            shapeDraft.dash
           )}
         </div>
       ) : null}
@@ -204,7 +222,17 @@ function renderVisual(item: Annotation, scale: number): JSX.Element | null {
 
     case 'rect':
     case 'ellipse':
-      return renderShape(item.type, item.rects[0], item.color, item.strokeWidth ?? DEFAULT_STROKE_WIDTH)
+    case 'line':
+    case 'arrow':
+      return renderShape(
+        item.type,
+        item.rects[0],
+        item.color,
+        item.strokeWidth ?? DEFAULT_STROKE_WIDTH,
+        item.line,
+        item.fill,
+        item.dash
+      )
 
     case 'text':
       return (
@@ -238,17 +266,23 @@ function renderVisual(item: Annotation, scale: number): JSX.Element | null {
 }
 
 /**
- * 矩形/椭圆用 SVG 画。
+ * 矩形/椭圆/直线/箭头用 SVG 画。
  *
  * 关键点：`viewBox` 用**页面坐标**、元素尺寸用屏幕像素，
  * 于是 strokeWidth 直接写页面坐标下的线宽即可自动跟随缩放 ——
  * 线宽是"文档的一部分"（导出后也是这么粗），不该随缩放忽粗忽细。
+ *
+ * `line` 参数是归一化端点（0~1）；不传就按左上到右下画一条对角线，
+ * 这样老数据或异常值也能画出个像样的东西，而不是空白。
  */
 function renderShape(
-  type: 'whiteout' | 'rect' | 'ellipse',
+  type: 'whiteout' | 'rect' | 'ellipse' | 'line' | 'arrow',
   rect: AnnotationRect | undefined,
   color: string,
-  strokeWidth: number
+  strokeWidth: number,
+  line?: [number, number, number, number],
+  fill?: string,
+  dash?: boolean
 ): JSX.Element {
   if (!rect) return <span className="edit-visual edit-visual--whiteout" />
   if (type === 'whiteout') return <span className="edit-visual edit-visual--whiteout" />
@@ -256,6 +290,41 @@ function renderShape(
   const w = Math.max(1, rect.width)
   const h = Math.max(1, rect.height)
   const sw = Math.max(1, strokeWidth)
+  /* 空串是「取消填充」留下的痕迹：SVG 里 fill="" 属于非法值会被忽略，
+     结果退回默认黑色填充 —— 必须显式折成 none */
+  const fillPaint = fill && fill !== '' && fill !== 'none' ? fill : 'none'
+  /* 虚线只作用在描边上；箭头头部保持实线，否则小箭头会碎成点 */
+  const dashArr = dash ? dashArray(sw) : undefined
+
+  if (type === 'line' || type === 'arrow') {
+    const [nx1, ny1, nx2, ny2] = line ?? [0, 0, 1, 1]
+    const x1 = nx1 * w
+    const y1 = ny1 * h
+    const x2 = nx2 * w
+    const y2 = ny2 * h
+    return (
+      <svg
+        className="edit-visual edit-visual--shape edit-visual--line"
+        viewBox={`0 0 ${w} ${h}`}
+        preserveAspectRatio="none"
+        aria-hidden="true"
+      >
+        <line
+          x1={x1}
+          y1={y1}
+          x2={x2}
+          y2={y2}
+          stroke={color}
+          strokeWidth={sw}
+          strokeLinecap="round"
+          strokeDasharray={dashArr}
+        />
+        {type === 'arrow' ? (
+          <ArrowHead x1={x1} y1={y1} x2={x2} y2={y2} color={color} strokeWidth={sw} />
+        ) : null}
+      </svg>
+    )
+  }
 
   return (
     <svg
@@ -271,9 +340,10 @@ function renderShape(
           y={sw / 2}
           width={Math.max(0, w - sw)}
           height={Math.max(0, h - sw)}
-          fill="none"
+          fill={fillPaint}
           stroke={color}
           strokeWidth={sw}
+          strokeDasharray={dashArr}
         />
       ) : (
         <ellipse
@@ -281,11 +351,49 @@ function renderShape(
           cy={h / 2}
           rx={Math.max(0.5, w / 2 - sw / 2)}
           ry={Math.max(0.5, h / 2 - sw / 2)}
-          fill="none"
+          fill={fillPaint}
           stroke={color}
           strokeWidth={sw}
+          strokeDasharray={dashArr}
         />
       )}
     </svg>
   )
+}
+
+/** 箭头头部：两条与主干成 25° 的短线，长度随总线长收敛（短线不戴大帽子） */
+function ArrowHead(props: {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  color: string
+  strokeWidth: number
+}): JSX.Element {
+  const { x1, y1, x2, y2, color, strokeWidth } = props
+  const len = Math.hypot(x2 - x1, y2 - y1)
+  const size = Math.min(Math.max(8, strokeWidth * 4), Math.max(8, len * 0.4))
+  const angle = Math.atan2(y2 - y1, x2 - x1)
+  const spread = 0.45 // ≈ 26°
+  const p1x = x2 - size * Math.cos(angle - spread)
+  const p1y = y2 - size * Math.sin(angle - spread)
+  const p2x = x2 - size * Math.cos(angle + spread)
+  const p2y = y2 - size * Math.sin(angle + spread)
+  return (
+    <g stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" fill="none">
+      <line x1={x2} y1={y2} x2={p1x} y2={p1y} />
+      <line x1={x2} y1={y2} x2={p2x} y2={p2y} />
+    </g>
+  )
+}
+
+/** 把两个页面坐标点换算成「相对外接框」的 0~1 端点 */
+export function normalizeLine(
+  rect: AnnotationRect,
+  from: { x: number; y: number },
+  to: { x: number; y: number }
+): [number, number, number, number] {
+  const w = Math.max(1, rect.width)
+  const h = Math.max(1, rect.height)
+  return [(from.x - rect.x) / w, (from.y - rect.y) / h, (to.x - rect.x) / w, (to.y - rect.y) / h]
 }

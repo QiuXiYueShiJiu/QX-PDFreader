@@ -47,6 +47,102 @@ import type {
   SaveBinaryPayload,
   SignPayload
 } from '@shared/pdf-advanced'
+/*
+ * 图片工具的载荷类型 —— **就地声明**，不从 ../main/image-tools import。
+ *
+ * 原因：渲染层的 env.d.ts 有 `import type { OpenPayload } from '../../preload/index'`，
+ * 于是 tsconfig.web 会顺着 preload 把 main/** 也拉进项目，触发 TS6307
+ * （main 不在 web 的 include 里）。preload 只负责转发，用结构相同的
+ * 本地类型即可；真正的参数校验一律在主进程（image-tools.ts）里做。
+ */
+
+/** 图片工具支持的输出格式 */
+export type ImageOutputFormat = 'png' | 'jpg' | 'webp' | 'bmp'
+
+/** 打开图片后记下的「临时 PDF ← 原图」信息 */
+export interface ImageOpenMeta {
+  sourcePath: string
+  originalName: string
+  tempPath: string
+  isImage: true
+  format: string
+  formatLabel: string
+  width: number
+  height: number
+  bytes: number
+  openedAt: number
+}
+
+/** 直接读一张图片时返回的信息 */
+export interface ImageFileMeta {
+  sourcePath: string
+  originalName: string
+  isImage: true
+  format: string
+  formatLabel: string
+  width: number
+  height: number
+  bytes: number
+  mtimeMs: number
+}
+
+export interface ImageReadResult {
+  ok: boolean
+  dataUrl?: string
+  converted?: boolean
+  meta?: ImageFileMeta
+  error?: string
+}
+
+/** 图片元数据查询结果（临时 PDF 路径命中时为 ImageOpenMeta） */
+export interface ImageMetaResult {
+  ok: boolean
+  meta?: ImageOpenMeta | ImageFileMeta | null
+  error?: string
+}
+
+export interface ImagePickResult {
+  ok: boolean
+  canceled?: boolean
+  files: string[]
+  error?: string
+}
+
+export interface ImagePickFolderResult {
+  ok: boolean
+  canceled?: boolean
+  directory?: string
+  error?: string
+}
+
+export interface ImageSaveRequest {
+  sourcePath: string
+  /** 已编码好的图片字节；BMP 可以不传，改传 rgba */
+  bytes?: Uint8Array
+  /** 原始 RGBA（canvas.getImageData），只有 BMP 用 */
+  rgba?: { bytes: Uint8Array; width: number; height: number }
+  format: ImageOutputFormat
+  mode: 'dialog' | 'overwrite' | 'directory'
+  fileName?: string
+  directory?: string
+  targetPath?: string
+}
+
+export interface ImageSaveResult {
+  ok: boolean
+  path?: string
+  dir?: string
+  backup?: string
+  bytes?: number
+  canceled?: boolean
+  error?: string
+}
+
+/** 选图对话框参数 */
+export interface ImagePickOptions {
+  multi?: boolean
+  title?: string
+}
 
 function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   return ipcRenderer.invoke(channel, ...args) as Promise<T>
@@ -66,7 +162,7 @@ export interface UpdateAsset {
   url: string
   /** 静默部署版清单里的校验值 */
   sha256?: string
-  /** 静默部署版下载要带的校验值 */
+  /** 静默部署版下载要带的变量 */
   token?: string
   /** 来源通道（github / mirror / special） */
   source?: string
@@ -121,6 +217,29 @@ const api = {
       landscape: boolean
       background: string
     }): Promise<OpenResult & { blank?: boolean; pages?: number }> => invoke('pdf:create-blank', spec)
+  },
+
+  /* ---------- 页面结构编辑（插入空白页 / 删除本页） ---------- */
+  pages: {
+    /**
+     * 在第 index 页（0 起始）之前插入一张空白页，尺寸跟随上一页。
+     *
+     * 主进程把它写到 userData/pages/ 下的工作副本里再返回副本路径，
+     * 渲染层拿到路径后重开这个副本 —— 原文件一个字节都不动。
+     */
+    insertBlank: (filePath: string, index: number) =>
+      invoke<{ ok: true; path: string; pages: number; index: number } | { ok: false; error: string }>(
+        'pdf:page-insert-blank',
+        filePath,
+        index
+      ),
+    /** 删除第 index 页（0 起始）；只剩一页时主进程会拒绝。 */
+    remove: (filePath: string, index: number) =>
+      invoke<{ ok: true; path: string; pages: number; index: number } | { ok: false; error: string }>(
+        'pdf:page-delete',
+        filePath,
+        index
+      )
   },
 
   /* ---------- 设置 ---------- */
@@ -341,11 +460,59 @@ const api = {
    */
   /** 插件市场：清单来自镜像站，主题包由渲染层落到 settings.customThemes */
   market: {
-    list: () => invoke<{ ok: boolean; items: unknown[]; at?: number; error?: string }>('market:list'),
+    /** prefer：'github'（默认）或 'mirror'，决定先问哪个源；失败会退到另一个 */
+    list: (prefer?: 'github' | 'mirror') =>
+      invoke<{ ok: boolean; items: unknown[]; at?: number; error?: string }>('market:list', prefer),
     /** 仅 --test-hooks 生效：替换市场源（离线测试用） */
     setSources: (list: { name: string; url: string }[]) => invoke<boolean>('market:set-sources', list),
     /** 清掉 10 分钟清单缓存 */
     clearCache: () => invoke<boolean>('market:clear-cache')
+  },
+
+  /* ---------- 更新回滚（2.0.0） ---------- */
+  rollback: {
+    /** 还留着的旧安装包（最多三份） */
+    list: () => invoke<{ version: string; path: string; size: number; savedAt: string }[]>('rollback:list'),
+    /** 回滚到指定版本：静默装旧包并退出当前进程 */
+    apply: (version: string) => invoke<{ ok: boolean; error?: string }>('rollback:apply', version),
+    /** 渲染层画出来了 → 启动失败计数清零 */
+    bootOk: () => invoke<boolean>('rollback:boot-ok'),
+    /** 当前连续失败次数（诊断用） */
+    failures: () => invoke<number>('rollback:failures')
+  },
+
+  plugins: {
+    /** 商店清单（独立插件库，github 默认 / mirror 兜底） */
+    index: (prefer?: 'github' | 'mirror') =>
+      invoke<{ ok: boolean; items: unknown[]; source?: string; error?: string }>('plugin:index', prefer),
+    /** 从商店装：下载 + 校验 sha256 + 安装 */
+    installUrl: (url: string, sha256?: string) =>
+      invoke<{ ok: boolean; error?: string; verified?: boolean }>('plugin:install-url', url, sha256),
+    /** 已安装列表（含启用状态与加载错误） */
+    list: () => invoke<unknown[]>('plugin:list'),
+    /** 插件注册的命令，上栏「工具 → 插件」组用它渲染 */
+    commands: () => invoke<{ id: string; label: string; pluginId: string }[]>('plugin:commands'),
+    /** 执行一条命令；失败时主进程已弹过「禁用 / 重试」对话框 */
+    run: (commandId: string) => invoke<{ ok: boolean; error?: string }>('plugin:run', commandId),
+    /** 弹文件选择框装 .qxplugin */
+    install: () => invoke<{ ok: boolean; canceled?: boolean; error?: string }>('plugin:install'),
+    /** 不弹框、直接装指定路径（验证脚本用） */
+    installPath: (archivePath: string) =>
+      invoke<{ ok: boolean; error?: string }>('plugin:install-path', archivePath),
+    uninstall: (pluginId: string) =>
+      invoke<{ ok: boolean; error?: string }>('plugin:uninstall', pluginId),
+    setEnabled: (pluginId: string, enabled: boolean) =>
+      invoke<{ ok: boolean }>('plugin:set-enabled', pluginId, enabled),
+    /** 打开插件目录，方便用户手动放包 */
+    openFolder: () => invoke<string>('plugin:open-folder'),
+    /** 渲染层把当前页文本推给宿主，插件通过 api.document 读 */
+    setDocument: (path: string, text: string) => invoke<boolean>('plugin:set-document', path, text),
+    /** 安装完成后主进程会主动推一次新列表 */
+    onChanged: (cb: (list: unknown[]) => void) => {
+      const handler = (_e: unknown, list: unknown[]): void => cb(list)
+      ipcRenderer.on('plugin:changed', handler)
+      return () => ipcRenderer.removeListener('plugin:changed', handler)
+    }
   },
 
   update: {
@@ -415,9 +582,17 @@ const api = {
     saveBinary: (payload: SaveBinaryPayload) => invoke<ToolResult>('adv:save-binary', payload),
     batch: (payload: BatchPayload) => invoke<ToolResult>('adv:batch', payload),
     pickFiles: () => invoke<string[]>('adv:pick-files')
+  },
+
+  /* ---------- 图片工具 ---------- */
+  image: {
+    read: (filePath: string) => invoke<ImageReadResult>('img:read', filePath),
+    meta: (filePath: string) => invoke<ImageMetaResult>('img:meta', filePath),
+    pick: (options?: ImagePickOptions) => invoke<ImagePickResult>('img:pick', options ?? {}),
+    pickFolder: () => invoke<ImagePickFolderResult>('img:pick-folder'),
+    save: (payload: ImageSaveRequest) => invoke<ImageSaveResult>('img:save', payload)
   }
 }
-
 contextBridge.exposeInMainWorld('pdfApp', api)
 
 export type PdfAppApi = typeof api

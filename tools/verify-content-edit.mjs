@@ -173,7 +173,12 @@ const PROBE = `JSON.stringify((() => {
   const tLayer = document.querySelector('.textLayer');
   const ta = document.querySelector('textarea.edit-textarea');
   const pressed = (label) => {
-    const b = document.querySelector('.drawbar button[aria-label=' + JSON.stringify(label) + ']');
+    /*
+     * 2026-10-27：漫游在上栏「插入」组、画笔与橡皮在下栏悬浮条，
+     * 所以不能只查 .ribbon —— 两个容器一起找。
+     */
+    const id = label === '漫游' ? 'roam' : label === '画笔' ? 'pen' : label === '橡皮' ? 'eraser' : label;
+    const b = document.querySelector('.ribbon [data-tb-id="' + id + '"], .dock [data-tb-id="' + id + '"]');
     return b ? b.getAttribute('aria-pressed') : null;
   };
   return {
@@ -306,16 +311,26 @@ check(
 
 // 工具条可以被用户/上一支脚本收起来（收起后整条 bar 换成一个小圆钮，
 // 下面所有 [data-tb-id="edit-*"] 都会「找不到元素」）。先展开再测。
-if (await evaluate(`!!document.querySelector('.drawbar button[aria-label="展开批注工具条"]')`)) {
-  console.log('  注：批注工具条当前是收起态，先点「展开批注工具条」')
-  await clickSelector('.drawbar button[aria-label="展开批注工具条"]')
+if (await evaluate(`!!document.querySelector('[data-tb-id="ribbon-expand"]')`)) {
+  console.log('  注：功能区当前是收起态，先点「展开工具条」')
+  await clickSelector('[data-tb-id="ribbon-expand"]')
   await sleep(500)
 }
+
+// 1.0.9.x：单条功能区只渲染当前页签的按钮，工具按钮在「开始」页 → 先点回开始页
+const ensureHomeTab = async () => {
+  const active = await evaluate(`(document.querySelector('.ribbon__tab.is-active')?.dataset.tbId) || ''`)
+  if (active !== 'ribbon-tab-home') {
+    await clickSelector('[data-tb-id="ribbon-tab-home"]')
+    await sleep(350)
+  }
+}
+await ensureHomeTab()
 
 if (before0.editTool !== 'none') {
   // 上一支脚本（或上一次中断的运行）把它留在编辑态了：先点「漫游」归位再断言。
   console.log(`  注：进来时 editTool=${before0.editTool}（上一支脚本留下的），先点「漫游」归位`)
-  await clickSelector('.drawbar button[aria-label="漫游"]')
+  await clickSelector('.ribbon [data-tb-id="roam"]')
   await waitFor(`window.__store.getState().editTool === 'none'`, 4000)
 }
 const s1 = await readEdit()
@@ -543,7 +558,8 @@ check(
 
 /* ── 断言 8：点「漫游」→ 编辑样式全消失 ─────────────────────── */
 
-const roamClick = await clickSelector('.drawbar button[aria-label="漫游"]')
+await ensureHomeTab()
+const roamClick = await clickSelector('.ribbon [data-tb-id="roam"]')
 const backRoam = await waitFor(
   `window.__store.getState().editTool === 'none' && !document.querySelector('.viewer-scroll.is-edit-tool')`,
   5000
@@ -622,7 +638,8 @@ for (let i = 0; i < 12; i += 1) {
  * 它不参与任何一条断言，也不会让上面的检查变绿。
  */
 await evaluate(`window.__store.getState().markExported()`)
-await clickSelector('.drawbar button[aria-label="漫游"]')
+await ensureHomeTab()
+await clickSelector('.ribbon [data-tb-id="roam"]')
 await waitFor(`window.__store.getState().editTool === 'none'`, 4000)
 const s10 = await readEdit()
 check(

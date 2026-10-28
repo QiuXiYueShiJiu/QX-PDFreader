@@ -302,81 +302,31 @@ const rail = await json(`(() => {
 })()`)
 check(!rail.hasFullscreen, '右侧栏没有「全屏」按钮（v2.1.3 起彻底移除）', `右侧 ${rail.count} 个按钮：${rail.labels.join('/')}`)
 
-/* ---------- ⑨ 启动声明浮层（右下角 / 三行文案 / × 与「不再提示」） ---------- */
-const showToast = async () => {
-  await json(`(() => {
-    window.__store.setState({ disclaimerDismissed: false })
-    void window.__store.getState().patchSettings({ disclaimerHidden: false })
-    return true
-  })()`)
-  await sleep(450)
-}
-
-await showToast()
+/* ---------- ⑨ 启动声明浮层已按用户要求下线（2026-10-26） ---------- */
+/*
+ * 用户口径（1.0.9.x）：「布局只留 office 式…不需要声明」。
+ * 右下角的启动声明浮层已经从产品里删掉，这里改成**反向断言** ——
+ * 浮层不许再回来，也不许有残留的 × / 「不再提示」按钮。
+ * （原来那 6 条正向断言就是在测试一个已经被删掉的功能，全是假红。）
+ */
+await json(`(() => {
+  window.__store.setState({ disclaimerDismissed: false })
+  void window.__store.getState().patchSettings({ disclaimerHidden: false })
+  return true
+})()`)
+await sleep(450)
 const dis = await json(`(() => {
   const el = document.querySelector('[data-disclaimer="1"]')
-  const cs = el ? getComputedStyle(el) : null
   return {
     present: !!el,
-    text: el ? (el.textContent || '').replace(/\\s+/g, ' ').trim() : '',
     hasClose: !!document.querySelector('[data-tb-id="disclaimer-close"]'),
     hasMute: !!document.querySelector('[data-tb-id="disclaimer-mute"]'),
-    zIndex: cs ? cs.zIndex : '',
-    radius: cs ? cs.borderTopLeftRadius : '',
-    right: cs ? cs.right : '',
-    bottom: cs ? cs.bottom : ''
+    anyText: /本软件免费提供|早期版本|报告给开发者/.test(document.body.textContent || '')
   }
 })()`)
-check(dis.present, '启动声明浮层出现在右下角', dis.present ? `right=${dis.right} bottom=${dis.bottom} z=${dis.zIndex}` : '未出现')
-check(
-  /本软件免费提供/.test(dis.text) && /早期版本/.test(dis.text) && /报告给开发者/.test(dis.text),
-  '声明三行文案齐全（免费 / 早期版本 / 反馈）',
-  dis.text.slice(0, 60)
-)
-check(dis.hasClose && dis.hasMute, '有 × 关闭按钮与「知道了，不再提示」勾选框', `×=${dis.hasClose} 勾选=${dis.hasMute}`)
-check(parseFloat(dis.radius) >= 10, '浮层是圆角（≥10px）', `radius=${dis.radius}`)
-
-// ① 只点 ×：本次消失，但不写持久化开关
-const onceClose = await json(`(async () => {
-  document.querySelector('[data-tb-id="disclaimer-close"]')?.click()
-  await new Promise((r) => setTimeout(r, 320))
-  return {
-    gone: !document.querySelector('[data-disclaimer="1"]'),
-    hidden: window.__store.getState().settings.disclaimerHidden,
-    dismissed: window.__store.getState().disclaimerDismissed
-  }
-})()`)
-check(
-  onceClose.gone && onceClose.dismissed && !onceClose.hidden,
-  '点 × 只关本次、不写「不再提示」',
-  `gone=${onceClose.gone} dismissed=${onceClose.dismissed} hidden=${onceClose.hidden}`
-)
-
-// ② 勾「不再提示」再关：写进设置（持久化）
-await showToast()
-const mutedClose = await json(`(async () => {
-  document.querySelector('[data-tb-id="disclaimer-mute"]')?.click()
-  await new Promise((r) => setTimeout(r, 120))
-  document.querySelector('[data-tb-id="disclaimer-close"]')?.click()
-  await new Promise((r) => setTimeout(r, 380))
-  return {
-    gone: !document.querySelector('[data-disclaimer="1"]'),
-    hidden: window.__store.getState().settings.disclaimerHidden
-  }
-})()`)
-check(
-  mutedClose.gone && mutedClose.hidden,
-  '勾「不再提示」后关闭会持久化到设置',
-  `gone=${mutedClose.gone} hidden=${mutedClose.hidden}`
-)
-
-// ③ 已持久化时不再出现
-await json(`(async () => { await window.__store.getState().patchSettings({ disclaimerHidden: true }); return true })()`)
-await sleep(250)
-const afterPersist = await json(
-  `(!document.querySelector('[data-disclaimer="1"]'))`
-)
-check(afterPersist === true, '持久化后重启不再出现（设置生效）', `present=${!afterPersist}`)
+check(!dis.present, '启动声明浮层已下线（不再出现在右下角）', dis.present ? '仍然存在' : '无 [data-disclaimer]')
+check(!dis.hasClose && !dis.hasMute, '没有残留的 × / 「不再提示」按钮', `×=${dis.hasClose} 勾选=${dis.hasMute}`)
+check(!dis.anyText, '界面上没有声明文案残留', dis.anyText ? '仍有「本软件免费提供/早期版本」字样' : '')
 
 /* ---------- 收尾：恢复干净状态 ---------- */
 await json(`(() => {
@@ -386,9 +336,6 @@ await json(`(() => {
   s.setZoom('fit-width')
   s.clearAnnotations()
   s.patchSettings({ theme: 'light' })
-  // 声明要在下次真的启动时出现，用例不能把「不再提示」留给用户
-  window.__store.setState({ disclaimerDismissed: false })
-  void s.patchSettings({ disclaimerHidden: false })
   return true
 })()`)
 

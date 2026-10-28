@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
  * Copyright 2026 秋夕月拾旧
  *
- * 插件市场浮层。配色全部走主题校验值，切主题时自动跟着变。
+ * 插件市场浮层。配色全部走主题变量，切主题时自动跟着变。
  */
 
 .market {
@@ -75,6 +75,37 @@
 .market__ghost:hover {
   border-color: rgb(var(--accent));
   color: rgb(var(--accent));
+}
+
+/*
+ * 清单来源开关（GitHub / 镜像）。
+ * 两个按钮拼成一段，中间不重复描边；激活项用强调色填充 ——
+ * 与设置页的分段控件同一套观感，用户不用重新学。
+ */
+.market__source {
+  display: inline-flex;
+  gap: 0;
+  margin-right: 4px;
+  border: 1px solid rgb(var(--border));
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.market__source .market__ghost {
+  border: 0;
+  border-radius: 0;
+  height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.market__source .market__ghost + .market__ghost {
+  border-left: 1px solid rgb(var(--border));
+}
+
+.market__source .market__ghost.is-active {
+  background: rgb(var(--accent));
+  color: #fff;
 }
 
 .market__note {

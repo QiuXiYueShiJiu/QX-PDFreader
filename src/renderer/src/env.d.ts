@@ -67,6 +67,17 @@ export interface PdfAppApi {
       background: string
     }) => Promise<OpenResult & { blank?: boolean; pages?: number }>
   }
+  /** 页面结构编辑：插入空白页 / 删除本页（改的是工作副本，原文件不动） */
+  pages: {
+    insertBlank: (
+      filePath: string,
+      index: number
+    ) => Promise<{ ok: true; path: string; pages: number; index: number } | { ok: false; error: string }>
+    remove: (
+      filePath: string,
+      index: number
+    ) => Promise<{ ok: true; path: string; pages: number; index: number } | { ok: false; error: string }>
+  }
   settings: {
     get: () => Promise<ReaderSettings>
     patch: (patch: Partial<ReaderSettings>) => Promise<ReaderSettings>
@@ -224,9 +235,42 @@ export interface PdfAppApi {
    *   与 preload 的 `update` 字段一一对应，改一边记得同步另一边。
    */
   market: {
-    list: () => Promise<{ ok: boolean; items: unknown[]; at?: number; error?: string }>
+    /** prefer：'github'（默认）或 'mirror'，决定先问哪个源；失败会退到另一个 */
+    list: (prefer?: 'github' | 'mirror') => Promise<{ ok: boolean; items: unknown[]; at?: number; error?: string }>
     setSources: (list: { name: string; url: string }[]) => Promise<boolean>
     clearCache: () => Promise<boolean>
+  }
+  rollback: {
+    list: () => Promise<{ version: string; path: string; size: number; savedAt: string }[]>
+    apply: (version: string) => Promise<{ ok: boolean; error?: string }>
+    bootOk: () => Promise<boolean>
+    failures: () => Promise<number>
+  }
+  plugins: {
+    index: (prefer?: 'github' | 'mirror') => Promise<{ ok: boolean; items: unknown[]; source?: string; error?: string }>
+    installUrl: (url: string, sha256?: string) => Promise<{ ok: boolean; error?: string; verified?: boolean }>
+    list: () => Promise<
+      {
+        id: string
+        name: string
+        version: string
+        author: string
+        description: string
+        permissions: string[]
+        enabled: boolean
+        dir: string
+        error?: string
+      }[]
+    >
+    commands: () => Promise<{ id: string; label: string; pluginId: string }[]>
+    run: (commandId: string) => Promise<{ ok: boolean; error?: string }>
+    install: () => Promise<{ ok: boolean; canceled?: boolean; error?: string }>
+    installPath: (archivePath: string) => Promise<{ ok: boolean; error?: string }>
+    uninstall: (pluginId: string) => Promise<{ ok: boolean; error?: string }>
+    setEnabled: (pluginId: string, enabled: boolean) => Promise<{ ok: boolean }>
+    openFolder: () => Promise<string>
+    setDocument: (path: string, text: string) => Promise<boolean>
+    onChanged: (cb: (list: unknown[]) => void) => () => void
   }
   update: {
     check: () => Promise<UpdateInfoLike>

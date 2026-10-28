@@ -1,17 +1,31 @@
 /**
- * 液态玻璃主题包（theme = 'glass'）。
+ * 液态玻璃主题包。
  *
- * 设计意图（用户 2026-10-23 要求「液态玻璃 + 圆角设计 + 每个主题包可设置」）：
- *   · 半透明磨砂面板：底下一层柔和彩色光斑，界面元素是浮在上面的玻璃片；
- *   · 圆角由 `--glass-radius` 统一驱动，设置里的滑块直接改它；
- *   · 模糊强度由 `--glass-blur` 驱动，0 就是纯半透明、越大越糊。
+ * 用户的要求是「液态玻璃 + 圆角设计 + 每个主题包可设置」，所以这一套不是
+ * 换几个颜色，而是**一整套可感知的形态**：
  *
- * 为什么不写进 base.css：8 个内置主题只换颜色校验值，而这一套要额外覆盖
- * 组件的背景/边框/阴影，单独一个文件更清楚，也方便以后整包下线。
+ *   · 面板是半透明玻璃：底色取当前配色的 --surface，按 --panel-alpha 调透明度，
+ *     背后用 backdrop-filter 糊一层 —— 换任何一档配色都还是玻璃；
+ *   · 厚度靠两道光：顶部 1px 白高光 + 底部 1px 暗边，再加面板角上一枚
+ *     跟着强调色走的极淡径向光斑，玻璃才「立」得起来；
+ *   · 圆角由 --radius 驱动（默认 22px），模糊由 --glass-blur 驱动
+ *     （默认 18px，0 = 纯半透明、越大越糊），都由设置页的滑块实时改；
+ *   · 页面四周留出 --glass-gap（默认 10px）的「玻璃缝隙」，让背后的光斑透出来
+ *     —— 没有缝隙的话，一整屏玻璃和一张不透明的图没区别。
  *
- * 变量由 store.ts 的 applyTheme() 写成行内变量（跟随设置实时变化），
- * 这里的 `:root` 值只是兜底，保证行内变量还没写上时也有像样的观感。
+ * ★ 作用域是 html[data-pack='glass']，**不是** html[data-theme='glass']。
+ *
+ *   `data-pack` 是主题包（形态），`data-theme` 是配色（13 档）。把形态挂在
+ *   包上，液态玻璃就不再只对 glass 那一档配色生效：切到深色 / 米色 / 护眼绿，
+ *   面板照样半透明、照样透出背景，只是颜色跟着那一档走。这正是
+ *   「13 档配色在 glass 包下也能透出背景」的实现方式。
+ *
+ * 变量兜底都在 base.css 的 :root 里（--panel-alpha / --panel-shadow /
+ * --panel-highlight / --panel-edge / --glass-blur / --glass-gap），这里不重复定义，
+ * 避免两处口径打架。
  */
+
+/* ---------------- 配色：glass 这一档自己的颜色 ---------------- */
 
 html[data-theme='glass'] {
   /* 冷调淡蓝，比浅色主题更「清透」，但对比度仍满足投影阅读 */
@@ -24,137 +38,103 @@ html[data-theme='glass'] {
   --accent: 84 126 255;
   --reader-bg: 240 245 253;
 
-  /* 圆角校验值整体跟着玻璃半径走：磁贴/卡片/输入框保持同一套比例 */
-  --radius: var(--glass-radius);
-  --radius-sm: calc(var(--glass-radius) * 0.55);
-  --radius-lg: calc(var(--glass-radius) * 1.5);
-
   color-scheme: light;
 }
 
-/* 兜底值；applyTheme() 会用行内变量覆盖 */
-html[data-theme='glass'] {
-  --glass-radius: 14px;
-  --glass-blur: 12px;
-}
+/* ---------------- 背景：三团柔光 + 玻璃缝隙 ---------------- */
 
 /*
- * 背景：三团柔光 + 底色。
- * 光斑必须落在 `.app` 自己身上（它是 fixed 全屏层），
- * 放 body 会被 `.app` 的不透明底色盖掉。
+ * 光斑落在 `.app` 自己身上（它是整屏层），放 body 会被 `.app` 的底色盖掉。
+ * 颜色取强调色而不是写死蓝紫：用户换了强调色，背景的柔光跟着一起换，
+ * 「一整套视觉」才成立。
  */
-html[data-theme='glass'] .app {
+html[data-pack='glass'] .app {
+  /*
+   * 玻璃缝隙：四周各留 --glass-gap（默认 10px）。
+   * 因为背景画在 .app 自己身上，padding 区域露出来的就是那层光斑背景，
+   * 于是外壳（标题栏 / 工具栏 / 状态栏）看起来是浮在背景上的一块玻璃。
+   */
+  padding: var(--glass-gap);
   background:
-    radial-gradient(1100px 620px at 10% -12%, rgb(140 175 255 / 0.55), transparent 62%),
-    radial-gradient(880px 520px at 92% -4%, rgb(255 186 216 / 0.5), transparent 58%),
-    radial-gradient(760px 520px at 62% 112%, rgb(150 232 214 / 0.45), transparent 60%),
+    radial-gradient(1100px 620px at 10% -12%, rgb(var(--accent) / 0.28), transparent 62%),
+    radial-gradient(880px 520px at 92% -4%, rgb(var(--accent) / 0.16), transparent 58%),
+    radial-gradient(760px 520px at 62% 112%, rgb(var(--accent) / 0.14), transparent 60%),
     rgb(var(--bg));
 }
 
+/* ---------------- 外壳：半透明 + 背景模糊 + 1px 高光/暗边 ---------------- */
+
 /*
- * 玻璃片：所有「界面外壳」统一半透明 + 背景模糊 + 一道 1px 亮边。
+ * 六个常驻外壳（标题栏 / 工具栏 / 标签栏 / 状态栏 / 侧栏 / 竖排工具条）。
  *
- * `backdrop-filter` 在隐藏窗口的 CDP 截图里可能拿不到合成结果（会退化成
- * 半透明纯色），所以颜色本身也要够好看，不能只靠模糊。
+ * 这里的 backdrop-filter 是「液态玻璃看得出来」的关键：没有它，半透明面板
+ * 只是把背景按比例压暗，看起来像一张半透明的色纸；加上之后，背后的光斑
+ * 和 PDF 页面会被真正糊开，玻璃的质感才出来。
+ *
+ * 性能提醒：模糊半径是 var(--glass-blur)，设置页里拖到 0 就是
+ * blur(0px)（合成器会退化成近乎免费），嫌一体机掉帧的用户可以关掉。
  */
-/*
- * ★ 2026-10-24 流畅度：外壳**不再用 backdrop-filter**。
- *
- * 原来这六个面（标题栏 / 工具栏 / 标签栏 / 状态栏 / 侧栏 / 右栏）各自挂
- * blur(var(--glass-blur))，它们占屏幕一大半且常驻，滚动时每一帧都要重新做
- * 高斯模糊——在教室一体机的核显上就是掉帧的主因。
- *
- * 现在改成"多层半透明渐变 + 1px 亮边"，观感仍是玻璃片，但走的是普通
- * 合成（纯色 + 渐变），代价接近 0。模糊只保留给小面积浮层（见文件末尾的
- * .update-toast / market 面板），它们不常出现、面积也小。
- */
-html[data-theme='glass'] .titlebar,
-html[data-theme='glass'] .toolbar,
-html[data-theme='glass'] .tabbar,
-html[data-theme='glass'] .statusbar,
-html[data-theme='glass'] .sidebar,
-html[data-theme='glass'] .rail {
+html[data-pack='glass'] .titlebar,
+html[data-pack='glass'] .toolbar,
+html[data-pack='glass'] .tabbar,
+html[data-pack='glass'] .statusbar,
+html[data-pack='glass'] .sidebar,
+html[data-pack='glass'] .rail {
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 0.34), rgb(255 255 255 / 0.10) 42%, rgb(255 255 255 / 0.02)),
-    rgb(var(--surface) / 0.72);
-  border-color: rgb(var(--border) / 0.6);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.42);
-}
-
-/* 标题栏与工具栏都贴顶，给一条底部高光分隔，玻璃的「厚度感」就在这里 */
-html[data-theme='glass'] .titlebar,
-html[data-theme='glass'] .toolbar,
-html[data-theme='glass'] .tabbar {
-  box-shadow: inset 0 -1px 0 rgb(255 255 255 / 0.55);
-}
-
-/* 侧栏/右侧栏/drawbar 在边缘，给内侧高光 */
-html[data-theme='glass'] .sidebar {
-  box-shadow: inset -1px 0 0 rgb(255 255 255 / 0.5);
-}
-
-html[data-theme='glass'] .rail {
-  box-shadow: inset 1px 0 0 rgb(255 255 255 / 0.5);
-}
-
-/*
- * 底部工具条保持「深色玻璃」。
- *
- * drawbar.css 里它的前景色本来就是浅色（白字 + 白图标），底色是 rgb(28 32 40 / 0.95)。
- * 如果跟着其它外壳一起换成浅色玻璃，白字会消失（实测整条工具条看不见）。
- * 所以这里只把它的**不透明度**降下来 + 加模糊，做出「深色玻璃」的观感。
- */
-html[data-theme='glass'] .drawbar {
-  /* 长条压在页面上，模糊会随滚动整条重算；用近实底换取操作跟手 */
-  background: rgb(20 26 40 / 0.94);
-  border: 1px solid rgb(255 255 255 / 0.16);
-  border-radius: calc(var(--glass-radius) * 1.2);
+    /* 面板角上的极淡强调色光斑：玻璃「被光照到」的那一角 */
+    radial-gradient(120% 90% at 0% 0%, rgb(var(--accent) / 0.12), transparent 58%),
+    /* 从上到下变薄的白高光，制造厚度 */
+    linear-gradient(180deg, rgb(255 255 255 / 0.3), rgb(255 255 255 / 0.06) 46%, rgb(255 255 255 / 0)),
+    rgb(var(--surface) / var(--panel-alpha));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
+  border-color: rgb(var(--border) / 0.55);
   box-shadow:
-    0 18px 44px rgb(30 60 120 / 0.22),
-    inset 0 1px 0 rgb(255 255 255 / 0.18);
+    var(--panel-shadow, none),
+    inset 0 1px 0 var(--panel-highlight),
+    inset 0 -1px 0 var(--panel-edge);
 }
 
-/* 按钮/卡片/输入框：圆角 + 玻璃高光，hover 时抬一点 */
-html[data-theme='glass'] .tb,
-html[data-theme='glass'] .sb-seg,
-html[data-theme='glass'] .sb-card,
-html[data-theme='glass'] .sb-input,
-html[data-theme='glass'] .sb-select,
-html[data-theme='glass'] .tab {
-  border-radius: var(--radius-sm);
+/* 侧栏与竖排工具条是竖向的：高光换到「朝阅读区」的那一侧 */
+html[data-pack='glass'] .sidebar {
+  box-shadow:
+    var(--panel-shadow, none),
+    inset 1px 0 0 var(--panel-highlight),
+    inset -1px 0 0 var(--panel-edge);
 }
 
-html[data-theme='glass'] .sb-card {
-  /*
-   * ★ 这里**不能**加 backdrop-filter。设置页有二十多张卡片，每张都会
-   *   各自开一层模糊，滚动时整屏重算，一体机上表现为「设置页卡顿、拖不动」。
-   *   卡片本身已经在半透明面板里，用不透明度做层次就够了。
-   */
-  background: rgb(var(--surface) / 0.72);
-  border: 1px solid rgb(var(--border) / 0.6);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.65);
-}
-
-html[data-theme='glass'] .tb:hover,
-html[data-theme='glass'] .tab:hover {
-  background: rgb(var(--surface) / 0.85);
+html[data-pack='glass'] .rail {
+  box-shadow:
+    var(--panel-shadow, none),
+    inset 1px 0 0 var(--panel-highlight),
+    inset -1px 0 0 var(--panel-edge);
 }
 
 /* 选中的按钮/页签：强调色淡玻璃，不用实心块，避免破坏透明感 */
-html[data-theme='glass'] .tb[aria-pressed='true'],
-html[data-theme='glass'] .tab--active {
+html[data-pack='glass'] .tb:hover,
+html[data-pack='glass'] .tab:hover {
+  background: rgb(var(--surface) / calc(var(--panel-alpha) + 0.2));
+}
+
+html[data-pack='glass'] .tb[aria-pressed='true'],
+html[data-pack='glass'] .tab--active {
   background: rgb(var(--accent) / 0.16);
   box-shadow:
     inset 0 0 0 1px rgb(var(--accent) / 0.35),
     inset 0 1px 0 rgb(255 255 255 / 0.6);
 }
 
-/* 阅读区：纸面保持不透明，只把背后的光斑透出来一点点 */
-html[data-theme='glass'] .app__viewer {
+/* ---------------- 阅读区：玻璃上挖出来的一个洞 ---------------- */
+
+html[data-pack='glass'] .app__viewer {
+  /* 透明：让 .app 的柔光从纸面四周透出来 */
   background: transparent;
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 
-html[data-theme='glass'] .pagebox {
+html[data-pack='glass'] .pagebox {
+  /* 纸面本身要保持基本不透明，否则正文对比度会塌；玻璃感交给它周围的缝隙 */
   background: rgb(var(--surface) / 0.9);
   border-radius: var(--radius-sm);
   box-shadow:
@@ -162,32 +142,86 @@ html[data-theme='glass'] .pagebox {
     0 2px 6px rgb(30 60 120 / 0.08);
 }
 
-/* 设置面板与浮层：更强的玻璃，压过内容但仍能看见背后的光斑 */
+/* ---------------- 设置页与浮层 ---------------- */
+
 /*
- * 设置面板与浮层：面板**占满整列高度**，底下是 PDF 页面。
- * 给它挂 backdrop-filter 会造成「每滚一像素就把整块面板重新模糊一次」，
- * 实测在核显一体机上设置页直接卡住。所以面板改成接近实底（0.96），
- * 只在面积小、不滚动的地方（toast）保留模糊。
+ * 设置面板：半透明（跟着 --panel-alpha 走）+ 角上光斑 + 顶部高光，
+ * 但**不加 backdrop-filter**。
+ *
+ * 面板占满整列高度、底下压着 PDF 页面，挂上模糊会变成「滚动一像素就把
+ * 整块面板重新模糊一次」，在教室一体机的核显上直接卡住（历史实测）。
+ * 它已经在半透明玻璃面板里，用不透明度做层次就够了。
  */
-html[data-theme='glass'] .sb-settings-panel {
-  background: rgb(var(--surface) / 0.96);
+html[data-pack='glass'] .sb-settings-panel {
+  background:
+    radial-gradient(140% 60% at 100% 0%, rgb(var(--accent) / 0.14), transparent 62%),
+    linear-gradient(180deg, rgb(255 255 255 / 0.22), rgb(255 255 255 / 0) 40%),
+    rgb(var(--surface) / var(--panel-alpha));
+  border-left: 1px solid rgb(var(--border) / 0.6);
+  border-radius: var(--radius) 0 0 var(--radius);
+  box-shadow:
+    var(--panel-shadow, none),
+    inset 1px 0 0 var(--panel-highlight);
 }
 
-html[data-theme='glass'] .market-panel,
-html[data-theme='glass'] .update-toast {
+/*
+ * 卡片：比面板更实一点，但同样透出一点背景。
+ * 同样不加 backdrop-filter —— 设置页有二十多张卡片，每张各开一层模糊，
+ * 滚动时整屏重算，一体机上表现为「设置页卡顿、拖不动」。
+ */
+html[data-pack='glass'] .sb-card {
+  background:
+    radial-gradient(120% 90% at 0% 0%, rgb(var(--accent) / 0.08), transparent 60%),
+    rgb(var(--surface) / calc(var(--panel-alpha) + 0.22));
+  border: 1px solid rgb(var(--border) / 0.6);
+  box-shadow:
+    inset 0 1px 0 var(--panel-highlight),
+    0 6px 18px rgb(0 0 0 / 0.06);
+}
+
+/* 输入框/分段控件：圆角跟包走，底色比卡片再实一点（要能看清文字） */
+html[data-pack='glass'] .tb,
+html[data-pack='glass'] .sb-seg,
+html[data-pack='glass'] .sb-input,
+html[data-pack='glass'] .sb-select,
+html[data-pack='glass'] .tab {
+  border-radius: var(--radius-sm);
+}
+
+/* 小面积浮层：模糊只留给它们，面积小、不常出现，代价可以接受 */
+html[data-pack='glass'] .market-panel,
+html[data-pack='glass'] .update-toast {
   background: rgb(var(--surface) / 0.9);
-  backdrop-filter: blur(8px) saturate(180%);
   -webkit-backdrop-filter: blur(8px) saturate(180%);
+  backdrop-filter: blur(8px) saturate(180%);
   border: 1px solid rgb(var(--border) / 0.55);
   border-radius: var(--radius-lg);
 }
 
-/* 细滚动条：玻璃主题下用半透明强调色，别用系统的深灰 */
-html[data-theme='glass'] .app *::-webkit-scrollbar-thumb {
+/*
+ * 底部手绘工具条保持「深色玻璃」。
+ *
+ * drawbar.css 里它的前景色本来就是浅色（白字 + 白图标），底色是深灰。
+ * 如果跟着其它外壳一起换成浅色玻璃，白字会消失（实测整条工具条看不见）。
+ * 所以这里只降不透明度 + 加模糊，做出「深色玻璃」的观感。
+ */
+html[data-pack='glass'] .drawbar {
+  background: rgb(20 26 40 / 0.9);
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.8)) saturate(1.2);
+  backdrop-filter: blur(calc(var(--glass-blur) * 0.8)) saturate(1.2);
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: calc(var(--radius) * 1.1);
+  box-shadow:
+    0 18px 44px rgb(30 60 120 / 0.22),
+    inset 0 1px 0 rgb(255 255 255 / 0.18);
+}
+
+/* 细滚动条：玻璃包下用半透明强调色，别用系统的深灰 */
+html[data-pack='glass'] .app *::-webkit-scrollbar-thumb {
   background: rgb(var(--accent) / 0.35);
   border-radius: 99px;
 }
 
-html[data-theme='glass'] .app *::-webkit-scrollbar-thumb:hover {
+html[data-pack='glass'] .app *::-webkit-scrollbar-thumb:hover {
   background: rgb(var(--accent) / 0.55);
 }

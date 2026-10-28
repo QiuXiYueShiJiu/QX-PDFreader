@@ -147,7 +147,7 @@ if (!mainChunk) {
   check(false, 'out/renderer/assets/index-*.js 存在')
 } else {
   report(`out/renderer/assets/${mainChunk.split(/[\\/]/).pop()}`, readText(mainChunk), [
-    'viewmode',
+    'viewmode-single',
     '适应宽度',
     '连续滚动',
     '双栏滚动',

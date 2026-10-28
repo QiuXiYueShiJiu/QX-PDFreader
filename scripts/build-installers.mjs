@@ -20,7 +20,7 @@
  *     装完自动启动应用，省掉一次点击。
  *
  * ── 为什么要分成两个包 ──────────────────────────────────────
- *   学校场景里两种需求并存：
+ *   示例单位场景里两种需求并存：
  *     · 机房批量部署 → 要「双击就跑完」，不能有人守着点下一步
  *     · 个人安装     → 想自己选装到哪
  *   一个包无法同时满足，所以分开构建。
@@ -53,7 +53,7 @@ const resolved = JSON.parse(readFileSync('build/.packaging-resolved.json', 'utf8
  *
  * 早先这里写死 `--config.directories.output=dist-installer`，
  * 于是 package.json 里配了别的目录也不生效 —— 用户要求把安装包
- * 放到自定义目录，所以改成跟着配置走（PDF_RELEASE_DIR 可覆盖）。
+ * 放到配置里指定的目录，所以这里跟着配置走。
  */
 const OUT_DIR = pkgForOut.build?.directories?.output ?? 'dist-installer'
 
@@ -81,7 +81,7 @@ function run(cmd, args, label) {
  * 按变体重渲染「声明」，再打包。
  *
  * ★ 为什么必须每次重渲染（用户要求）：
- *   · 公开版（标准版）安装包**不得出现任何单位/学校信息**；
+ *   · 公开版（标准版）安装包**不得出现任何单位/示例单位信息**；
  *   · 专供版（快速版）必须带**适用范围声明**与技术支持。
  *   两者共用同一个 `nsis.include` 与同一个 `resources/build-info.json`，
  *   所以必须在每次打包**之前**把它们改成对应变体的内容 ——
@@ -135,15 +135,15 @@ run(
     // 装完自动启动：快速部署时少一次点击
     '--config.nsis.runAfterFinish=true',
     '--config.nsis.include=build/installer.nsh',
-    // 产物名固定成学校要的那个
+    // 产物名固定成示例单位要的那个
     `--config.nsis.artifactName=${QUICK_NAME}.\${ext}`
   ],
   '打包 快速版'
 )
 
-/* ---------- ③b 静默部署版（一键静默 · 内置校验值通道） ---------- */
+/* ---------- ③b 静默部署版（一键静默 · 内置凭据通道） ---------- */
 /*
- * 只在显式传 --with-special 时打：静默部署版要带单位声明与内置校验值，
+ * 只在显式传 --with-special 时打：静默部署版要带单位声明与内置凭据，
  * 平时做公开包不该把它顺手产出来（容易发错文件）。
  */
 const WITH_SPECIAL = process.argv.includes('--with-special')

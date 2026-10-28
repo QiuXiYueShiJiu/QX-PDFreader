@@ -17,7 +17,7 @@ import { useViewer } from '../store'
  *   2. 勾「知道了，不再提示」再关：写进 settings.json，以后都不出现
  *   3. 设置面板里没有开关（用户要求的入口只有这一个）
  *
- * 颜色全部取主题校验值（--surface / --text / --border / --muted / --accent），
+ * 颜色全部取主题变量（--surface / --text / --border / --muted / --accent），
  * 所以浅色、深色、米色三套主题下都是「当前主题的圆角提示框」，
  * 不需要为声明单独维护一套配色。
  */

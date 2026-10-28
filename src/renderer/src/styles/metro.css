@@ -2,7 +2,7 @@
  * Metro UI 主题（Windows 10 设计语言）
  *
  * 定位：这是**第四套主题**（light / dark / sepia / metro），
- *   校验值在 base.css 的 `html[data-theme='metro']` 里定义，
+ *   变量在 base.css 的 `html[data-theme='metro']` 里定义，
  *   本文件只做「Metro 特有的形态」—— 不是再定义一遍颜色。
  *
  * Metro 的三条硬特征（对照 Windows 10 的「设置」「开始菜单」）：
@@ -299,4 +299,58 @@ html[data-theme='metro'] ::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   background: rgb(var(--text) / 0.28);
   background-clip: content-box;
+}
+
+/* ============================================================
+ * 主题包：Metro（形态，挂 data-pack 而不是 data-theme）
+ *
+ * Metro 的形态是「荧光灯下的纸」：直角、纯色、无阴影、无模糊。
+ * 这段只管形态，颜色仍由上面 html[data-theme='metro'] 的配色决定：
+ * 13 档配色里任何一档配上 Metro 包，都会得到这套直角纯色的样子。
+ *
+ * 刻意不覆盖 box-shadow：Metro 主题自己用 inset 高光画 1px 分隔线，
+ * 这里再叠投影，直角面板 + 阴影会显得脏。
+ * ============================================================ */
+
+html[data-pack='metro'] .titlebar,
+html[data-pack='metro'] .toolbar,
+html[data-pack='metro'] .tabbar,
+html[data-pack='metro'] .statusbar,
+html[data-pack='metro'] .sidebar,
+html[data-pack='metro'] .rail,
+html[data-pack='metro'] .sb-settings-panel,
+html[data-pack='metro'] .sb-card,
+html[data-pack='metro'] .drawbar,
+html[data-pack='metro'] .market-panel,
+html[data-pack='metro'] .update-toast,
+html[data-pack='metro'] .tb,
+html[data-pack='metro'] .tab,
+html[data-pack='metro'] .sb-seg,
+html[data-pack='metro'] .sb-input,
+html[data-pack='metro'] .sb-select {
+  border-radius: 0;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/*
+ * 纯色：完全不透明，一点背景都不透 —— 和玻璃包正好相反。
+ *
+ * ★ 这里**不能**把 .titlebar 列进来：
+ *   上面 `html[data-theme='metro'] .titlebar` 把标题栏涂成整条强调色 + 前景色，
+ *   本段的特异度与它相同、位置又靠后，一旦包含 .titlebar 就会把背景改成浅色的
+ *   --surface，白字贴浅底 —— 用户看到的「Metro 主题下标题栏不见了」正是这个。
+ *   （2026-10-28 修，见需求清单 B6）
+ */
+html[data-pack='metro'] .toolbar,
+html[data-pack='metro'] .tabbar,
+html[data-pack='metro'] .statusbar,
+html[data-pack='metro'] .sidebar,
+html[data-pack='metro'] .rail {
+  background: rgb(var(--surface));
+}
+
+/* 紧凑：工具条高度由 --toolbar-h 给（applyTheme 写 40px），这里只收紧内边距 */
+html[data-pack='metro'] .toolbar {
+  padding-inline: 6px;
 }

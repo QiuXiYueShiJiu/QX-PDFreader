@@ -98,7 +98,11 @@
    */
   gap: calc(10px * var(--tb-scale, 1));
 
-  height: 46px;
+  /*
+   * 高度由主题包决定（--toolbar-h 由 applyTheme 写成行内变量）：
+   * classic / glass = 46px，Metro 包 40px 更紧凑。
+   */
+  height: var(--toolbar-h, 46px);
   padding: 0 10px;
   background: rgb(var(--surface));
   border-bottom: 1px solid rgb(var(--border));

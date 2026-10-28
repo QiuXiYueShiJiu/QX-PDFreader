@@ -78,12 +78,17 @@ const DEFAULT_SUITE = [
   'verify-ocr.mjs', // 扫描页 OCR：识别当前页画布 / 文字层可选中 / 选中后可进改文字（tesseract 资源与 CSP 的回归）
   'verify-teaching.mjs',
   'verify-update.mjs',
-  'verify-theme.mjs', // 主题 13 档 CSS 变量与对比度、Metro 直角、自定义背景图的 CSS 变量与解码
+  'verify-theme.mjs', // 主题 9 档凭据与对比度、Metro 直角、自定义背景图的 CSS 变量与解码
   'verify-theme-pack.mjs', // 主题包：3 个包 / 每包设置 / 分段控件不溢出（用户报的横向溢出）
   'verify-tools.mjs', // PDF 工具箱：面板入口 + 水印/元数据两条真链路 + 高级 API 齐全（离线）
   'verify-newpdf.mjs',
     'verify-impose.mjs', // 新建空白 PDF：工具栏入口 / 对话框默认值 / 页数方向底色 / 创建后多标签且不顶掉旧文档
   'verify-content-edit.mjs', // 内容编辑入口冒烟：工具接线 / 画-选-删链路 / 文字层让位 / 漫游态不误建物件
+  'verify-edit-shapes.mjs', // 直线 / 箭头：方向不丢、零厚度撑热区、箭头三笔画、可拉伸
+  'verify-page-edit.mjs',
+  'verify-plugin-store.mjs', // 插件商店：安装 / 权限闸门 / 命令 / 启停 / 卸载
+  'verify-compare.mjs', // 分屏对比：右侧参考窗 / 独立滚动 / 关闭还原
+  'verify-rollback.mjs', // 紧急回滚：列表 / 同版本防呆 / 启动计数 / 设置页区块
   'verify-export-ipc.mjs', // 导出为新 PDF 的 IPC（带 targetPath 不弹框）：落盘、可解析、拒绝覆盖源文件
   'verify-no-foreground.mjs', // 前台不被改动：第二实例转交文件时不许把隐藏窗口拽到前台
   /* —— 退出相关的三支已从默认套件移除（用户 2026-10-19 要求：测试不需要测退出）——

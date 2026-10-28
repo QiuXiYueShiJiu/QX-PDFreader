@@ -14,10 +14,10 @@
  * 单实例：文件关联双击时需要把新文件交给已运行实例打开，而不是开新窗口。
  */
 
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, net, protocol, screen, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, net, protocol, screen, shell } from 'electron'
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
-import { createHash } from 'node:crypto'
 import { writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { basename, dirname, extname, join, normalize, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { PDFDocument, rgb as pdfRgb } from 'pdf-lib'
@@ -34,11 +34,28 @@ import type { Annotation, OpenResult } from '@shared/types'
 import { checkForUpdate, currentVersion, downloadUpdate, installUpdate } from './updater'
 import { registerPdfAdvancedIpc } from './pdf-advanced'
 import { registerPdfToolsIpc } from './pdf-tools'
+import { registerImageToolsIpc } from './image-tools'
+import { loadPlugins, registerPluginIpc } from './plugins'
+import { askRollbackIfUnstable, bootFailures, listRollback, markBootOk, markBootStart, rollbackTo } from './rollback'
+import {
+  decodeImage,
+  getImageMeta,
+  imageHash8,
+  IMAGE_DIALOG_EXTS,
+  IMAGE_OPEN_EXTS,
+  rememberImageMeta,
+  tempPdfName,
+  writeImageMetaSidecar
+} from './image-decode'
+import type { DecodedImage, ImageOpenMeta } from './image-decode'
 import { isThumbFresh, saveThumb, thumbPath } from './thumbs'
 import { ensureShellThumb } from './shell-thumb'
 
-/* 关联的图片格式：打开时先转一页 PDF，之后缩放/批注/OCR 都能用 */
-const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']
+/*
+ * 关联的图片格式：打开时先转一页 PDF，之后缩放/批注/OCR 都能用。
+ * 列表本身在 src/main/image-decode.ts（与图片工具、文件对话框共用一份）。
+ */
+const IMAGE_EXTS = IMAGE_OPEN_EXTS
 
 /**
  * ★ 必须在模块加载时立刻声明特权协议，位置不能挪到文件底部。
@@ -239,6 +256,12 @@ if (!gotLock) {
     (process.env['PDF_READER_OPEN_FILE'] ? resolve(process.env['PDF_READER_OPEN_FILE']) : null)
   if (startFile) queueOpen(startFile)
 
+  /*
+   * 启动计数（回滚用）：进程活了但界面可能永远起不来，所以在这里先 +1，
+   * 渲染层真正画出来之后再由 rollback:boot-ok 清零。
+   */
+  markBootStart()
+
   void app.whenReady().then(onReady)
 }
 
@@ -409,7 +432,7 @@ function registerPdfProtocol(): void {
  *
  * ★ 必须处理 Chromium 的 URL 规范化（这是最隐蔽的一个坑）。
  *
- *   我们发出的是 `pdf-file:///C:/<user>/a.pdf`（三段斜杠，盘符在路径里），
+ *   我们发出的是 `pdf-file:///C:/Users/a.pdf`（三段斜杠，盘符在路径里），
  *   但 Chromium 解析特权协议时会把它规范化为
  *       `pdf-file://c/Users/a.pdf`
  *   —— 盘符被降为小写并变成了 **host**，路径里不再有冒号。
@@ -428,14 +451,6 @@ function decodePathFromUrl(rawUrl: string): string | null {
     return null
   }
 
-  /*
-   * ★ 首选形式：路径放在 query 里 —— pdf-file:///?p=<编码后的绝对路径>。
-   *   原因见各渲染层 toPdfUrl 的注释：Chromium 会把 path 首段目录当 host 并小写化。
-   *   下面几条分支保留给旧格式（历史书签、旧版缓存里的 URL）。
-   */
-  const fromQuery = parsed.searchParams.get('p')
-  if (fromQuery) return normalize(fromQuery)
-
   // host 是盘符（规范化后的小写单字母），也可能是空（标准三段斜杠形式）
   const host = parsed.hostname
   const pathname = decodeURIComponent(parsed.pathname)
@@ -447,27 +462,12 @@ function decodePathFromUrl(rawUrl: string): string | null {
     return normalize(`${host.toUpperCase()}:${pathname}`)
   }
 
-  // 情况二：盘符在路径里 —— pdf-file:///C:/<user>/a.pdf
+  // 情况二：盘符在路径里 —— pdf-file:///C:/Users/a.pdf
   if (/^\/[a-zA-Z]:[\\/]/.test(pathname)) {
     return normalize(pathname.slice(1))
   }
 
-  /*
-   * 情况三：POSIX 绝对路径。
-   *
-   * ★ 这里也有一个 Chromium 规范化问题：我们发的是 `pdf-file:///projects/a.pdf`
-   *   （三段斜杠），Chromium 把多余的斜杠折叠成两段，于是**第一段目录变成了 host**：
-   *       pdf-file://projects/a.pdf
-   *   此时 hostname="projects"、pathname="/a.pdf"，直接取 pathname 会丢掉一层
-   *   目录（实测打开 /projects/... 被解析成 /a.pdf，文件永远「不存在」）。
-   *   Windows 上因为盘符是单字母、有专门分支，才没暴露这个问题。
-   *
-   *   处理：host 不是单字母盘符时，把它当成路径的第一段拼回去。
-   */
-  if (host) {
-    return normalize(`/${host}${pathname}`)
-  }
-
+  // 情况三：普通绝对路径（非 Windows 盘符场景）
   return normalize(pathname)
 }
 
@@ -504,7 +504,23 @@ const CAPTURE_MODE = process.env.QX_CAPTURE === '1'
  */
 let MARKET_SOURCES: { name: string; url: string }[] | null = null
 
-let MARKET_CACHE: { at: number; value: { ok: boolean; items: unknown[]; at: number; source?: string } } | null = null
+let MARKET_CACHE: { at: number; sourceKey: string; value: { ok: boolean; items: unknown[]; at: number; source?: string } } | null = null
+
+/**
+ * 插件市场的两个清单来源（同一份 schema）。
+ *
+ * 顺序由渲染层传入的偏好决定（用户 2026-10-27 要求：默认 GitHub 源，可选镜像源）：
+ *   · github —— 仓库里的 `plugins/index.json`，是别人提 PR 加主题包的原始入口；
+ *   · mirror —— 中转站的 `plugins.php`，国内更快，含还没同步到 GitHub 的包。
+ * 偏好只决定「先问谁」：先失败的那个会被跳过，另一个仍然兜底。
+ */
+const MARKET_SOURCE_LIST = [
+  {
+    name: 'github',
+    url: 'https://raw.githubusercontent.com/QiuXiYueShiJiu/QX-PDFreader/main/plugins/index.json'
+  },
+  { name: 'mirror', url: 'https://xn--6rso4u4lc86ad09c.top/contact/plugins.php' }
+] as const
 
 /**
  * 原生对话框探针（**只在自动化测试里打开**）。
@@ -967,7 +983,7 @@ const SEND_DEDUPE_MS = 800
 /**
  * 图片转单页 PDF。
  *
- * 用 Electron 自带的 nativeImage 解码（png / jpg / webp / bmp / gif 都能读），
+ * 用 Electron 自带的 nativeImage 解码（解码与格式表在 image-decode.ts），
  * 再交给 pdf-lib 排版，省掉一整套图片解码依赖。
  *
  * ★ 2026-10-24 提速（用户反馈"图片加载有点慢"）：
@@ -979,12 +995,20 @@ const SEND_DEDUPE_MS = 800
  *   3. **先缩小再编码**：超过 1600px 的图先 resize 到 1600 再编码/直嵌，
  *      避免把 4000×3000 的整张 PNG 写进 PDF。
  */
-function imageCacheKey(source: string): string {
-  const st = statSync(source)
-  return createHash('sha1')
-    .update(`${resolve(source)}|${st.mtimeMs}|${st.size}`)
-    .digest('hex')
-    .slice(0, 24)
+/** 解码结果 → 打开元数据（临时 PDF ↔ 原图） */
+function imageMetaFromDecoded(decoded: DecodedImage, tempPath: string): ImageOpenMeta {
+  return {
+    sourcePath: decoded.sourcePath,
+    originalName: decoded.originalName,
+    tempPath,
+    isImage: true,
+    format: decoded.ext,
+    formatLabel: decoded.format.label,
+    width: decoded.width,
+    height: decoded.height,
+    bytes: decoded.bytes,
+    openedAt: Date.now()
+  }
 }
 
 /** 清掉过期缓存：保留最近 48 个，且删掉 7 天没被碰过的 */
@@ -1000,7 +1024,11 @@ function pruneImageCache(dir: string): void {
       .sort((a, b) => b.at - a.at)
     const cutoff = Date.now() - 7 * 24 * 3600 * 1000
     for (const [index, file] of files.entries()) {
-      if (index >= 48 || file.at < cutoff) rmSync(file.full, { force: true })
+      if (index >= 48 || file.at < cutoff) {
+        rmSync(file.full, { force: true })
+        /* 元数据旁车跟着一起删，免得缓存目录里只剩孤儿 .json */
+        rmSync(`${file.full}.json`, { force: true })
+      }
     }
   } catch {
     /* 缓存清理失败不影响打开 */
@@ -1011,8 +1039,12 @@ async function imageToPdfFile(source: string): Promise<string> {
   const dir = join(app.getPath('userData'), 'image-cache')
   mkdirSync(dir, { recursive: true })
 
-  const key = imageCacheKey(source)
-  const cached = join(dir, `${key}.pdf`)
+  /*
+   * 缓存文件名 = `原文件名-<8位指纹>.pdf`。
+   * 指纹含 mtime/size：图片一改就换名，旧缓存自然失效，不会拿旧图当新图。
+   */
+  const hash8 = imageHash8(source)
+  const cached = join(dir, tempPdfName(source, hash8))
   if (existsSync(cached)) {
     /* 命中就刷新 mtime，让它排在"最近使用"里，不被滚动清理掉 */
     try {
@@ -1021,21 +1053,31 @@ async function imageToPdfFile(source: string): Promise<string> {
     } catch {
       /* 忽略 */
     }
+    /*
+     * 进程重启后映射表是空的：补一次解码拿到尺寸与格式，
+     * 标签页标题与图片工具面板才有正确的原文件名 / 宽高。
+     */
+    if (!getImageMeta(cached)) {
+      const meta = imageMetaFromDecoded(decodeImage(source), cached)
+      rememberImageMeta(meta)
+      writeImageMetaSidecar(meta)
+    }
     return cached
   }
 
-  const image = nativeImage.createFromPath(source)
-  if (image.isEmpty()) throw new Error('无法解码这张图片')
-
-  const { width, height } = image.getSize()
-  if (!width || !height) throw new Error('图片尺寸异常')
+  /*
+   * 解码与格式校验都在 image-decode.ts：
+   * ico / tif 读不出来时那里给的是「此格式暂不支持 + 该怎么办」，
+   * 而不是笼统的「无法解码这张图片」。
+   */
+  const decoded = decodeImage(source)
+  const { image, width, height, ext } = decoded
 
   const scale = Math.min(1600 / width, 1600 / height, 1)
   const pageW = width * scale
   const pageH = height * scale
 
   const pdf = await PDFDocument.create()
-  const ext = extname(source).toLowerCase()
   const resized = scale < 1 ? image.resize({ width: Math.round(pageW), height: Math.round(pageH) }) : image
   let embedded
   if (ext === '.jpg' || ext === '.jpeg') {
@@ -1049,6 +1091,9 @@ async function imageToPdfFile(source: string): Promise<string> {
   page.drawImage(embedded, { x: 0, y: 0, width: pageW, height: pageH })
 
   await writeFile(cached, await pdf.save())
+  const meta = imageMetaFromDecoded(decoded, cached)
+  rememberImageMeta(meta)
+  writeImageMetaSidecar(meta)
   pruneImageCache(dir)
   return cached
 }
@@ -1121,6 +1166,100 @@ async function createBlankPdf(spec: BlankPdfSpec): Promise<string> {
   return target
 }
 
+/* ---------------- 页面结构编辑（插入空白页 / 删除本页） ---------------- */
+
+/**
+ * 页面结构编辑的工作副本路径。
+ *
+ * 为什么不直接改原文件：
+ *   原文件属于用户（可能只读、在 U 盘、正被别的程序占用），改写它风险太大，
+ *   也没有回退的机会。这里把它复制到 userData/pages/<hash>.pdf 当工作副本，
+ *   页结构编辑只在副本上叠加；用户要留存就「导出 PDF」另存。
+ *
+ * 已经是副本（路径落在 pages 目录里）就直接用 —— 连续插页/删页都在同一份副本上，
+ * 不会再复制出第二份、更不会把用户刚加的页丢掉。
+ */
+function pageWorkCopy(sourcePath: string): string {
+  const abs = resolve(sourcePath)
+  const dir = join(app.getPath('userData'), 'pages')
+  if (dirname(abs) === dir) return abs
+  mkdirSync(dir, { recursive: true })
+  const hash = createHash('sha1').update(abs).digest('hex').slice(0, 16)
+  const target = join(dir, `${hash}.pdf`)
+  /*
+   * 每次都从原文件重新起一份副本。
+   *
+   * 为什么不是「副本存在就复用」：副本会留在 userData 里跨会话存在，用户上次
+   * 编辑过、这次又打开原文件重新插页时，复用旧副本会把上一次的改动叠上去
+   * （实测出现过「明明 20 页，插一页变 22 页」）。既然进编辑时看到的是原文件，
+   * 副本就必须以原文件为基准重建 —— 编辑的语义才是「在原文件基础上改」。
+   */
+  copyFileSync(abs, target)
+  /*
+   * 记下原文件名。工作副本是按哈希命名的，打开它时如果没有这张便签，
+   * 标签页、窗口标题、任务栏全都会显示 `447b2a2971e5213e.pdf`。
+   */
+  try {
+    writeFileSync(`${target}.name`, basename(abs), 'utf8')
+  } catch {
+    /* 便签写不进去不影响功能，只是名字会退化成哈希 */
+  }
+  return target
+}
+
+/** 工作副本的原始文件名（不是副本就返回 undefined）。 */
+function workCopyTitle(abs: string): string | undefined {
+  const dir = join(app.getPath('userData'), 'pages')
+  if (dirname(abs) !== dir) return undefined
+  try {
+    return readFileSync(`${abs}.name`, 'utf8').trim() || undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** 插入一张空白页：落在第 index 页（0 起始）之前，尺寸跟随参照页。 */
+async function insertBlankPage(
+  sourcePath: string,
+  index: number
+): Promise<{ ok: true; path: string; pages: number; index: number } | { ok: false; error: string }> {
+  try {
+    if (!existsSync(sourcePath)) return { ok: false, error: '文件不存在' }
+    const work = pageWorkCopy(sourcePath)
+    const pdf = await PDFDocument.load(readFileSync(work), { ignoreEncryption: true })
+    const total = pdf.getPageCount()
+    const at = Math.min(Math.max(0, Math.round(Number(index) || 0)), total)
+    /* 新页尺寸跟上一页一致：老师插页多半是为了接着写，纸张大小得一样 */
+    const ref = pdf.getPage(Math.min(Math.max(at - 1, 0), total - 1))
+    const { width, height } = ref.getSize()
+    pdf.insertPage(at, [width, height])
+    await writeFile(work, await pdf.save())
+    return { ok: true, path: work, pages: total + 1, index: at }
+  } catch (error) {
+    return { ok: false, error: `插入空白页失败：${String(error)}` }
+  }
+}
+
+/** 删除第 index 页（0 起始）。最后一页不允许删 —— 删完就没有文档了。 */
+async function deletePage(
+  sourcePath: string,
+  index: number
+): Promise<{ ok: true; path: string; pages: number; index: number } | { ok: false; error: string }> {
+  try {
+    if (!existsSync(sourcePath)) return { ok: false, error: '文件不存在' }
+    const work = pageWorkCopy(sourcePath)
+    const pdf = await PDFDocument.load(readFileSync(work), { ignoreEncryption: true })
+    const total = pdf.getPageCount()
+    if (total <= 1) return { ok: false, error: '只剩这一页了，删不掉' }
+    const at = Math.min(Math.max(0, Math.round(Number(index) || 0)), total - 1)
+    pdf.removePage(at)
+    await writeFile(work, await pdf.save())
+    return { ok: true, path: work, pages: total - 1, index: Math.min(at, total - 2) }
+  } catch (error) {
+    return { ok: false, error: `删除本页失败：${String(error)}` }
+  }
+}
+
 async function openFileInWindow(filePath: string): Promise<OpenResult> {
   const abs = resolve(filePath)
 
@@ -1140,7 +1279,7 @@ async function openFileInWindow(filePath: string): Promise<OpenResult> {
   const ext = extname(abs).toLowerCase()
   const isImage = IMAGE_EXTS.includes(ext)
   if (ext !== '.pdf' && !isImage) {
-    return { ok: false, error: '仅支持 PDF 与常见图片格式（png / jpg / webp / bmp / gif）' }
+    return { ok: false, error: `仅支持 PDF 与常见图片格式（${IMAGE_DIALOG_EXTS.join(' / ')}）` }
   }
 
   if (size === 0) {
@@ -1149,7 +1288,8 @@ async function openFileInWindow(filePath: string): Promise<OpenResult> {
 
   // 图片先转成一页 PDF，这样缩放、批注、OCR、导出全都直接可用
   let target = abs
-  let title: string | undefined
+  /* 页面结构编辑打开的哈希工作副本，标题要用原文件名（见 workCopyTitle） */
+  let title: string | undefined = workCopyTitle(abs)
   if (isImage) {
     try {
       target = await imageToPdfFile(abs)
@@ -1203,8 +1343,12 @@ function sendOpenToRenderer(abs: string, size: number, title?: string): void {
 
   console.log('[pdf] 发送打开请求:', abs)
   mainWindow.webContents.send('pdf:open', { path: abs, name: title ?? basename(abs), size })
-  // 更新窗口标题，任务栏与 Alt+Tab 里能看到正在读哪份文件
-  mainWindow.setTitle(`${basename(abs)} - 秋夕-PDF阅读器`)
+  /*
+   * 更新窗口标题。
+   * 图片打开的是临时 PDF，标题必须用**原文件名**，否则任务栏/Alt+Tab
+   * 里显示的是 `IMG_2026-3f9a1c0d.pdf` 这种缓存名。
+   */
+  mainWindow.setTitle(`${title ?? basename(abs)} - 秋夕-PDF阅读器`)
 }
 
 /**
@@ -1302,9 +1446,9 @@ function registerIpc(): void {
     const result = await dialog.showOpenDialog(mainWindow ?? undefined!, {
       title: '打开 PDF',
       filters: [
-        { name: 'PDF 与图片', extensions: ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] },
+        { name: 'PDF 与图片', extensions: ['pdf', ...IMAGE_DIALOG_EXTS] },
         { name: 'PDF 文档', extensions: ['pdf'] },
-        { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] }
+        { name: '图片', extensions: [...IMAGE_DIALOG_EXTS] }
       ],
       properties: ['openFile']
     })
@@ -1331,6 +1475,20 @@ function registerIpc(): void {
     } catch (error) {
       return { ok: false as const, error: `新建失败：${String(error)}` }
     }
+  })
+
+  /* ---------- 页面结构编辑：插入空白页 / 删除本页 ---------- */
+
+  ipcMain.handle('pdf:page-insert-blank', async (_e, filePath: string, index: number) => {
+    const result = await insertBlankPage(filePath, index)
+    if (!result.ok) return result
+    return result
+  })
+
+  ipcMain.handle('pdf:page-delete', async (_e, filePath: string, index: number) => {
+    const result = await deletePage(filePath, index)
+    if (!result.ok) return result
+    return result
   })
 
   /* ---------- 阅读区背景图 ---------- */
@@ -1379,9 +1537,15 @@ function registerIpc(): void {
   /* ---------- 最近打开 ---------- */
 
   ipcMain.handle('pdf:recent', () => getRecent())
-  ipcMain.handle('pdf:recent-push', (_e, entry: { path: string; name: string; page: number }) =>
-    pushRecent(entry)
-  )
+  ipcMain.handle('pdf:recent-push', (_e, entry: { path: string; name: string; page: number }) => {
+    /*
+     * 图片是「原图 → 临时 PDF」打开的，渲染层手里只有临时 PDF 的路径，
+     * 于是最近列表会记成 IMG_2026-ab12cd34.pdf。这里查一下图片元数据，
+     * 有就用原文件名覆盖——最近文件列表也就显示 IMG_2026.jpg 了。
+     */
+    const meta = getImageMeta(entry.path)
+    return pushRecent(meta ? { ...entry, name: meta.originalName } : entry)
+  })
 
   /* ---------- 阅读位置 ---------- */
 
@@ -1612,17 +1776,6 @@ function registerIpc(): void {
  */
 ipcMain.handle('app:open-default-apps', async () => {
   try {
-    /*
-     * ms-settings: 是 Windows 专有协议。Linux 上没有等价的统一入口：
-     * deb 安装后由 xdg-mime 决定默认程序，用户在文件管理器里「设为默认」
-     * 或跑 xdg-mime default 即可，所以这里只回一句可操作的提示，不假装成功。
-     */
-    if (process.platform !== 'win32') {
-      return {
-        ok: false,
-        err: 'Linux 下请用系统「设置 → 默认应用」，或执行：xdg-mime default qx-pdfreader.desktop application/pdf'
-      }
-    }
     await shell.openExternal('ms-settings:defaultapps')
     return { ok: true }
   } catch (error) {
@@ -1727,24 +1880,27 @@ ipcMain.handle('app:info', () => appVersionInfo())
     return true
   })
 
-  ipcMain.handle('market:list', async () => {
+  ipcMain.handle('market:list', async (_e, prefer?: unknown) => {
     const now = Date.now()
-    if (MARKET_CACHE && now - MARKET_CACHE.at < 10 * 60_000) return MARKET_CACHE.value
+    /*
+     * 偏好在缓存键里 —— 否则用户把「GitHub / 镜像」切过来，10 分钟内仍然拿到
+     * 上一个源的清单，看着像开关没反应。
+     */
+    const preferKey = prefer === 'mirror' ? 'mirror' : 'github'
+    if (MARKET_CACHE && MARKET_CACHE.sourceKey === preferKey && now - MARKET_CACHE.at < 10 * 60_000) {
+      return MARKET_CACHE.value
+    }
 
     /*
-     * 两个源，同一份 schema：
-     *   ① 镜像站 plugins.php —— 国内快，包含未同步到 GitHub 的新包；
-     *   ② GitHub raw plugins/index.json —— 镜像站挂了/被墙时的兜底，
-     *      也是别人提 PR 加主题包的原始入口。
-     * 先①后②，任一成功就返回；两个都失败才报错（文案合并两边的失败原因）。
+     * 两个源，同一份 schema，偏好只决定「先问谁」：
+     *   ① 用户选的那个源；
+     *   ② 另一个源兜底（镜像站被墙 / GitHub 被墙时都还能用）。
+     * 任一成功就返回；两个都失败才报错（文案合并两边的失败原因）。
+     * 测试挂钩 MARKET_SOURCES 一旦设置，就完全替换这份列表（离线用例要可控）。
      */
-    const sources = MARKET_SOURCES ?? [
-      { name: 'mirror', url: 'https://xn--6rso4u4lc86ad09c.top/contact/plugins.php' },
-      {
-        name: 'github',
-        url: 'https://raw.githubusercontent.com/QiuXiYueShiJiu/QX-PDFreader/main/plugins/index.json'
-      }
-    ]
+    const preferred = MARKET_SOURCE_LIST.find((s) => s.name === preferKey)
+    const other = MARKET_SOURCE_LIST.find((s) => s.name !== preferKey)
+    const sources = MARKET_SOURCES ?? (preferred && other ? [preferred, other] : [...MARKET_SOURCE_LIST])
 
     const errors: string[] = []
     for (const source of sources) {
@@ -1759,7 +1915,7 @@ ipcMain.handle('app:info', () => appVersionInfo())
         const json = (await res.json()) as { items?: unknown[] }
         const items = Array.isArray(json.items) ? json.items : []
         const value = { ok: true, items, at: now, source: source.name }
-        MARKET_CACHE = { at: now, value }
+        MARKET_CACHE = { at: now, sourceKey: preferKey, value }
         console.log(`[market] 清单 ${items.length} 项（来源 ${source.name}）`)
         return value
       } catch (error) {
@@ -1882,6 +2038,40 @@ ipcMain.handle('app:info', () => appVersionInfo())
    * 实现集中在 src/main/pdf-advanced.ts。
    */
   registerPdfAdvancedIpc(() => mainWindow)
+
+  /*
+   * ---------- 图片工具 ----------
+   * 编辑 / 调色 / 滤镜 / 格式转换 / 批量压缩。
+   * 像素运算在渲染层（ImageToolsPanel）用 canvas 做，
+   * 落盘与安全校验集中在 src/main/image-tools.ts。
+   */
+  registerImageToolsIpc(() => mainWindow)
+
+  /*
+   * ---------- 插件宿主（2.0.0） ----------
+   * 第三方插件的安装 / 启停 / 命令执行都在 src/main/plugins.ts。
+   * 插件跑在主进程的 vm 沙箱里（用户选的），权限靠清单声明 + 运行时闸门。
+   * 这里注册完通道后立刻加载已启用的插件，命令会出现在上栏「工具」的「插件」组。
+   */
+  registerPluginIpc()
+  loadPlugins()
+
+  /*
+   * 连续启动失败就主动问一句要不要回滚（B13）。
+   * 放在窗口创建之前：界面可能根本起不来，提示必须比渲染层更早。
+   */
+  void askRollbackIfUnstable()
+
+  /* ---------- 回滚（2.0.0 / B13） ---------- */
+  ipcMain.handle('rollback:list', () => listRollback())
+  ipcMain.handle('rollback:apply', (_e, version: unknown) =>
+    typeof version === 'string' ? rollbackTo(version) : { ok: false, error: '版本号不合法' }
+  )
+  ipcMain.handle('rollback:boot-ok', () => {
+    markBootOk()
+    return true
+  })
+  ipcMain.handle('rollback:failures', () => bootFailures())
 
   /**
    * 标签页切换时同步窗口标题。

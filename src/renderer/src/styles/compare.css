@@ -1,0 +1,209 @@
+/* SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0 */
+/* Copyright 2026 秋夕月拾旧 */
+
+/*
+ * 分屏对比（2.0.0）。
+ *
+ * 布局约束：主阅读区 `.app__viewer` 是 `overflow: hidden` 的定位容器，
+ * 内部原本只有一个 `DocumentView`。这里加一层 `.app__split` 做横向弹性
+ * 布局，主窗格 `flex: 1 1 auto`（宽高仍由 DocumentView 自己算），
+ * 参考窗 `flex: 0 0 var(--compare-w)`。
+ */
+
+/*
+ * 主窗格：必须包一层相对定位的弹性子项。
+ *   `.viewer-scroll` 是 `position: absolute; inset: 0`（见 viewer.css），
+ *   直接当 flex 子项会脱离文档流、宽度恒等于外层，分屏时右侧参考窗就叠上去。
+ */
+.app__main {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+.app__split {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.app__split > .viewer,
+.app__split > .viewer-scroll,
+.app__split > div:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.compare-pane {
+  --compare-w: 46%;
+  position: relative;
+  flex: 0 0 var(--compare-w);
+  min-width: 240px;
+  max-width: 62%;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  border-left: 1px solid rgb(var(--line) / 0.8);
+  background: rgb(var(--bg) / 0.6);
+  box-shadow: -8px 0 18px rgb(0 0 0 / 0.06);
+}
+
+.compare-pane__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 8px 0 10px;
+  border-bottom: 1px solid rgb(var(--line) / 0.7);
+  background: rgb(var(--surface) / var(--panel-alpha, 1));
+  color: rgb(var(--text));
+  flex-shrink: 0;
+}
+
+.compare-pane__title {
+  font-size: 12.5px;
+  font-weight: 600;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compare-pane__tagline {
+  font-size: 11px;
+  color: rgb(var(--muted));
+  padding: 1px 6px;
+  border: 1px solid rgb(var(--line) / 0.8);
+  border-radius: 999px;
+}
+
+.compare-pane__tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.compare-pane__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: calc(var(--radius, 10px) * 0.4);
+  background: transparent;
+  color: rgb(var(--text));
+  cursor: pointer;
+}
+
+.compare-pane__btn:hover {
+  background: rgb(var(--accent) / 0.12);
+}
+
+.compare-pane__page {
+  min-width: 48px;
+  text-align: center;
+  font-size: 11.5px;
+  color: rgb(var(--muted));
+  font-variant-numeric: tabular-nums;
+}
+
+.compare-pane__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 14px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.compare-pane__page {
+  position: relative;
+  line-height: 0;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.14);
+  border-radius: 2px;
+  background: #fff;
+}
+
+.compare-pane__canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.compare-pane__tag {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.55);
+  color: #fff;
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.compare-pane__empty {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px;
+  text-align: center;
+  color: rgb(var(--muted));
+  font-size: 13px;
+}
+
+.compare-pane__hint {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.compare-pane__pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid rgb(var(--accent));
+  border-radius: calc(var(--radius, 10px) * 0.5);
+  background: rgb(var(--accent));
+  color: rgb(var(--accent-fg, 255 255 255));
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.compare-pane__note {
+  margin: 8px 14px 0;
+  font-size: 12px;
+  color: rgb(var(--muted));
+}
+
+.compare-pane__note--bad {
+  color: rgb(var(--danger, 200 60 50));
+}
+
+/* 窄窗口下参考窗让一半多出来太挤，改按窗口宽度收窄 */
+@media (max-width: 1100px) {
+  .compare-pane {
+    --compare-w: 50%;
+    min-width: 200px;
+  }
+}
+
+html[data-pack='metro'] .compare-pane,
+html[data-pack='metro'] .compare-pane__btn,
+html[data-pack='metro'] .compare-pane__pick {
+  border-radius: 0;
+}

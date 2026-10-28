@@ -36,6 +36,10 @@ import './styles/viewer.css'
 import './styles/viewer-compat.css'
 import './styles/rails.css'
 import './styles/drawbar.css'
+/* 底部悬浮画笔条（画笔 / 橡皮 / 调色盘 / 粗细 / 清屏） */
+import './styles/dock.css'
+import './styles/plugin-store.css'
+import './styles/compare.css'
 import './styles/tabs.css'
 import './styles/slideclear.css'
 import './styles/mask.css'
@@ -45,7 +49,7 @@ import './styles/components.css'
 import './styles/edit.css'
 import './styles/disclaimer.css'
 /*
- * Metro 主题的形态覆盖放最后：它只改「外观形态」，颜色校验值在 base.css 里，
+ * Metro 主题的形态覆盖放最后：它只改「外观形态」，颜色变量在 base.css 里，
  * 放最后能确保它对前面文件的圆角/阴影规则有最终决定权。
  */
 import './styles/metro.css'

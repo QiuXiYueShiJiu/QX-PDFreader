@@ -19,11 +19,9 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 const PORT = Number(process.argv[2] ?? 9521)
-const CDP = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'cdp-eval.mjs')
+const CDP = process.cwd().replace(/\\/g, '/') + '/scripts/cdp-eval.mjs'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -166,7 +164,7 @@ const main = async () => {
       ok: true, newer: true, current: '1.0.1.0', latest: '1.0.2.0',
       asset: { name: 'fake-setup.exe', size: 1024, url: '${FAKE_URL}' }
     })
-    s.setUpdateStage('ready', 'C:/<user>/fake-setup.exe')
+    s.setUpdateStage('ready', 'C:/Users/public/fake-setup.exe')
     return true
   })()`)
   await sleep(350)

@@ -23,6 +23,10 @@ interface EditBarProps {
   color: string
   fontSize: number
   strokeWidth: number
+  /** 新画的图形是否带半透明填充（矩形/椭圆） */
+  fillOn: boolean
+  /** 新画的图形是否用虚线描边（矩形/椭圆/直线/箭头） */
+  dashOn: boolean
   /** 有内容改了还没导出：store 里 exportDirty */
   exportDirty: boolean
   exporting: boolean
@@ -36,6 +40,8 @@ interface EditBarProps {
   onColor: (color: string) => void
   onFontSize: (size: number) => void
   onStrokeWidth: (width: number) => void
+  onToggleFill: () => void
+  onToggleDash: () => void
   onPickImage: () => void
   onDelete: () => void
   onExport: () => void
@@ -45,9 +51,11 @@ interface EditBarProps {
 export function EditBar(props: EditBarProps): JSX.Element {
   const { tool } = props
   const showFontSize = tool === 'text'
-  const showStroke = tool === 'rect' || tool === 'ellipse'
+  /* 线宽对四种手绘图形都有效：矩形、椭圆、直线、箭头 */
+  const showStroke = tool === 'rect' || tool === 'ellipse' || tool === 'line' || tool === 'arrow'
   /* 涂白的颜色固定是白色，给它显示调色板只会让人以为能换色 */
-  const showColors = tool === 'text' || tool === 'rect' || tool === 'ellipse'
+  const showColors =
+    tool === 'text' || tool === 'rect' || tool === 'ellipse' || tool === 'line' || tool === 'arrow'
 
   return (
     <div
@@ -98,6 +106,38 @@ export function EditBar(props: EditBarProps): JSX.Element {
             </button>
           ))}
         </div>
+      ) : null}
+
+      {/*
+        填充只给矩形/椭圆：涂白本身已经是「填满」，直线/箭头没有内部可填。
+        两个按钮做成开关（aria-pressed），对当前选中的图形也立即生效。
+      */}
+      {tool === 'rect' || tool === 'ellipse' ? (
+        <button
+          type="button"
+          className={`edit-bar__btn${props.fillOn ? ' is-active' : ''}`}
+          data-tb-id="edit-fill"
+          title="给图形加半透明填充（看得见底下的字）"
+          aria-label="填充"
+          aria-pressed={props.fillOn}
+          onClick={props.onToggleFill}
+        >
+          填充
+        </button>
+      ) : null}
+
+      {showStroke ? (
+        <button
+          type="button"
+          className={`edit-bar__btn${props.dashOn ? ' is-active' : ''}`}
+          data-tb-id="edit-dash"
+          title="描边改用虚线"
+          aria-label="虚线"
+          aria-pressed={props.dashOn}
+          onClick={props.onToggleDash}
+        >
+          虚线
+        </button>
       ) : null}
 
       {showColors ? (
@@ -216,6 +256,10 @@ function hintOf(tool: EditTool, pendingImage: boolean): string {
       return '拖动绘制矩形'
     case 'ellipse':
       return '拖动绘制椭圆'
+    case 'line':
+      return '按下并拖动，松手得到一条直线'
+    case 'arrow':
+      return '从起点拖到要指向的位置，松手得到箭头'
     default:
       return ''
   }

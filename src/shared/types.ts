@@ -35,7 +35,7 @@ export type ThemeMode =
   | 'midnight'
   | 'plum'
   | 'glow'
-  /** 插件市场装的主题包：具体校验值存在 settings.customThemes 里 */
+  /** 插件市场装的主题包：具体变量存在 settings.customThemes 里 */
   | 'custom'
 
 /**
@@ -47,7 +47,42 @@ export type ThemeMode =
  */
 export type ThemeLayout = 'normal' | 'office'
 
-/** 主题包：来自插件市场的可安装主题（校验值与内置主题同构） */
+/**
+ * 主题包 id。
+ *
+ * 主题包不是「一种配色」，而是「一整套可感知的视觉」：圆角、投影、模糊、
+ * 面板透明度、工具栏高度都由包决定（默认值在 ThemePackDefaults 里）。
+ * 配色（13 档）是包内部的选项，两者正交：液态玻璃包换任何一档配色，
+ * 依然是半透明磨砂 + 大圆角。
+ */
+export type ThemePackId = 'classic' | 'metro' | 'glass'
+
+/**
+ * 一个主题包的全套默认值。
+ *
+ * 「切包」= 把这几个值一次性写进下面那些**实时字段**
+ * （glassRadius / glassBlur / panelAlpha / accentColor）。
+ * CSS 只认实时字段（行内变量），不直接读 packDefaults ——
+ * 这样默认值可以随设置文件走，用户在界面上改过的值也不会被包的默认值偷偷盖回去。
+ */
+export interface ThemePackDefaults {
+  /** 圆角半径（px，0~28）：一次改掉按钮、卡片、外壳的比例 */
+  radius: number
+  /** 背景模糊（px，0~30）：只有液态玻璃包会真的去糊 */
+  blur: number
+  /** 面板不透明度（0.35~1）：1 = 纯色不透明 */
+  panelAlpha: number
+  /** 外壳投影（CSS box-shadow 值；空串 = 无阴影） */
+  shadow: string
+  /** 顶部工具栏高度（px）：Metro 包更紧凑 */
+  toolbarHeight: number
+  /** 页面四周的「玻璃缝隙」（px）：只有液态玻璃包开，让背景透出来 */
+  gap: number
+  /** 包的默认强调色（空串 = 跟随配色） */
+  accent: string
+}
+
+/** 主题包：来自插件市场的可安装主题（变量与内置主题同构） */
 export interface CustomTheme {
   id: string
   name: string
@@ -76,16 +111,36 @@ export interface ReaderSettings {
   readerImageDim: number
   /** 背景图的模糊半径 0~24px */
   readerImageBlur: number
-  /** 液态玻璃主题包：圆角半径（px，0~24） */
+  /**
+   * 当前主题包的圆角半径（px，0~28）。
+   *
+   * 字段名沿用 glassRadius 是为了让旧 settings.json 与外部校验脚本
+   * （tools/verify-theme-pack.mjs）继续读得懂；语义已经从「液态玻璃的圆角」
+   * 升级为「整个主题包的圆角」，三个包都吃这个值。
+   */
   glassRadius: number
-  /** 液态玻璃主题包：背景模糊（px，0~30） */
+  /** 当前主题包的背景模糊（px，0~30）：只有液态玻璃包会真的去糊 */
   glassBlur: number
+  /** 当前主题包的面板不透明度（0.35~1）：1 = 纯色不透明，越小越透背景 */
+  panelAlpha: number
+  /**
+   * 三个主题包各自的全套默认值。
+   *
+   * 存进设置而不是写死在代码里：一是切包时要按包套用，二是设置页的
+   * 「恢复本包默认」按钮直接读它，三是以后想让用户自定义「包默认值」时不用改数据流。
+   */
+  packDefaults: Record<ThemePackId, ThemePackDefaults>
   /** 强调色覆盖（空串表示跟随主题）。十六进制 #rrggbb */
   accentColor: string
   /** 插件市场装的主题包 */
   customThemes: CustomTheme[]
   /** 当前正在使用的主题包 id（theme='custom' 时生效） */
   customThemeId: string
+  /**
+   * 插件市场清单来源：'github'（默认，读仓库 plugins/index.json）
+   * 或 'mirror'（中转站 plugins.php，国内更快）。两个源同一份 schema。
+   */
+  marketSource: 'github' | 'mirror'
   /** 默认缩放：'fit-width' | 'fit-page' | 'actual' | 数字 */
   defaultZoom: 'fit-width' | 'fit-page' | 'actual' | number
   /** 每次打开是否恢复上次阅读位置 */
@@ -167,6 +222,10 @@ export type AnnotationType =
   | 'rect'
   /** 椭圆框（rects[0] 是外接框） */
   | 'ellipse'
+  /** 直线（rects[0] 是外接框，line 存归一化端点） */
+  | 'line'
+  /** 箭头（同直线，导出时带箭头） */
+  | 'arrow'
   /** 自由文本（text 是内容，rects[0] 是文本框） */
   | 'text'
   /** 插入图片（image 是 dataURL，rects[0] 是位置与尺寸） */
@@ -177,6 +236,8 @@ export const CONTENT_ANNOTATION_TYPES: AnnotationType[] = [
   'whiteout',
   'rect',
   'ellipse',
+  'line',
+  'arrow',
   'text',
   'image'
 ]
@@ -187,7 +248,16 @@ export const CONTENT_ANNOTATION_TYPES: AnnotationType[] = [
  * 'none' = 没在编辑（指针交给画笔/橡皮/漫游那条链路）。
  * 与画笔/橡皮/漫游互斥：一个指针不可能同时在画线又在拖文本框。
  */
-export type EditTool = 'none' | 'select' | 'text' | 'image' | 'whiteout' | 'rect' | 'ellipse'
+export type EditTool =
+  | 'none'
+  | 'select'
+  | 'text'
+  | 'image'
+  | 'whiteout'
+  | 'rect'
+  | 'ellipse'
+  | 'line'
+  | 'arrow'
 
 /** 工具的中文名（工具条、状态栏、提示语共用，避免各写一份） */
 export const EDIT_TOOL_LABEL: Record<EditTool, string> = {
@@ -197,7 +267,9 @@ export const EDIT_TOOL_LABEL: Record<EditTool, string> = {
   image: '图片',
   whiteout: '涂白',
   rect: '矩形',
-  ellipse: '椭圆'
+  ellipse: '椭圆',
+  line: '直线',
+  arrow: '箭头'
 }
 
 /**
@@ -243,8 +315,23 @@ export interface Annotation {
   fontSize?: number
   /** 图片 dataURL（type === 'image'） */
   image?: string
-  /** 线条粗细（type === 'rect' | 'ellipse'，不填默认 2） */
+  /** 线条粗细（type === 'rect' | 'ellipse' | 'line' | 'arrow'，不填默认 2） */
   strokeWidth?: number
+  /**
+   * 直线 / 箭头的两个端点（归一化到 rects[0] 的 0~1）。
+   *
+   * 为什么不用「矩形 + 方向标记」：拖动方向有四种（左上→右下、左下→右上…），
+   * 存 bbox 会丢方向；存归一化端点则既保方向，又能在缩放时自动跟着变。
+   */
+  line?: [number, number, number, number]
+  /**
+   * 填充色（type === 'rect' | 'ellipse'）。
+   * 存的是带透明度的 rgba 字符串（约 22% 不透明），不填就只描边 ——
+   * 教学上要的是「圈出来还能看见底下的字」，纯色填充会把内容盖掉。
+   */
+  fill?: string
+  /** 虚线描边（rect | ellipse | line | arrow）：true 时描边成虚线 */
+  dash?: boolean
   /** 旋转角度（度，暂只用于图片；不填 0） */
   rotation?: number
 

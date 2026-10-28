@@ -2,7 +2,7 @@
 // Copyright 2026 秋夕月拾旧
 
 /**
- * 版本更新检查（双通道 + 静默部署版校验值通道）。
+ * 版本更新检查（双通道 + 静默部署版变量通道）。
  *
  * ── 三条通道 ──────────────────────────────────────────────────
  *   1. GitHub Releases API（公开版主通道，全球可用，国内可能慢）
@@ -23,13 +23,15 @@
  *   检查更新是锦上添花：断网、镜像挂了、格式变了 —— 一律 ok:false + 原因。
  *   公开版两条通道**并行**查，取版本号更高的那个；同版本时按用户偏好
  *   （设置里的 updateChannel，默认 auto→镜像站优先，因为国内更快）。
- *   静默部署版失败**不回落**到公开通道，避免把静默部署用户引到公开版。
+ *   静默部署版失败**不回落**到公开通道，避免把部署用户引到公开版。
  */
 
 import { app, net, shell } from 'electron'
 import { createHash } from 'node:crypto'
 import { createReadStream, createWriteStream, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+
+import { keepInstaller } from './rollback'
 
 const MIRROR_ORIGIN = 'https://xn--6rso4u4lc86ad09c.top'
 const MIRROR_CONTACT = `${MIRROR_ORIGIN}/contact/`
@@ -51,7 +53,7 @@ export interface UpdateAsset {
   url: string
   /** 静默部署版清单里给的校验值（公开通道一般没有） */
   sha256?: string
-  /** 下载时需要带的校验值（静默部署版） */
+  /** 下载时需要带的变量（静默部署版） */
   token?: string
   source?: UpdateSource
 }
@@ -305,7 +307,7 @@ async function checkGithub(timeoutMs: number, current: string): Promise<UpdateCh
 }
 
 /* ============================================================
- * 通道三：静默部署版（内置校验值）
+ * 通道三：静默部署版（内置变量）
  * ============================================================ */
 
 interface SpecialPayload {
@@ -339,15 +341,15 @@ async function checkSpecial(timeoutMs: number, current: string): Promise<UpdateC
         ...(header ? { [header]: token } : {})
       }
     })
-    if (res.status === 401) return { ...base, error: '静默部署校验值无效或已被吊销' }
-    if (!res.ok) return { ...base, error: `静默部署服务器返回 HTTP ${res.status}` }
+    if (res.status === 401) return { ...base, error: '部署变量无效或已被吊销' }
+    if (!res.ok) return { ...base, error: `部署服务器返回 HTTP ${res.status}` }
     const data = (await res.json()) as SpecialPayload
-    if (!data.ok) return { ...base, error: data.error ?? '静默部署服务器返回失败' }
-    if (!data.latest) return { ...base, error: '静默部署服务器上还没有发布版本' }
+    if (!data.ok) return { ...base, error: data.error ?? '部署服务器返回失败' }
+    if (!data.latest) return { ...base, error: '部署服务器上还没有发布版本' }
 
     const latestInfo = data.latest
     const latest = String(latestInfo.version ?? '').replace(/^v/i, '')
-    if (!latest) return { ...base, error: '静默部署清单缺少版本号' }
+    if (!latest) return { ...base, error: '部署清单缺少版本号' }
     const newer = isNewer(latest, current)
     let asset: UpdateAsset | undefined
     if (newer && latestInfo.asset?.name) {
@@ -375,7 +377,7 @@ async function checkSpecial(timeoutMs: number, current: string): Promise<UpdateC
     }
   } catch (error) {
     const aborted = error instanceof Error && error.name === 'AbortError'
-    return { ...base, error: aborted ? '连接静默部署服务器超时' : '连接静默部署服务器失败（可能没有网络）' }
+    return { ...base, error: aborted ? '连接部署服务器超时' : '连接部署服务器失败（可能没有网络）' }
   } finally {
     clearTimeout(timer)
   }
@@ -411,7 +413,7 @@ export async function checkForUpdate(
 ): Promise<UpdateCheckResult> {
   const current = currentVersion()
 
-  // 静默部署版：只走校验值通道，失败不回落
+  // 静默部署版：只走变量通道，失败不回落
   if (isSpecialBuild()) {
     return checkSpecial(timeoutMs, current)
   }
@@ -552,6 +554,16 @@ export async function downloadUpdate(
         rmSync(target, { force: true })
         return { ok: false, error: `安装包校验失败（期望 ${asset.sha256.slice(0, 12)}…，实际 ${actual.slice(0, 12)}…）` }
       }
+    }
+    /*
+     * 下载好就留一份副本（回滚用，2.0.0 / B13）。
+     * 这里失败不影响主流程：装不上旧版本是遗憾，但新版本该装还得装。
+     */
+    try {
+      const guessed = /(\d+\.\d+\.\d+(?:\.\d+)?)/.exec(asset.name)?.[1] ?? currentVersion()
+      keepInstaller(target, guessed)
+    } catch {
+      /* 忽略 */
     }
     return { ok: true, path: target }
   } catch (error) {

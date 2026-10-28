@@ -1,0 +1,200 @@
+/* SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0 */
+/* Copyright 2026 秋夕月拾旧 */
+
+/*
+ * 底部悬浮画笔条。
+ *
+ * 布局要点：
+ *   · 外层 .dock 是 position: fixed + 居中，pointer-events 只放在条身上，
+ *     不然会挡住阅读区的滚动与双指手势；
+ *   · 条身用与功能区同一套表面变量（--surface / --panel-alpha / --panel-shadow），
+ *     所以切主题、切主题包、调玻璃透明度时它跟着变，不需要单独维护配色；
+ *   · 圆角吃 --radius，Metro 包下自动变直角，玻璃包下自动变大圆角。
+ */
+
+.dock {
+  position: fixed;
+  left: 50%;  /* 屏幕水平居中：画布宽度随窗口变，固定居中比跟着阅读区走更稳 */
+  bottom: 46px; /* 给底部状态栏让位（状态栏高 30px 左右） */
+  transform: translateX(-50%);
+  z-index: 60; /* 低于设置面板/遮罩（>100），高于页面内容 */
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 10px;
+  max-width: calc(100vw - 40px);
+  border-radius: calc(var(--radius, 10px) + 6px);
+  border: 1px solid rgb(var(--line) / 0.9);
+  /* 主题变量是「空格分隔的三元组」（--surface: 255 255 255），必须用 rgb() 包起来；
+     直接塞进 color-mix 会得到非法值 → 背景整块变透明（踩过）。 */
+  background: rgb(var(--surface) / var(--panel-alpha, 1));
+  box-shadow: var(--panel-shadow, 0 10px 24px rgb(0 0 0 / 0.12));
+  backdrop-filter: blur(var(--glass-blur, 0px));
+  -webkit-backdrop-filter: blur(var(--glass-blur, 0px));
+  pointer-events: auto;
+  user-select: none;
+  transition: opacity 0.15s ease;
+}
+
+/* 玻璃包：缝隙感（与功能区、侧栏一致） */
+html[data-pack='glass'] .dock {
+  box-shadow:
+    var(--panel-shadow, 0 18px 40px rgb(0 0 0 / 0.18)),
+    inset 0 0 0 var(--glass-gap, 10px) rgb(255 255 255 / 0.16);
+}
+
+.dock__group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* 退出绘画时颜色组整体压暗（与按钮 disabled 叠加，视觉上更明确） */
+.dock__group.is-muted {
+  opacity: 0.45;
+}
+
+.dock__divider {
+  width: 1px;
+  height: 30px;
+  margin: 0 6px;
+  background: rgb(var(--line) / 0.9);
+  flex: none;
+}
+
+.dock__btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 44px;
+  height: 44px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: rgb(var(--text));
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+
+.dock__btn:hover:not(:disabled) {
+  background: rgb(var(--accent) / 0.1);
+}
+
+.dock__btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.dock__btn.is-active {
+  background: rgb(var(--accent) / 0.16);
+  color: rgb(var(--accent));
+  box-shadow: inset 0 0 0 1px rgb(var(--accent) / 0.38);
+}
+
+.dock__btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.dock__lbl {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* 调色盘：只有圆点，标签在下面一行小字 */
+
+.dock__btn--swatch {
+  min-width: 34px;
+  height: 44px;
+  padding: 0 4px;
+}
+
+.dock__btn--swatch .ribbon__swatch {
+  width: 18px;
+  height: 18px;
+}
+
+.dock__btn--swatch.is-active .ribbon__swatch {
+  box-shadow:
+    0 0 0 2px rgb(var(--surface)),
+    0 0 0 4px rgb(var(--accent) / 0.7);
+}
+
+/* 粗细组：滑块比功能区里略宽一点，底部条不受目录宽度限制 */
+
+.dock__group--width {
+  min-width: 118px;
+}
+
+.dock__group--width .ribbon__slider {
+  width: 84px;
+}
+
+.dock__group--width .ribbon__readout {
+  min-width: 18px;
+  font-size: 11px;
+}
+
+/* 清屏滑块（SlideToClear）在底部条里不需要额外外边距 */
+
+.dock .slideclear {
+  margin: 0;
+}
+
+/* ---------- 窄窗口：先藏文字标签，再藏分隔线 ---------- */
+
+@media (max-width: 1080px) {
+  .dock__lbl {
+    display: none;
+  }
+
+  .dock__btn {
+    min-width: 38px;
+    height: 38px;
+    padding: 0 4px;
+  }
+
+  .dock__btn--swatch {
+    min-width: 28px;
+    height: 38px;
+  }
+}
+
+@media (max-width: 860px) {
+  .dock__divider {
+    margin: 0 3px;
+  }
+
+  .dock__group--width {
+    min-width: 96px;
+  }
+
+  .dock__group--width .ribbon__slider {
+    width: 64px;
+  }
+}
+
+/* ---------- Metro 包：直角、更扁、更实的底 ---------- */
+
+html[data-pack='metro'] .dock {
+  border-radius: 0;
+  padding: 4px 8px;
+}
+
+html[data-pack='metro'] .dock__btn {
+  border-radius: 0;
+}
+
+/* ---------- 深色档位：描边别提太亮 ---------- */
+
+html[data-theme='dark'] .dock,
+html[data-theme='midnight'] .dock {
+  border-color: rgb(255 255 255 / 0.14);
+}

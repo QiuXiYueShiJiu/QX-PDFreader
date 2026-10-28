@@ -28,7 +28,7 @@ import {
   X
 } from 'lucide-react'
 import { useViewer } from '../store'
-import type { ReaderSettings, ThemeMode } from '@shared/types'
+import type { ReaderSettings, ThemeMode, ThemePackId } from '@shared/types'
 
 /** 缩放预设：用 as const 保留字面量类型，减少 as 断言 */
 const ZOOM_PRESETS = [
@@ -132,11 +132,26 @@ const ACCENT_PRESETS = [
   { value: '#475569', label: '灰' }
 ] as const
 
-/** 各主题包自己的主色（与 base.css / metro.css / glass.css 里的 --accent 保持一致） */
-const PACK_DEFAULT_ACCENT: Record<string, string> = {
-  classic: '#c0392b',
-  metro: '#0078d4',
-  glass: '#4c6ef5'
+/*
+ * 各主题包自己的主色不在这里写死：它已经是 packDefaults[id].accent 的一部分
+ * （见 shared/settings.ts 的 DEFAULT_PACK_DEFAULTS），强调色控件的「默认」按钮
+ * 与「恢复本包默认」按钮读的是同一份数据，不会出现两套口径。
+ */
+
+/**
+ * 「恢复本包默认」按钮要回填的字段。
+ *
+ * 三个实时字段 + 强调色，正好就是设置页里能调的全部形态项：
+ * 恢复默认不是重置整个设置，只重置「这个包自己的观感」。
+ */
+function packDefaultsPatch(settings: ReaderSettings, packId: ThemePackId): Partial<ReaderSettings> {
+  const preset = settings.packDefaults[packId]
+  return {
+    glassRadius: preset.radius,
+    glassBlur: preset.blur,
+    panelAlpha: preset.panelAlpha,
+    accentColor: preset.accent
+  }
 }
 
 /**
@@ -165,14 +180,16 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
   /** 打开时把焦点移进来，关闭时还给原来的元素 —— 键盘和读屏用户才不会迷路 */
   const panelRef = useRef<HTMLDivElement | null>(null)
   const idPrefix = useId()
-  /* Linux 与 Windows 的「默认应用」路径不同，文案与按钮跟着平台走 */
-  const isWindows = /Windows/i.test(navigator.userAgent)
 
   /** 背景图预览：与主界面走同一条 pdf-file 协议 */
   const readerImageUrl = useMemo(() => {
     if (!settings.readerImage) return ''
-    const normalized = settings.readerImage.replace(/\\/g, '/')
-    return `pdf-file:///?p=${encodeURIComponent(normalized)}`
+    const encoded = settings.readerImage
+      .replace(/\\/g, '/')
+      .split('/')
+      .map((seg) => encodeURIComponent(seg).replace(/%3A/gi, ':'))
+      .join('/')
+    return `pdf-file:///${encoded}`
   }, [settings.readerImage])
 
   const [picking, setPicking] = useState(false)
@@ -236,7 +253,16 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
    * 不打扰界面其它部分。
    */
   const checkUpdateNow = useViewer((s) => s.checkUpdateNow)
-  const setShowMarket = useViewer((s) => s.setShowMarket)
+  const setShowThemeStore = useViewer((s) => s.setShowThemeStore)
+  const rollbackVersions = useViewer((s) => s.rollbackVersions)
+  const loadRollback = useViewer((s) => s.loadRollback)
+  const applyRollback = useViewer((s) => s.applyRollback)
+  const onRollback = async (version: string): Promise<void> => {
+    await applyRollback(version)
+  }
+  useEffect(() => {
+    void loadRollback()
+  }, [loadRollback])
   const [checking, setChecking] = useState(false)
   const [checkMsg, setCheckMsg] = useState('')
 
@@ -385,6 +411,12 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
                       onChange({
                         theme: pack.fallback,
                         themeLayout: pack.id === 'metro' ? 'office' : 'normal',
+                        /*
+                         * 切包 = 套用这个包的一整套默认值，而不只是换配色。
+                         * 圆角 / 模糊 / 面板透明度 / 强调色一起换，用户才有
+                         * 「换了一个主题」而不是「换了个颜色」的感觉。
+                         */
+                        ...packDefaultsPatch(settings, pack.id)
                       })
                     }}
                   >
@@ -453,7 +485,7 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
                     value={
                       /^#[0-9a-f]{6}$/i.test(settings.accentColor)
                         ? settings.accentColor
-                        : PACK_DEFAULT_ACCENT[activePack.id] ?? '#c0392b'
+                        : settings.packDefaults[activePack.id].accent || '#c0392b'
                     }
                     aria-label="自定义强调色"
                     data-accent-custom="1"
@@ -474,26 +506,35 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
               </div>
             </div>
 
-            {/* 液态玻璃包：圆角半径 + 模糊强度 */}
-            {activePack.id === 'glass' ? (
-              <div className="sb-field sb-field--stack">
-                <div className="sb-field-text">
-                  <span className="sb-field-label">玻璃质感</span>
-                  <span className="sb-field-hint">圆角越大越圆润；模糊 0 是纯半透明，越大越磨砂</span>
-                </div>
-                <label className="sb-range" htmlFor={`${idPrefix}-glass-radius`}>
-                  <span className="sb-range__label">圆角 {settings.glassRadius}px</span>
-                  <input
-                    id={`${idPrefix}-glass-radius`}
-                    type="range"
-                    min={0}
-                    max={24}
-                    step={1}
-                    value={settings.glassRadius}
-                    data-glass-radius="1"
-                    onChange={(event) => onChange({ glassRadius: Number(event.target.value) })}
-                  />
-                </label>
+            {/*
+              主题包形态：圆角与面板透明度三个包都能调，模糊只有液态玻璃包露出来。
+              滑块 onChange → patchSettings → applyTheme 写行内变量，所以是「拖动即见效」，
+              不需要重渲染整个界面；值同时落盘，下次启动还在。
+            */}
+            <div className="sb-field sb-field--stack">
+              <div className="sb-field-text">
+                <span className="sb-field-label">形态细节</span>
+                <span className="sb-field-hint">
+                  圆角与面板透明度对三个包都生效；模糊只有液态玻璃包看得出来。当前包：
+                  {activePack.label}
+                </span>
+              </div>
+              <label className="sb-range" htmlFor={`${idPrefix}-theme-radius`}>
+                <span className="sb-range__label">圆角 {settings.glassRadius}px</span>
+                {/* 旧属性名 data-glass-radius 保留：tools/verify-theme-pack.mjs 靠它找滑块 */}
+                <input
+                  id={`${idPrefix}-theme-radius`}
+                  type="range"
+                  min={0}
+                  max={28}
+                  step={1}
+                  value={settings.glassRadius}
+                  data-tb-id="theme-radius"
+                  data-glass-radius="1"
+                  onChange={(event) => onChange({ glassRadius: Number(event.target.value) })}
+                />
+              </label>
+              {activePack.id === 'glass' ? (
                 <label className="sb-range" htmlFor={`${idPrefix}-glass-blur`}>
                   <span className="sb-range__label">模糊 {settings.glassBlur}px</span>
                   <input
@@ -503,12 +544,39 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
                     max={30}
                     step={1}
                     value={settings.glassBlur}
+                    data-tb-id="glass-blur"
                     data-glass-blur="1"
                     onChange={(event) => onChange({ glassBlur: Number(event.target.value) })}
                   />
                 </label>
+              ) : null}
+              <label className="sb-range" htmlFor={`${idPrefix}-theme-panel-alpha`}>
+                <span className="sb-range__label">
+                  面板透明度 {Math.round(settings.panelAlpha * 100)}%
+                </span>
+                <input
+                  id={`${idPrefix}-theme-panel-alpha`}
+                  type="range"
+                  min={0.35}
+                  max={1}
+                  step={0.01}
+                  value={settings.panelAlpha}
+                  data-tb-id="theme-panel-alpha"
+                  onChange={(event) => onChange({ panelAlpha: Number(event.target.value) })}
+                />
+              </label>
+              <div className="sb-field-actions">
+                <button
+                  type="button"
+                  className="sb-btn sb-btn--ghost"
+                  data-tb-id="pack-reset"
+                  onClick={() => onChange(packDefaultsPatch(settings, activePack.id))}
+                  title="只恢复这个主题包的圆角 / 模糊 / 面板透明度 / 强调色，其它设置不动"
+                >
+                  恢复「{activePack.label}」默认
+                </button>
               </div>
-            ) : null}
+            </div>
 
             <div className="sb-field">
               <div className="sb-field-text">
@@ -544,36 +612,9 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
             </div>
 
 
-            {/* 2026-10-24：布局与配色解耦，单独一门开关 */}
-            {/* 1.0.8.3：布局并入主题包（Metro = Office 2019 功能区），这里保留 DOM 只为兼容旧用例，已隐藏 */}
-            <div className="sb-field" hidden aria-hidden="true">
-              <div className="sb-field-text">
-                <span className="sb-field-label">界面布局</span>
-                <span className="sb-field-hint">
-                  紧凑是现在的工具条；Office 2019 换成功能区式的条带（图标在上、文字在下、直角），配色仍跟着上面选的主题走
-                </span>
-              </div>
-              <div className="sb-seg sb-seg--wrap" role="group" aria-label="界面布局">
-                <button
-                  type="button"
-                  className={`sb-seg-btn${settings.themeLayout === 'normal' ? ' is-active' : ''}`}
-                  data-tb-id="layout-normal"
-                  aria-pressed={settings.themeLayout === 'normal'}
-                  onClick={() => onChange({ themeLayout: 'normal' })}
-                >
-                  紧凑
-                </button>
-                <button
-                  type="button"
-                  className={`sb-seg-btn${settings.themeLayout === 'office' ? ' is-active' : ''}`}
-                  data-tb-id="layout-office"
-                  aria-pressed={settings.themeLayout === 'office'}
-                  onClick={() => onChange({ themeLayout: 'office' })}
-                >
-                  Office 2019
-                </button>
-              </div>
-            </div>
+            {/* 2026-10-28：布局设置整块删除。界面只剩 Office 一种布局，
+                还留着开关只会让人以为能改（原来那个 hidden 也没真隐藏，
+                .sb-field 的 display:flex 压过了 [hidden] 的默认 display:none）。 */}
 
             <div className="sb-field">
               <div className="sb-field-text">
@@ -636,11 +677,11 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
                   type="button"
                   className="sb-link"
                   data-tb-id="settings-open-market"
-                  onClick={() => setShowMarket(true)}
+                  onClick={() => setShowThemeStore(true)}
                 >
-                  插件市场
+                  主题商店
                 </button>
-                看看社区主题包
+                看看社区配色包
               </div>
             </div>
 
@@ -781,28 +822,23 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
               <div className="sb-field-text">
                 <span className="sb-field-label">把图片交给秋夕打开</span>
                 <span className="sb-field-hint">
-                  {isWindows
-                    ? '安装时已登记 PDF 与常见图片格式。Windows 10/11 把「默认打开方式」锁在用户设置里，安装器改不了，需要你在设置页点一次「秋夕-PDF阅读器」。'
-                    : '安装时已通过 .desktop 文件登记 PDF 与常见图片格式。Linux 的默认程序由桌面环境决定，可在文件属性里「设为默认」，或执行：xdg-mime default qx-pdfreader.desktop application/pdf'}
+                  安装时已登记 PDF 与常见图片格式。Windows 10/11 把「默认打开方式」锁在用户设置里，
+                  安装器改不了，需要你在设置页点一次「秋夕-PDF阅读器」。
                 </span>
               </div>
               <div className="sb-row">
-                {isWindows ? (
-                  <button
-                    type="button"
-                    className="sb-btn sb-btn-primary"
-                    data-tb-id="settings-open-default-apps"
-                    onClick={() => {
-                      void window.pdfApp.app.openDefaultApps()
-                    }}
-                  >
-                    打开默认应用设置
-                  </button>
-                ) : null}
+                <button
+                  type="button"
+                  className="sb-btn sb-btn-primary"
+                  data-tb-id="settings-open-default-apps"
+                  onClick={() => {
+                    void window.pdfApp.app.openDefaultApps()
+                  }}
+                >
+                  打开默认应用设置
+                </button>
                 <span className="sb-field-hint">
-                  {isWindows
-                    ? '改完回到这里，双击 .png / .jpg 就会用秋夕打开。'
-                    : '改完回到这里，双击 .png / .jpg 就会用秋夕打开。'}
+                  改完回到这里，双击 .png / .jpg 就会用秋夕打开。
                 </span>
               </div>
             </div>
@@ -846,37 +882,76 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
               自动检查是静默的：只有查到新版本才会在右下角提示并开始下载，下载完由你决定什么时候装。
             </p>
 
-            {/* 通道偏好：只有公开版能选；静默部署版固定走服务器校验值通道 */}
-            <div className="sb-field">
-              <span className="sb-field-label">更新来源</span>
-              <div className="sb-seg" role="radiogroup" aria-label="更新来源" data-update-channel="1">
-                {(
-                  [
-                    ['auto', '自动', '两条都查，取版本更高的（同版本优先镜像站）'],
-                    ['mirror', '镜像站', '只查镜像站，国内最快'],
-                    ['github', 'GitHub', '只查 GitHub Releases']
-                  ] as const
-                ).map(([value, label, tip]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    role="radio"
-                    aria-checked={settings.updateChannel === value}
-                    /* 与面板里其它分段控件保持同一套样式钩子（.sb-seg-btn[aria-pressed]） */
-                    aria-pressed={settings.updateChannel === value}
-                    data-update-channel-option={value}
-                    className="sb-seg-btn"
-                    title={tip}
-                    onClick={() => onChange({ updateChannel: value })}
-                  >
-                    {label}
-                  </button>
-                ))}
+            {/*
+              回滚（2.0.0 / B13）。
+              只列「保留着的旧安装包」，最多三份 —— 这些都是自动更新时顺手存下的，
+              不是让用户自己去找安装包。连续两次启动没进界面，主进程会自己弹框问。
+            */}
+            {rollbackVersions.length > 0 ? (
+              <div className="sb-field" data-rollback="1">
+                <span className="sb-label">回滚到旧版本</span>
+                <p className="sb-field-hint">
+                  还留着 {rollbackVersions.length} 个旧安装包。装回去不会动设置、最近文件和批注。
+                </p>
+                <div className="sb-field-inline">
+                  {rollbackVersions.map((entry) => (
+                    <button
+                      key={entry.version}
+                      type="button"
+                      className="sb-btn"
+                      data-tb-id={`rollback-${entry.version}`}
+                      onClick={() => void onRollback(entry.version)}
+                      title={`${entry.version} · ${Math.round(entry.size / 1048576)}MB`}
+                    >
+                      回滚到 {entry.version}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <p className="sb-field-hint">
-                静默部署版没有这个选项 —— 它只从指定服务器取更新，走内置校验值校验。
-              </p>
-            </div>
+            ) : null}
+
+            {/*
+              通道偏好：只有公开版能选。
+
+              2026-10-28（需求清单 B2 / B3）：两件事一起改。
+              · 原来这里有一句「静默部署版没有这个选项……」，等于在公开版里讲解一个
+                用户根本装不到的版本 —— 正式版里不该出现任何特殊版本的说明，整段删掉。
+              · 定制版本（variant 不是 standard）不该让用户改更新源：它只认内置通道，
+                给了选择器只会让人以为能换。所以整块在非公开版不渲染，只留上面的
+                「检查更新」按钮。
+            */}
+            {about?.variant === 'standard' ? (
+              <div className="sb-field">
+                <span className="sb-field-label">更新来源</span>
+                <div className="sb-seg" role="radiogroup" aria-label="更新来源" data-update-channel="1">
+                  {(
+                    [
+                      ['auto', '自动', '两条都查，取版本更高的（同版本优先镜像站）'],
+                      ['mirror', '镜像站', '只查镜像站，国内最快'],
+                      ['github', 'GitHub', '只查 GitHub Releases']
+                    ] as const
+                  ).map(([value, label, tip]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      role="radio"
+                      aria-checked={settings.updateChannel === value}
+                      /* 与面板里其它分段控件保持同一套样式钩子（.sb-seg-btn[aria-pressed]） */
+                      aria-pressed={settings.updateChannel === value}
+                      data-update-channel-option={value}
+                      className="sb-seg-btn"
+                      title={tip}
+                      onClick={() => onChange({ updateChannel: value })}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className="sb-field-hint">
+                  自动会同时问镜像站与 GitHub，取版本更高的那个；同版本优先用镜像站，下载更快。
+                </p>
+              </div>
+            ) : null}
 
           </section>
 

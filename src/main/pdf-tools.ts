@@ -725,39 +725,8 @@ interface Converter {
   extensions: string[]
 }
 
-/** 在 PATH 里找一个可执行名（只用 existsSync，不额外 spawn 进程） */
-function inPath(name: string): string | null {
-  for (const dir of (process.env.PATH ?? '').split(':')) {
-    if (!dir) continue
-    const full = join(dir, name)
-    try {
-      if (existsSync(full)) return full
-    } catch {
-      /* 忽略 */
-    }
-  }
-  return null
-}
-
 /** PATH 与常见安装目录里找 soffice */
 function findSoffice(): string | null {
-  /*
-   * Linux 上 soffice 通常在 PATH 里（或 /opt/libreoffice 下的 program 目录）；
-   * 先按 PATH 找，再退到几个固定位置 —— 打包机与 UOS 上名字都是 soffice。
-   */
-  if (process.platform !== 'win32') {
-    const fromPath = ['soffice', '/usr/bin/soffice', '/usr/lib/libreoffice/program/soffice',
-      '/snap/bin/libreoffice', '/opt/libreoffice/program/soffice']
-    for (const candidate of fromPath) {
-      try {
-        if (candidate.includes('/') ? existsSync(candidate) : Boolean(inPath(candidate))) return candidate
-      } catch {
-        /* 忽略非法路径 */
-      }
-    }
-    return null
-  }
-
   const candidates = [
     'C:\\Program Files\\LibreOffice\\program\\soffice.exe',
     'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe',
@@ -795,14 +764,12 @@ function availableConverters(): Converter[] {
    * 因此这里按「Windows 上大概率有」列出来，真正失败时由 convert 的错误提示兜底。
    * 两个 COM 提供方都列上，按 Office 优先于 WPS。
    */
-  if (process.platform === 'win32') {
-    list.push(
-      { kind: 'word', label: 'Microsoft Word', extensions: officeExt },
-      { kind: 'excel', label: 'Microsoft Excel', extensions: ['xls', 'xlsx', 'csv'] },
-      { kind: 'powerpoint', label: 'Microsoft PowerPoint', extensions: ['ppt', 'pptx'] },
-      { kind: 'wps', label: 'WPS Office', extensions: ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'rtf', 'csv'] }
-    )
-  }
+  list.push(
+    { kind: 'word', label: 'Microsoft Word', extensions: officeExt },
+    { kind: 'excel', label: 'Microsoft Excel', extensions: ['xls', 'xlsx', 'csv'] },
+    { kind: 'powerpoint', label: 'Microsoft PowerPoint', extensions: ['ppt', 'pptx'] },
+    { kind: 'wps', label: 'WPS Office', extensions: ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'rtf', 'csv'] }
+  )
 
   converterCache = list
   return list

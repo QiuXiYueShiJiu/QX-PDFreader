@@ -122,6 +122,31 @@ await json(`(async () => {
   return true;
 })()`)
 
+/*
+ * 归位：这套用例经常跟着别的用例跑（前面可能留了缩放、滚动、打开的浮层），
+ * 只要视口里没有「两行完整可见的正文」，下面的落点挑选就会一个候选都挑不出来。
+ * 所以先把状态收拾干净，再挑点。
+ */
+await json(`(async () => {
+  const w = (ms) => new Promise((r) => setTimeout(r, ms));
+  const s = window.__store.getState();
+  if (s.compareOpen) s.closeComparePane();
+  if (s.showSettings) s.setShowSettings(false);
+  if (s.showTools) s.setShowTools(false);
+  if (s.showThemeStore) s.setShowThemeStore(false);
+  if (s.showPluginStore) s.setShowPluginStore(false);
+  if (s.showImageTools) s.setShowImageTools(false);
+  if (s.editTool !== 'select') s.setEditTool('select');
+  if (s.zoom !== 'fit-width') s.setZoom('fit-width');
+  const sc = document.querySelector('.viewer-scroll');
+  if (sc) sc.scrollTop = 0;
+  await w(400);
+  /* 封面页只有 5 行字，拖动跨度太小选不出东西；落到正文页再挑点（顺序不能反，setPage 会滚动） */
+  s.setPage(Math.min(3, s.pageCount || 1));
+  await w(1400);
+  return true;
+})()`)
+
 /* ---------- 找落点：同一页内的两行文字 + 一处灰底 ---------- */
 const spotRaw = await json(`(() => {
   /*
@@ -154,14 +179,15 @@ const spotRaw = await json(`(() => {
       .filter(
         (s) =>
           s.width > 40 &&
-          s.height > 6 &&
+          s.height > 5 &&
           s.text.length > 8 &&
           s.top >= 140 &&
-          s.bottom <= innerHeight - 150 &&
+          s.bottom <= innerHeight - 120 &&
           s.left >= 40 &&
           s.right <= innerWidth - 40
       );
-    if (spans.length < 6) continue;
+    /* 4 行就够（封面页只有 5 行完整可见），太少说明这一屏没正文，换下一页 */
+    if (spans.length < 4) continue;
     spans.sort((p, q) => p.top - q.top || p.left - q.left);
     /* 两行：起点取第 1 行靠右 1/3，终点取第 3 行靠右 1/3，保证跨行 */
     const line1 = spans[0];

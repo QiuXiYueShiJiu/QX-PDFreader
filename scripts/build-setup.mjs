@@ -7,14 +7,14 @@
  * ══════════════════════════════════════════════════════════════════
  * 为什么要单独一份（用户 2026-10-16 要求：源码零隐私信息 + 版本隔离）
  * ══════════════════════════════════════════════════════════════════
- *   源码是要 Apache-2.0 开源的，不能出现学单位名称、安装目录、本机路径。
- *   但交付时快速版又必须装到指定的安装目录、安装包名要带学校标识。
+ *   源码是要 Apache-2.0 开源的，不能出现学单位名称、本地目录、本机路径。
+ *   但交付时快速版又必须装到指定的本地目录、安装包名要带示例单位标识。
  *   解法：源码里只留**通用默认值**，交付参数放在这份**不发布**的
  *   `build/packaging.json` 里（已在 .gitignore 中）。
  *
  * 字段：
  *   installDir     快速版（oneClick）默认安装目录。留空 = 用"未发布"的默认值
- *   installDirArtifact  安装包产物名里是否追加学校/客户标识
+ *   installDirArtifact  安装包产物名里是否追加示例单位/客户标识
  *   artifactName   标准版安装包文件名模板（${ext} 会被替换成 exe）
  *
  * 用法（一般由 scripts/build-installers.mjs 读，不需要手动跑）：
@@ -47,7 +47,7 @@ const VARIANT = (() => {
 })()
 
 /**
- * 默认安装目录（**通用值，不含任何客户/学校信息**）。
+ * 默认安装目录（**通用值，不含任何客户/示例单位信息**）。
  * 交付时由 build/packaging.json 覆盖。
  */
 const DEFAULT_INSTALL_DIR = 'C:\\Program Files\\QXPDFReader'
@@ -55,7 +55,7 @@ const DEFAULT_INSTALL_DIR = 'C:\\Program Files\\QXPDFReader'
 /**
  * 首次运行 build-setup 时写进 build/packaging.json 的**通用默认值**。
  *
- * ★ 这里**不要**写具体的单位名 / 安装目录 —— 本文件是公开源码。
+ * ★ 这里**不要**写具体的单位名 / 本地目录 —— 本文件是公开源码。
  *   交付时把真实值填进 build/packaging.json（该文件不发布），
  *   或者直接用环境变量 PDFREADER_INSTALL_DIR / PDFREADER_QUICK_NAME 覆盖。
  */
@@ -146,7 +146,7 @@ const legal = {
     support: cfg.legal?.quick?.support ?? ''
   },
   /*
-   * 静默部署版：只给签约单位部署，更新走「内置校验值 + 服务器清单」通道。
+   * 静默部署版：只给签约单位部署，更新走「内置凭据 + 服务器清单」通道。
    * 声明可以单独配（cfg.legal.special），没配就复用 quick 的。
    */
   special: {
@@ -294,7 +294,7 @@ const buildInfo = {
   support: legal[VARIANT].support,
   /*
    * 更新通道：public 走 GitHub + 镜像站；自定义部署版只走服务器清单（带校验值）。
-   * 连接参数（路径 / 头名 / 校验值）只写进 build-info.json，源码里没有这些字面量。
+   * 连接参数（路径 / 头名 / 凭据）只写进 build-info.json，源码里没有这些字面量。
    */
   channel: VARIANT === 'special' ? 'custom' : 'public',
   custom:
