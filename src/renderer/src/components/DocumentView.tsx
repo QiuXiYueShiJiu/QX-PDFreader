@@ -2732,10 +2732,15 @@ export function DocumentView({
        * 双击检测：两次按下间隔 < 400ms、位移 < 12px 就当双击 → 选中该词。
        * 时序见上面 mouseTapRef 的注释（我们掐掉了原生 dblclick）。
        */
+      /*
+       * 同样改用事件时钟（v2.0.1.1）：两次按下的间隔若按处理函数跑起来的时刻算，
+       * 主线程一忙就会被算大，双击被当成两次单击。
+       */
       const now = Date.now()
+      const evt = Number.isFinite(e.timeStamp) && e.timeStamp > 0 ? e.timeStamp : now
       const prevTap = mouseTapRef.current
-      const isDouble = now - prevTap.at < 400 && Math.abs(e.clientX - prevTap.x) < 12 && Math.abs(e.clientY - prevTap.y) < 12
-      mouseTapRef.current = { at: now, x: e.clientX, y: e.clientY }
+      const isDouble = evt - prevTap.at < 400 && Math.abs(e.clientX - prevTap.x) < 12 && Math.abs(e.clientY - prevTap.y) < 12
+      mouseTapRef.current = { at: evt, x: e.clientX, y: e.clientY }
       const pickedWord = isDouble ? selectWordAt(e.clientX, e.clientY) : false
 
       selectDragRef.current = {
@@ -3365,12 +3370,26 @@ export function DocumentView({
         }
 
         if (s.mode === 'pending') {
-          const at = Date.now()
+          /*
+           * ★ 双击判定用**事件时钟**（ev.timeStamp），不用墙上时钟（v2.0.1.1 修）。
+           *
+           *   踩坑：原先是 `const at = Date.now()`，两次轻点的间隔按「处理函数真正
+           *   跑起来的时刻」算。主线程一忙（翻页、重绘、GC），第二次 pointerup 的
+           *   处理会被推后几十到上百毫秒，420ms 的窗口就被吃掉 —— 用户明明双击了，
+           *   程序却当成两次单击（约 1/3 概率），表现为「双击选词选不出东西」。
+           *
+           *   ev.timeStamp 是事件**产生**的时刻（与 performance.now 同一时间域），
+           *   不受排队影响，两次轻点的间隔还原成用户手指的真实间隔。
+           *   长按判定仍用墙上时钟，因为 s.startAt 是 pointerdown 里用 Date.now()
+           *   记的 —— 两者不在同一时间域，故分开成 nowWall / at。
+           */
+          const nowWall = Date.now()
+          const at = Number.isFinite(ev.timeStamp) && ev.timeStamp > 0 ? ev.timeStamp : nowWall
           /*
            * 按了够久才松手 → 也当长按选词。
            * 真机上手指按下 ~300ms 就抬起来是常态，只认 400ms 计时器会「一次都选不中」。
            */
-          if (at - s.startAt >= TOUCH_TAP_HOLD_MS) {
+          if (nowWall - s.startAt >= TOUCH_TAP_HOLD_MS) {
             beginWordSelect(ev.clientX, ev.clientY)
             /* 用选区是否真的选出内容判断成功，而不是读 s.mode：
                TS 在 `if (s.mode === 'pending')` 分支里已经把 s.mode 收窄，

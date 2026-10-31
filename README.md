@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-2.0.1.0-2f6fed" />
+  <img alt="version" src="https://img.shields.io/badge/version-2.0.1.1-2f6fed" />
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078d4" />
   <img alt="license" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-e5484d" />
   <img alt="offline" src="https://img.shields.io/badge/network-%E5%8F%AA%E6%A3%80%E6%9F%A5%E6%9B%B4%E6%96%B0-16a34a" />
@@ -310,7 +310,7 @@
 |---|---|---|
 | 安装方式 | 向导（可选目录与快捷方式） | 一路到底静默装好 |
 | 适合 | 自己电脑、需要挑安装位置 | 教室一体机、批量部署 |
-| 文件名 | `秋夕-PDF阅读器-2.0.1.0-安装程序.exe` | `PDF阅读器-快速安装.exe` |
+| 文件名 | `秋夕-PDF阅读器-2.0.1.1-安装程序.exe` | `PDF阅读器-快速安装.exe` |
 
 ### 安装步骤
 
@@ -327,7 +327,7 @@ PDF阅读器-快速安装.exe /S
 ### 校验安装包
 
 ```powershell
-Get-FileHash .\秋夕-PDF阅读器-2.0.1.0-安装程序.exe -Algorithm SHA256
+Get-FileHash .\秋夕-PDF阅读器-2.0.1.1-安装程序.exe -Algorithm SHA256
 ```
 
 ---
@@ -457,6 +457,27 @@ A：工具箱「加密」可以加/解密码；带打开密码的 PDF 需先解�
 ---
 
 ## 更新日志
+
+### 2.0.1.1（2026-10-31）
+
+**修：选择工具下双击选词约 1/3 概率失效**
+
+- 根因是双击间隔用了墙上时钟：`Date.now()` 量的是「事件处理函数真正跑起来的
+  时刻」，主线程一忙（翻页、重绘、GC），第二次 pointerup 被推后几十到上百毫秒，
+  420ms 的判定窗口就被吃掉 —— 用户明明双击了，程序却当成两次单击。
+- 改为用事件时钟 `ev.timeStamp`（与 `performance.now` 同一时间域，记录事件
+  **产生**的时刻，不受排队影响），还原两次轻点的真实间隔。
+- 同一问题在页面双击缩放、桌面端双选字两条路径上一样存在，一并改掉。
+  长按判定仍用墙上时钟（起点是 pointerdown 时记的），两个时间域不再混用。
+
+**补齐：8 支会改动前台窗口的手动测试工具**
+
+- `tools/show-window.ps1`、`focus-window.ps1`、`focus-slideshow.ps1`、
+  `maximize-window.ps1`、`move-window.ps1`、`click-at.ps1`、`send-click.ps1`、
+  `send-key.ps1`，以及它们共用的 `tools/_win32.ps1`。
+- 这八支都是**手动**工具，一律先调用 `Assert-ForegroundAllowed`：没有显式设置
+  `PDF_READER_ALLOW_FOREGROUND=1` 就拒绝执行，不会在课堂机上抢前台。
+- 此前它们没进仓库，导致 `verify-no-foreground` 的静态判据直接 ENOENT 崩。
 
 ### 2.0.1.0（2026-10-31）
 

@@ -226,6 +226,11 @@ export function useTouchGestures(
 
     const onTouchEnd = (e: TouchEvent): void => {
       const now = Date.now()
+      /*
+       * 双击判定改用事件时钟（v2.0.1.1）：Date.now() 量的是「处理函数跑起来的
+       * 时刻」，主线程一忙就会把两次轻点的间隔算大，窗口被吃掉，双击退化成两次单击。
+       */
+      const evt = Number.isFinite(e.timeStamp) && e.timeStamp > 0 ? e.timeStamp : now
 
       // 少于两指就结束缩放手势
       if (e.touches.length < 2) gesture = null
@@ -255,7 +260,7 @@ export function useTouchGestures(
       }
 
       const isDouble =
-        now - prev.at <= DOUBLE_TAP_MS && Math.hypot(x - prev.x, y - prev.y) <= DOUBLE_TAP_SLOP
+        evt - prev.at <= DOUBLE_TAP_MS && Math.hypot(x - prev.x, y - prev.y) <= DOUBLE_TAP_SLOP
 
       if (isDouble && optsRef.current.allowDoubleTap?.() === false) {
         /*
@@ -274,7 +279,7 @@ export function useTouchGestures(
         optsRef.current.onZoom(target, { x, y })
         lastTap = { at: 0, x: 0, y: 0 }
       } else {
-        lastTap = { at: now, x, y }
+        lastTap = { at: evt, x, y }
       }
     }
 
