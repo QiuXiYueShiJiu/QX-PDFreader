@@ -85,7 +85,22 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  /*
+   * ★ 这里**不能**写 `align-items: center`（v2.0.1.0 修 Issue #2）。
+   *
+   *   踩坑：页面/图片放大到超过视口宽度后，`center` 会把溢出部分
+   *   **平均分到左右两侧**。右侧那半可以靠 scrollLeft 增大看到，
+   *   但左侧那半对应的是**负的 scrollLeft** —— 滚动容器最小只能是 0，
+   *   于是左边永远滚不到。
+   *   用户看到的就是「往右拖到某处就卡住，图片左侧始终看不见」，
+   *   隐藏左侧边栏、最大化窗口都没用（与侧边栏无关，是横向滚动本身的边界）。
+   *
+   *   改成 flex-start 之后，超出部分只往右侧溢出，
+   *   scrollLeft 从 0 到 max 正好覆盖整个页面宽度，整页都能拖出来看；
+   *   窄于容器时的视觉居中改由 `.viewer-row` 的 `margin-inline: auto` 负责
+   *   （auto 外边距在放不下时会解析为 0，不会产生不可达的负溢出）。
+   */
+  align-items: flex-start;
   gap: 16px;
   padding: 16px;
   min-height: 100%;
@@ -105,9 +120,18 @@
   display: flex;
   flex-direction: row;
   align-items: flex-start;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 12px;
   flex: 0 0 auto;
+  /*
+   * 居中交给 auto 外边距，而不是 `justify-content: center`。
+   *
+   * 原因与上面 `.viewer-pages` 那条完全一样：`center` 在内容比容器宽时
+   * 会把溢出甩到两侧，左侧那半落到负滚动区、永远看不到。
+   * `margin-inline: auto` 的行为正好相反 —— 放得下时两侧均分（视觉居中），
+   * 放不下时解析为 0，整行从左边起算，左边缘就在 scrollLeft = 0 处。
+   */
+  margin-inline: auto;
 }
 
 /* 双页模式下两页等高 —— align-items 由 flex-start 换成 stretch 会让

@@ -26,9 +26,9 @@ import { readFileSync, writeFileSync } from 'node:fs'
 /** 应用显示名（与 package.json 的 productName 保持一致） */
 const PRODUCT = '秋夕-PDF阅读器'
 /** 三段式，给 npm / semver */
-const SEMVER = '2.0.0'
+const SEMVER = '2.0.1'
 /** 四段式，写进 exe 属性、也用于安装包文件名 */
-const WIN_VERSION = '2.0.0.0'
+const WIN_VERSION = '2.0.1.0'
 
 const path = 'package.json'
 const pkg = JSON.parse(readFileSync(path, 'utf8'))

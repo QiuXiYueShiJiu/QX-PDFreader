@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-2.0.0.0-2f6fed" />
+  <img alt="version" src="https://img.shields.io/badge/version-2.0.1.0-2f6fed" />
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078d4" />
   <img alt="license" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-e5484d" />
   <img alt="offline" src="https://img.shields.io/badge/network-%E5%8F%AA%E6%A3%80%E6%9F%A5%E6%9B%B4%E6%96%B0-16a34a" />
@@ -310,7 +310,7 @@
 |---|---|---|
 | 安装方式 | 向导（可选目录与快捷方式） | 一路到底静默装好 |
 | 适合 | 自己电脑、需要挑安装位置 | 教室一体机、批量部署 |
-| 文件名 | `秋夕-PDF阅读器-2.0.0.0-安装程序.exe` | `PDF阅读器-快速安装.exe` |
+| 文件名 | `秋夕-PDF阅读器-2.0.1.0-安装程序.exe` | `PDF阅读器-快速安装.exe` |
 
 ### 安装步骤
 
@@ -327,7 +327,7 @@ PDF阅读器-快速安装.exe /S
 ### 校验安装包
 
 ```powershell
-Get-FileHash .\秋夕-PDF阅读器-2.0.0.0-安装程序.exe -Algorithm SHA256
+Get-FileHash .\秋夕-PDF阅读器-2.0.1.0-安装程序.exe -Algorithm SHA256
 ```
 
 ---
@@ -457,6 +457,28 @@ A：工具箱「加密」可以加/解密码；带打开密码的 PDF 需先解�
 ---
 
 ## 更新日志
+
+### 2.0.1.0（2026-10-31）
+
+**修 Issue #2：图片放大后无法向右拖拽查看左侧内容**
+
+- 根因是页面横向居中的方式：`.viewer-pages` 用 `align-items: center`、
+  `.viewer-row` 用 `justify-content: center`。内容比视口宽时，flex 会把溢出
+  **平均分到左右两侧**；右侧能靠 `scrollLeft` 增大看到，左侧那半却对应
+  **负的 scrollLeft** —— 滚动容器最小只能是 0，于是左边永远滚不到。
+  隐藏侧边栏、窗口最大化都无效，因为这个边界与侧边栏无关。
+- 改成 `align-items: flex-start` + `justify-content: flex-start`，
+  居中交给 `margin-inline: auto`（放得下时两侧均分，放不下时解析为 0）。
+- 实测：200% 缩放、页宽 3200px、视口 1094px 时，修复前图片左侧
+  **1058px 不可达**，修复后左缘偏移 +16px、不可达 0px。
+- 新增回归用例 `tools/verify-image-zoom-pan.mjs`（9 项判据），
+  并已验证「还原成 center 时该用例必红」。
+
+**补回漏提交的 `scripts/cdp-eval.mjs`**
+
+- 四十多支 `tools/verify-*.mjs` 都依赖这个共用 CDP 求值脚本，但它没有进仓库
+  （`.gitignore` 未排除，属漏 `git add`），导致套件一跑就
+  `Cannot find module`。补齐后套件恢复正常。
 
 ### 2.0.0（2026-10-28）
 
