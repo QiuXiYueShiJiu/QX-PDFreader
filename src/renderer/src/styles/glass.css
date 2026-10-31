@@ -55,6 +55,16 @@ html[data-pack='glass'] .app {
    * 于是外壳（标题栏 / 工具栏 / 状态栏）看起来是浮在背景上的一块玻璃。
    */
   padding: var(--glass-gap);
+  /*
+   * ★ 外壳自己带圆角并裁切（2026-10-31）。
+   *
+   *   缝隙归零后，如果这里不裁，四个直角还是会把底色露出来，
+   *   「液态玻璃」看起来仍然是一个方块。加上圆角 + overflow:hidden，
+   *   整个应用在视觉上就是一块带圆角的玻璃；
+   *   Windows 11 的无边框窗口本身也会被 DWM 圆角化，两者能对上。
+   */
+  border-radius: var(--radius, 22px);
+  overflow: hidden;
   background:
     radial-gradient(1100px 620px at 10% -12%, rgb(var(--accent) / 0.28), transparent 62%),
     radial-gradient(880px 520px at 92% -4%, rgb(var(--accent) / 0.16), transparent 58%),

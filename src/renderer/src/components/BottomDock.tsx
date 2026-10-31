@@ -56,11 +56,29 @@ export function BottomDock(): JSX.Element {
   const setRoam = useViewer((s) => s.setRoam)
   const clearAnnotations = useViewer((s) => s.clearAnnotations)
 
+  /*
+   * 面板打开时把悬浮条收起来（2026-10-31，用户第 5 条）。
+   *
+   *   它是 position: fixed，层级又高于部分面板的内容区，
+   *   设置页拉到底部时会被这条画笔条压住 —— 实测就是「遮挡设置页」。
+   *   与其调 z-index（面板层级各自不同，容易按下一个冒出另一个），
+   *   不如在面板打开期间整条收掉：这时候用户在处理设置，不需要画笔。
+   */
+  const panelOpen = useViewer(
+    (s) => s.showSettings || s.showTools || s.showPluginStore || s.showThemeStore || s.showImageTools
+  )
+
   /** 漫游态：没有画笔、没有橡皮、也没选编辑工具 */
   const roaming = editTool === 'none' && !drawMode && !eraserMode
 
   return (
-    <aside className="dock" data-dock="1" role="toolbar" aria-label="画笔工具条">
+    <aside
+      className="dock"
+      data-dock="1"
+      data-hidden={panelOpen ? '1' : '0'}
+      role="toolbar"
+      aria-label="画笔工具条"
+    >
       <div className="dock__group">
         <button
           type="button"

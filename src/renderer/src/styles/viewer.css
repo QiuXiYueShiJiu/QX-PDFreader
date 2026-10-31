@@ -86,23 +86,42 @@
   display: flex;
   flex-direction: column;
   /*
-   * ★ 这里**不能**写 `align-items: center`（v2.0.1.0 修 Issue #2）。
+   * ★ 这里**不能**写裸 `align-items: center`（v2.0.1.0 修 Issue #2）。
    *
-   *   踩坑：页面/图片放大到超过视口宽度后，`center` 会把溢出部分
+   *   踩坑：页面/图片放大到超过视口宽度后，裸 `center` 会把溢出部分
    *   **平均分到左右两侧**。右侧那半可以靠 scrollLeft 增大看到，
    *   但左侧那半对应的是**负的 scrollLeft** —— 滚动容器最小只能是 0，
    *   于是左边永远滚不到。
    *   用户看到的就是「往右拖到某处就卡住，图片左侧始终看不见」，
    *   隐藏左侧边栏、最大化窗口都没用（与侧边栏无关，是横向滚动本身的边界）。
    *
-   *   改成 flex-start 之后，超出部分只往右侧溢出，
-   *   scrollLeft 从 0 到 max 正好覆盖整个页面宽度，整页都能拖出来看；
-   *   窄于容器时的视觉居中改由 `.viewer-row` 的 `margin-inline: auto` 负责
-   *   （auto 外边距在放不下时会解析为 0，不会产生不可达的负溢出）。
+   *   改成 flex-start 后，超出部分只往右侧溢出，scrollLeft 从 0 到 max
+   *   正好覆盖整页；窄于容器时的视觉居中交给 `.viewer-row` 的
+   *   `margin-inline: auto`（auto 在放不下时解析为 0，不产生负溢出）。
+   *
+   *   ⚠ 记录一条**已证伪**的猜测，免得后人重走：
+   *     曾怀疑「flex-start 会让 verify-touch-select 的双击选词失败」。
+   *     做了对照实验（裸 center 与 safe center 各跑 3 次）后发现，
+   *     两种写法都是 3 次里挂 2 次 —— 双击选词本来就是**偶发**问题，
+   *     与这里的居中方式无关。不要因为那支用例红了就来改这段。
+   *
+   *   备选写法：`align-items: safe center`（只在溢出时退回 start，
+   *   放得下时与 center 像素级等价）。语义更小，但与本写法对 Issue #2
+   *   的效果一致，留作将来的可选收敛方向。
    */
   align-items: flex-start;
   gap: 16px;
-  padding: 16px;
+  /*
+   * ★ 首尾缓冲（2026-10-31，用户第 7 条）。
+   *
+   *   原来四周都是 16px。第一页顶部的页眉、最后一页的页脚贴着滚动边界，
+   *   想在那儿写字/涂白时，手指已经到屏幕边缘，页面却再也推不上去。
+   *   这里把纵向内边距放大到接近半屏：首尾都能滚出足够的空白，
+   *   贴边内容可以挪到屏幕中间来批注。
+   *   横向仍保持 16px —— 横向再加会把页面推出可视宽度。
+   */
+  padding-block: clamp(48px, 22vh, 240px);
+  padding-inline: 16px;
   min-height: 100%;
 }
 
@@ -126,7 +145,7 @@
   /*
    * 居中交给 auto 外边距，而不是 `justify-content: center`。
    *
-   * 原因与上面 `.viewer-pages` 那条完全一样：`center` 在内容比容器宽时
+   * 原因与上面 `.viewer-pages` 那条相同：`center` 在内容比容器宽时
    * 会把溢出甩到两侧，左侧那半落到负滚动区、永远看不到。
    * `margin-inline: auto` 的行为正好相反 —— 放得下时两侧均分（视觉居中），
    * 放不下时解析为 0，整行从左边起算，左边缘就在 scrollLeft = 0 处。

@@ -89,7 +89,14 @@ export const DEFAULT_PACK_DEFAULTS: Record<ThemePackId, ThemePackDefaults> = {
     panelAlpha: 0.55,
     shadow: '0 18px 40px rgb(0 0 0 / 0.18)',
     toolbarHeight: 46,
-    gap: 10,
+    /*
+     * ★ gap 从 10 改成 0（2026-10-31，用户第 2 条）。
+     *
+     *   Windows 的窗口本身是方形的，缝隙露出来的是读写区底色而不是
+     *   「桌面上浮着一块玻璃」—— 实际观感就是四周多了一圈没用的填充。
+     *   归零之后外壳直接顶到窗口边缘，只在内部靠半透明与圆角表现质感。
+     */
+    gap: 0,
     accent: '#4c6ef5'
   }
 }

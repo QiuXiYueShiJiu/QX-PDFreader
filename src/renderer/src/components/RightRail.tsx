@@ -38,7 +38,8 @@ import {
   Settings,
   StretchHorizontal,
   X,
-  ZoomIn
+  ZoomIn,
+  Palette
 } from 'lucide-react'
 import { useViewer } from '../store'
 
@@ -116,6 +117,14 @@ export function RightRail(): JSX.Element {
   const setShowSettings = useViewer((s) => s.setShowSettings)
   const setShowPluginStore = useViewer((s) => s.setShowPluginStore)
   const showPluginStore = useViewer((s) => s.showPluginStore)
+  /*
+   * 主题商店：2026-10-31 用户第 1 条「主题商店没有入口」。
+   * 原来它只作为一行小字藏在「设置 → 外观 → 背景图」里，等于没有。
+   * 这里给一个和插件商店并列的正式入口 —— 两者本来就是两件事
+   * （主题商店 = 配色包，插件商店 = 可执行代码），但入口应当一样显眼。
+   */
+  const setShowThemeStore = useViewer((s) => s.setShowThemeStore)
+  const showThemeStore = useViewer((s) => s.showThemeStore)
   // 课堂辅助遮罩（黑屏 / 聚光灯 / 放大镜）
   const maskMode = useViewer((s) => s.maskMode)
   const setMaskMode = useViewer((s) => s.setMaskMode)
@@ -259,6 +268,13 @@ export function RightRail(): JSX.Element {
             插件商店 = 能执行代码的第三方插件，装在这里；
             主题商店 = 配色包，入口在「设置 → 外观」。
         */}
+        <RailButton
+          icon={<Palette size={20} />}
+          label="主题商店"
+          active={showThemeStore}
+          onClick={() => setShowThemeStore(true)}
+          title="主题商店：安装社区配色包（纯配色，不执行代码）"
+        />
         <RailButton
           icon={<Store size={20} />}
           label="插件商店"

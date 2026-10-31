@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-2.0.1.1-2f6fed" />
+  <img alt="version" src="https://img.shields.io/badge/version-2.0.2.0-2f6fed" />
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078d4" />
   <img alt="license" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-e5484d" />
   <img alt="offline" src="https://img.shields.io/badge/network-%E5%8F%AA%E6%A3%80%E6%9F%A5%E6%9B%B4%E6%96%B0-16a34a" />
@@ -310,7 +310,7 @@
 |---|---|---|
 | 安装方式 | 向导（可选目录与快捷方式） | 一路到底静默装好 |
 | 适合 | 自己电脑、需要挑安装位置 | 教室一体机、批量部署 |
-| 文件名 | `秋夕-PDF阅读器-2.0.1.1-安装程序.exe` | `PDF阅读器-快速安装.exe` |
+| 文件名 | `秋夕-PDF阅读器-2.0.2.0-安装程序.exe` | `PDF阅读器-快速安装.exe` |
 
 ### 安装步骤
 
@@ -327,7 +327,7 @@ PDF阅读器-快速安装.exe /S
 ### 校验安装包
 
 ```powershell
-Get-FileHash .\秋夕-PDF阅读器-2.0.1.1-安装程序.exe -Algorithm SHA256
+Get-FileHash .\秋夕-PDF阅读器-2.0.2.0-安装程序.exe -Algorithm SHA256
 ```
 
 ---
@@ -458,26 +458,57 @@ A：工具箱「加密」可以加/解密码；带打开密码的 PDF 需先解�
 
 ## 更新日志
 
+### 2.0.2.0（2026-10-31）
+
+把两条并行开发的版本线合并成一个包，之后不再在 2.0.1.x 里分叉。
+
+- **修：双击选词偶发失效（真正的根因）** —— 详见 2.0.1.1 段的诊断更正。
+  双击成功后压 350ms 冷静期，期内轻点不再清空选区。
+- **修：加页后跳回第 1 页**。`reopenActiveTab` 原本先等 250ms 再落定页码，
+  中间有半拍「页数已是新值、页码还是 1」；改成页数一到就落定，再留 250ms 兜底。
+- 合入 **2.0.1.1**（手势线）：双击判定改用事件时钟（防御性，非根因）；补齐 9 支手动窗口工具。
+- 合入 **2.0.1.2 / 2.0.1.3**（界面与图标线）：9 条界面需求 + 整套图标重做。
+- 补齐 `tools/capture-flip-moment.mjs`（此前漏提交，会让 `verify-no-foreground` 直接 ENOENT）。
+- 版本号统一为 2.0.2.0，安装包 / 徽章 / 校验示例三处一致。
+
+### 2.0.1.3（2026-10-31）
+
+**主体图标按用户要求重做**
+
+- 「秋夕」字样 + 三张纸页错位堆叠 + 右下斜插画笔；底牌仍是暮色渐变（夜蓝→暮紫→落日橙）
+- ≤24px 不写字、不画叶（那个尺度只会糊成墨点），保留「纸叠 + 画笔」，语义仍成立
+- 全部尺寸由矢量绘制 + 8 倍超采样生成，不是放大位图
+
+**文件格式图标**
+
+- PDF / PNG / JPG / WEBP / BMP / GIF / TIF / ICO 各一枚，统一「纸页 + 折角 + 底部格式色带 + 格式文字」，靠配色与文字双重区分
+- ≥28px 才写格式文字，更小改成色带中心一颗白点
+
+### 2.0.1.2（2026-10-31）
+
+- 文件关联从「只登记 pdf」补齐为 **PDF + 7 类图片**，每类一条 ProgId、各带专属图标
+- 新增 `tools/make-icons.py`（原文件缺失），`npm run icons` 一次生成应用图标 + 8 枚格式图标
+
 ### 2.0.1.1（2026-10-31）
 
-**修：选择工具下双击选词约 1/3 概率失效**
+**双击选词：一次诊断更正**
 
-- 根因是双击间隔用了墙上时钟：`Date.now()` 量的是「事件处理函数真正跑起来的
-  时刻」，主线程一忙（翻页、重绘、GC），第二次 pointerup 被推后几十到上百毫秒，
-  420ms 的判定窗口就被吃掉 —— 用户明明双击了，程序却当成两次单击。
-- 改为用事件时钟 `ev.timeStamp`（与 `performance.now` 同一时间域，记录事件
-  **产生**的时刻，不受排队影响），还原两次轻点的真实间隔。
-- 同一问题在页面双击缩放、桌面端双选字两条路径上一样存在，一并改掉。
-  长按判定仍用墙上时钟（起点是 pointerdown 时记的），两个时间域不再混用。
+> 这一版最初的判断是「时间域问题」，**结论不成立，已在 2.0.2.0 更正** ——
+> 合并后连跑 5 次全挂，比修复前更差，说明改的不是地方。
 
-**补齐：8 支会改动前台窗口的手动测试工具**
+真正的根因是**第三下轻点把刚选中的词清掉**：双击选中之后，手指往往还会再落一下
+（自动化用例里是「轻点 → 双击」连拍），那一下被当成普通轻点，执行「点空白取消选区」，
+刚选好的词立刻消失。失败率取决于三下之间的间隔，与时间域无关。
 
-- `tools/show-window.ps1`、`focus-window.ps1`、`focus-slideshow.ps1`、
-  `maximize-window.ps1`、`move-window.ps1`、`click-at.ps1`、`send-click.ps1`、
-  `send-key.ps1`，以及它们共用的 `tools/_win32.ps1`。
-- 这八支都是**手动**工具，一律先调用 `Assert-ForegroundAllowed`：没有显式设置
-  `PDF_READER_ALLOW_FOREGROUND=1` 就拒绝执行，不会在课堂机上抢前台。
-- 此前它们没进仓库，导致 `verify-no-foreground` 的静态判据直接 ENOENT 崩。
+- 2.0.2.0 的修法是双击成功后压 350ms 冷静期，期内轻点不再清空选区。
+- 时间域改动（三处双击判定改用 `ev.timeStamp`，长按仍用 `Date.now()`）**保留**：
+  它不是根因，但按「处理函数跑起来的时刻」量间隔确实会放大抖动，属防御性修正。
+- 阈值未动（420ms）。
+- 补齐 `tools/show-window.ps1` 等 **9 支手动窗口工具** + 共用 `_win32.ps1`：
+  show-window / focus-window / focus-slideshow / maximize-window / move-window /
+  click-at / send-click / send-key / _win32。
+  每支开头都 `Assert-ForegroundAllowed`（没有 `PDF_READER_ALLOW_FOREGROUND=1` 就 exit 97），
+  不会在课堂机上抢前台。
 
 ### 2.0.1.0（2026-10-31）
 

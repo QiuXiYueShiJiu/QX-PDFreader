@@ -2938,6 +2938,19 @@ export function DocumentView({
   const TOUCH_DOUBLE_SLOP = 40
 
   const lastTouchTapRef = useRef<{ at: number; x: number; y: number }>({ at: 0, x: 0, y: 0 })
+
+  /*
+   * ★ 双击选词后的「轻点冷静期」（2026-10-31 合版修）。
+   *
+   *   现场证据：单独双击一定能选出词，但只要前面紧挨着一次轻点，
+   *   连拍就变成「点、点、点」三下 —— 第 1 下清选区，第 2 下凑成双击并选中，
+   *   第 3 下又被当成轻点把刚选好的词清掉。表现为双击选词时灵时不灵，
+   *   失败率取决于三下之间的间隔是否落在 420ms 窗口内。
+   *
+   *   所以双击成功后压一小段时间：期内轻点不再清空选区。
+   *   正常使用（双击后隔一会儿再点空白）完全不受影响。
+   */
+  const tapClearBlockedUntilRef = useRef(0)
   /**
    * 触摸会话正在生效（用来挡掉 Chromium 自己的长按选字/右键菜单）。
    *
@@ -3407,11 +3420,17 @@ export function DocumentView({
             lastTouchTapRef.current = { at: 0, x: 0, y: 0 }
             beginWordSelect(ev.clientX, ev.clientY)
             touchArmedRef.current = false
+            tapClearBlockedUntilRef.current = at + 350
             drawTrace('选择（触摸）：双击 → 选中该词')
             return
           }
           lastTouchTapRef.current = { at, x: ev.clientX, y: ev.clientY }
           /* 单次轻点：取消选区（与桌面端「点空白处取消」一致） */
+          if (at < tapClearBlockedUntilRef.current) {
+            touchArmedRef.current = false
+            drawTrace('选择（触摸）：双击后冷静期，忽略这次轻点清空')
+            return
+          }
           window.getSelection()?.removeAllRanges()
           setAnchor(null)
           touchArmedRef.current = false

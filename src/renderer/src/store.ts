@@ -881,6 +881,16 @@ export const useViewer = create<ViewerState>((set, get) => ({
       await new Promise((resolve) => setTimeout(resolve, 100))
       if (get().pageCount === expectedPages) break
     }
+    /*
+     * ★ 页数一到就立刻落定页码（2026-10-31 合版修）。
+     *
+     *   原来这里先等 250ms 再 setPage，于是有半拍窗口是
+     *   「pageCount 已经是新页数、page 还停在 1」——
+     *   插页后立刻看屏幕（或自动化用例）就会读到「加完跳回第 1 页」。
+     *   先把页码落定，再留一次兜底：文档内部还有一拍异步状态
+     *   （缩略图 / 布局 / 位置恢复）可能把页码带回 1。
+     */
+    if (get().pageCount === expectedPages && get().page !== page) get().setPage(page)
     await new Promise((resolve) => setTimeout(resolve, 250))
     if (get().pageCount === expectedPages && get().page !== page) get().setPage(page)
   },

@@ -1,6 +1,6 @@
 {
   "name": "qiuxi-pdf-reader",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "秋夕-PDF阅读器 —— 面向教学一体机的双栏批注式 PDF 阅读工具",
   "main": "./out/main/index.js",
   "author": "秋夕月拾旧",
@@ -80,7 +80,62 @@
         "name": "PDF 文档",
         "description": "PDF 文档",
         "role": "Viewer",
-        "icon": "build/pdf-file.ico"
+        "icon": "build/file-icons/pdf.ico"
+      },
+      {
+        "ext": "png",
+        "name": "PNG 图片",
+        "description": "PNG 图片",
+        "role": "Viewer",
+        "icon": "build/file-icons/png.ico"
+      },
+      {
+        "ext": [
+          "jpg",
+          "jpeg"
+        ],
+        "name": "JPEG 图片",
+        "description": "JPEG 图片",
+        "role": "Viewer",
+        "icon": "build/file-icons/jpg.ico"
+      },
+      {
+        "ext": "webp",
+        "name": "WebP 图片",
+        "description": "WebP 图片",
+        "role": "Viewer",
+        "icon": "build/file-icons/webp.ico"
+      },
+      {
+        "ext": "bmp",
+        "name": "BMP 图片",
+        "description": "BMP 图片",
+        "role": "Viewer",
+        "icon": "build/file-icons/bmp.ico"
+      },
+      {
+        "ext": "gif",
+        "name": "GIF 图片",
+        "description": "GIF 图片",
+        "role": "Viewer",
+        "icon": "build/file-icons/gif.ico"
+      },
+      {
+        "ext": [
+          "tif",
+          "tiff"
+        ],
+        "name": "TIFF 图片",
+        "description": "TIFF 图片",
+        "role": "Viewer",
+        "icon": "build/file-icons/tif.ico"
+      },
+      {
+        "ext": "ico",
+        "name": "ICO 图标",
+        "description": "ICO 图标",
+        "role": "Viewer",
+        "icon": "build/file-icons/ico.ico"
       }
     ],
     "nsis": {
@@ -90,7 +145,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "秋夕-PDF阅读器",
-      "artifactName": "秋夕-PDF阅读器-2.0.1.1-安装程序.${ext}",
+      "artifactName": "秋夕-PDF阅读器-2.0.2.0-安装程序.${ext}",
       "include": "build/installer.nsh"
     },
     "afterPack": "scripts/after-pack.mjs",
@@ -129,6 +184,6 @@
       }
     ]
   },
-  "buildVersion": "2.0.1.1",
+  "buildVersion": "2.0.2.0",
   "productName": "秋夕-PDF阅读器"
 }

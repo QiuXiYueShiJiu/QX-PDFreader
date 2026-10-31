@@ -20,8 +20,15 @@
   z-index: 60; /* 低于设置面板/遮罩（>100），高于页面内容 */
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 6px 10px;
+  /*
+   * ★ 尺寸跟随视口（2026-10-31，用户第 5 条）。
+   *
+   *   原来全部是写死的 px：最大化后条子还是那么小，远处看不清；
+   *   小窗口下又挤。这里改成 clamp(vw) —— 宽度越大整条越大，
+   *   但有上下限，1280 以下不会溢出，2560 以上不会夸张。
+   */
+  gap: clamp(1px, 0.15vw, 4px);
+  padding: clamp(4px, 0.35vw, 10px) clamp(8px, 0.7vw, 18px);
   max-width: calc(100vw - 40px);
   border-radius: calc(var(--radius, 10px) + 6px);
   border: 1px solid rgb(var(--line) / 0.9);
@@ -37,10 +44,20 @@
 }
 
 /* 玻璃包：缝隙感（与功能区、侧栏一致） */
+/* 面板打开时整条收起（见 BottomDock.tsx 的 panelOpen） */
+.dock[data-hidden='1'] {
+  display: none;
+}
+
 html[data-pack='glass'] .dock {
   box-shadow:
     var(--panel-shadow, 0 18px 40px rgb(0 0 0 / 0.18)),
-    inset 0 0 0 var(--glass-gap, 10px) rgb(255 255 255 / 0.16);
+    /*
+     * ★ 这里原来写的是 inset 0 0 0 var(--glass-gap, 10px)，
+     *   把「缝隙」当成了内阴影的扩散半径 —— 于是四周糊上一圈 10px 白边，
+     *   正是用户说的「四周额外填充」的来源之一。玻璃高光只需要 1px。
+     */
+    inset 0 0 0 1px rgb(255 255 255 / 0.16);
 }
 
 .dock__group {
@@ -67,10 +84,10 @@ html[data-pack='glass'] .dock {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  min-width: 44px;
-  height: 44px;
-  padding: 0 6px;
+  gap: clamp(1px, 0.1vw, 2px);
+  min-width: clamp(44px, 2.6vw, 62px);
+  height: clamp(44px, 2.7vw, 66px);
+  padding: 0 clamp(4px, 0.4vw, 10px);
   border: 0;
   border-radius: var(--radius-sm, 6px);
   background: transparent;
@@ -103,7 +120,7 @@ html[data-pack='glass'] .dock {
 }
 
 .dock__lbl {
-  font-size: 10px;
+  font-size: clamp(10px, 0.58vw, 14px);
   letter-spacing: 0.02em;
   white-space: nowrap;
 }
@@ -111,14 +128,14 @@ html[data-pack='glass'] .dock {
 /* 调色盘：只有圆点，标签在下面一行小字 */
 
 .dock__btn--swatch {
-  min-width: 34px;
-  height: 44px;
-  padding: 0 4px;
+  min-width: clamp(36px, 2vw, 46px);
+  height: clamp(44px, 2.7vw, 66px);
+  padding: 0 clamp(3px, 0.3vw, 7px);
 }
 
 .dock__btn--swatch .ribbon__swatch {
-  width: 18px;
-  height: 18px;
+  width: clamp(16px, 1.05vw, 26px);
+  height: clamp(16px, 1.05vw, 26px);
 }
 
 .dock__btn--swatch.is-active .ribbon__swatch {
