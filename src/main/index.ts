@@ -15,7 +15,7 @@
  */
 
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, screen, shell } from 'electron'
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { basename, dirname, extname, join, normalize, resolve } from 'node:path'
@@ -1035,6 +1035,56 @@ function pruneImageCache(dir: string): void {
   }
 }
 
+/**
+ * 「原图 → 临时 PDF」这条链路的并发闸门（2026-11-03 修的缺陷）。
+ *
+ * ══════════════════════════════════════════════════════════════
+ * 用户报「连续打开两张图片，第二张有概率打不开」
+ * ══════════════════════════════════════════════════════════════
+ *   表现是弹「这张图片打不开：…文件可能已损坏，或扩展名与实际内容不符」，
+ *   而单独打开同一个文件必成功；录制/高负载时几乎必现，空闲时常成功。
+ *   三个成因叠在一起：
+ *
+ *     ① **同一张图被连开两次**：命中判断（existsSync）在写之前，
+ *        两次都走「未命中」分支，同时往同一个缓存路径写。
+ *     ② **写盘不是原子的**：writeFile 先截断再写，渲染层若在截断与
+ *        写完之间拿到路径，PDF.js 读到的就是半截文件。
+ *     ③ **两次转换完全并行**：nativeImage 解码 + pdf-lib 编码都很吃内存，
+ *        上一张还没收尾时再解一张，nativeImage 会偶发返回空图 ——
+ *        于是抛出「无法解码」，看起来像文件坏了。
+ *
+ *   修法：串行 + 同路径去重 + 原子写 + 解码失败重试一次。
+ *   串行的代价是连开多张时排队（每张仍只要几十到几百毫秒），
+ *   换来的是一定能打开 —— 对课堂场景这个取舍是对的。
+ */
+
+/** 串行链：所有图片转换排一条队，避免两张图同时抢内存。 */
+let imageConvertChain: Promise<unknown> = Promise.resolve()
+
+/** 正在转换的任务（key 是缓存路径），同一张图重复请求直接复用。 */
+const imageInflight = new Map<string, Promise<string>>()
+
+/**
+ * 把 fn 排进串行链。
+ *
+ * 用 `.then(fn, fn)` 而不是 `.then(fn)`：前一个任务失败也要继续跑下一个，
+ * 否则一次失败会把后面的转换全部卡死。
+ */
+function serializeImageWork<T>(fn: () => Promise<T>): Promise<T> {
+  const run = imageConvertChain.then(fn, fn)
+  /* 链上只保留"是否结束"，不保留结果与异常，避免未处理的 rejection */
+  imageConvertChain = run.then(
+    () => undefined,
+    () => undefined
+  )
+  return run
+}
+
+/** 缓存路径 → 临时文件的写盘路径（pid 与时间戳避免不同进程/重试互撞） */
+function partPathFor(cached: string, stamp: number): string {
+  return `${cached}.${process.pid}-${stamp}.part`
+}
+
 async function imageToPdfFile(source: string): Promise<string> {
   const dir = join(app.getPath('userData'), 'image-cache')
   mkdirSync(dir, { recursive: true })
@@ -1045,23 +1095,63 @@ async function imageToPdfFile(source: string): Promise<string> {
    */
   const hash8 = imageHash8(source)
   const cached = join(dir, tempPdfName(source, hash8))
+
+  /* ① 同一张图正在转 —— 直接等它，不要再开一次解码 */
+  const running = imageInflight.get(cached)
+  if (running) return running
+
+  /* ② 命中缓存不排队，免得多开几张时白白等前面的大图 */
+  const task = existsSync(cached)
+    ? (async () => {
+        touchImageCache(cached)
+        ensureImageMetaFor(cached, source)
+        return cached
+      })()
+    : serializeImageWork(() => convertImageToPdf(source, cached, dir))
+
+  imageInflight.set(cached, task)
+  try {
+    return await task
+  } finally {
+    imageInflight.delete(cached)
+  }
+}
+
+/** 命中缓存时刷新 mtime，让它排在"最近使用"里，不被滚动清理掉 */
+function touchImageCache(cached: string): void {
+  try {
+    const now = new Date()
+    utimesSync(cached, now, now)
+  } catch {
+    /* 忽略 */
+  }
+}
+
+/**
+ * 进程重启后映射表是空的：补一次解码拿到尺寸与格式，
+ * 标签页标题与图片工具面板才有正确的原文件名 / 宽高。
+ */
+function ensureImageMetaFor(cached: string, source: string): void {
+  if (getImageMeta(cached)) return
+  try {
+    const meta = imageMetaFromDecoded(decodeImage(source), cached)
+    rememberImageMeta(meta)
+    writeImageMetaSidecar(meta)
+  } catch {
+    /* 命中缓存但原图已删/改：元数据补不出来也不该让打开失败 */
+  }
+}
+
+/**
+ * 真解一次并落盘。
+ *
+ * 解码失败（nativeImage 返回空图）重试一次 —— 高负载下的偶发失败，
+ * 隔 120ms 再来一次基本都能成；真损坏的文件重试也会失败，报错不变。
+ */
+async function convertImageToPdf(source: string, cached: string, dir: string): Promise<string> {
   if (existsSync(cached)) {
-    /* 命中就刷新 mtime，让它排在"最近使用"里，不被滚动清理掉 */
-    try {
-      const now = new Date()
-      utimesSync(cached, now, now)
-    } catch {
-      /* 忽略 */
-    }
-    /*
-     * 进程重启后映射表是空的：补一次解码拿到尺寸与格式，
-     * 标签页标题与图片工具面板才有正确的原文件名 / 宽高。
-     */
-    if (!getImageMeta(cached)) {
-      const meta = imageMetaFromDecoded(decodeImage(source), cached)
-      rememberImageMeta(meta)
-      writeImageMetaSidecar(meta)
-    }
+    touchImageCache(cached)
+    ensureImageMetaFor(cached, source)
     return cached
   }
 
@@ -1070,7 +1160,18 @@ async function imageToPdfFile(source: string): Promise<string> {
    * ico / tif 读不出来时那里给的是「此格式暂不支持 + 该怎么办」，
    * 而不是笼统的「无法解码这张图片」。
    */
-  const decoded = decodeImage(source)
+  let decoded: DecodedImage
+  try {
+    decoded = decodeImage(source)
+  } catch (error) {
+    const message = String((error as Error)?.message ?? error)
+    /* 只对「解码器读不出」重试；不存在/太大/格式不支持重试无意义 */
+    if (!message.includes('无法解码')) throw error
+    diagLine(`[pdf] 图片解码失败，120ms 后重试一次: ${source}（${message}）`)
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 120))
+    decoded = decodeImage(source)
+  }
+
   const { image, width, height, ext } = decoded
 
   const scale = Math.min(1600 / width, 1600 / height, 1)
@@ -1090,7 +1191,22 @@ async function imageToPdfFile(source: string): Promise<string> {
   const page = pdf.addPage([pageW, pageH])
   page.drawImage(embedded, { x: 0, y: 0, width: pageW, height: pageH })
 
-  await writeFile(cached, await pdf.save())
+  /*
+   * ③ 原子写：先写 .part，再 rename 到位。
+   *    渲染层要么看到「没有这个文件」，要么看到完整文件，绝不会读到半截。
+   *    Windows 上 rename 不允许覆盖已存在的目标，所以先删一次。
+   */
+  const bytes = await pdf.save()
+  const part = partPathFor(cached, Date.now())
+  await writeFile(part, bytes)
+  try {
+    rmSync(cached, { force: true })
+    renameSync(part, cached)
+  } catch (error) {
+    rmSync(part, { force: true })
+    throw error
+  }
+
   const meta = imageMetaFromDecoded(decoded, cached)
   rememberImageMeta(meta)
   writeImageMetaSidecar(meta)
