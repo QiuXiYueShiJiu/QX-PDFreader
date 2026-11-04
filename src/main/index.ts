@@ -14,10 +14,11 @@
  * 单实例：文件关联双击时需要把新文件交给已运行实例打开，而不是开新窗口。
  */
 
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, screen, shell } from 'electron'
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, net, protocol, screen, shell } from 'electron'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
+import { execFile } from 'node:child_process'
 import { basename, dirname, extname, join, normalize, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { PDFDocument, rgb as pdfRgb } from 'pdf-lib'
@@ -47,6 +48,7 @@ import {
   tempPdfName,
   writeImageMetaSidecar
 } from './image-decode'
+import { imageFormatOf } from './image-decode'
 import type { DecodedImage, ImageOpenMeta } from './image-decode'
 import { isThumbFresh, saveThumb, thumbPath } from './thumbs'
 import { ensureShellThumb } from './shell-thumb'
@@ -1035,7 +1037,133 @@ function pruneImageCache(dir: string): void {
   }
 }
 
-async function imageToPdfFile(source: string): Promise<string> {
+/**
+ * 借渲染进程（完整 Chromium）把一张图片解成 PNG 字节。
+ *
+ * 存在的理由：主进程的 nativeImage 只稳定支持 PNG / JPEG；
+ * WebP / BMP / GIF 在部分 Windows 上 createFromPath 返回空图。
+ * 这三种 Chromium 全都能解码，所以让渲染层画到 canvas 上再转 PNG 回来。
+ * 失败返回 null，调用方保留原始错误信息。
+ */
+async function pngViaRenderer(abs: string): Promise<Buffer | null> {
+  const win = mainWindow
+  if (!win || win.isDestroyed()) return null
+  const url = `pdf-file:///${abs.replace(/\\/g, '/')}`
+  try {
+    const dataUrl = (await win.webContents.executeJavaScript(
+      `(async () => {
+        const src = ${JSON.stringify(url)}
+        const img = new Image()
+        await new Promise((res, rej) => {
+          img.onload = () => res(true)
+          img.onerror = () => rej(new Error('decode failed'))
+          img.src = src
+        })
+        const canvas = document.createElement('canvas')
+        canvas.width = img.naturalWidth
+        canvas.height = img.naturalHeight
+        const ctx = canvas.getContext('2d')
+        if (!ctx) throw new Error('no 2d context')
+        ctx.drawImage(img, 0, 0)
+        return canvas.toDataURL('image/png')
+      })()`,
+      true
+    )) as string
+    const base64 = String(dataUrl).split(',')[1]
+    return base64 ? Buffer.from(base64, 'base64') : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * TIFF 走 Windows 自带的 WIC 解码（System.Drawing）。
+ *
+ * 理由：Chromium 与 Skia 都不认 TIFF，而 Windows 的 GDI+ 天生能读。
+ * 这里起一个隐藏的 PowerShell 把 TIFF 转成 PNG 到临时目录，
+ * 拿到字节后统一走后续流程。失败返回 null，由调用方给「另存为 PNG」的提示。
+ */
+function tiffToPng(abs: string): Promise<Buffer | null> {
+  const target = join(app.getPath('temp'), `qx-tiff-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`)
+  const script = [
+    'Add-Type -AssemblyName System.Drawing',
+    `$img = [System.Drawing.Image]::FromFile('${abs.replace(/'/g, "''")}')`,
+    `$img.Save('${target.replace(/'/g, "''")}', [System.Drawing.Imaging.ImageFormat]::Png)`,
+    '$img.Dispose()'
+  ].join('; ')
+
+  return new Promise((resolvePromise) => {
+    try {
+      execFile(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
+        { windowsHide: true, timeout: 20000 },
+        (error: Error | null) => {
+          if (error) {
+            resolvePromise(null)
+            return
+          }
+          try {
+            const bytes = readFileSync(target)
+            rmSync(target, { force: true })
+            resolvePromise(bytes)
+          } catch {
+            resolvePromise(null)
+          }
+        }
+      )
+    } catch {
+      resolvePromise(null)
+    }
+  })
+}
+
+/*
+ * ---------- 图片转换的串行闸门 ----------
+ * 用户反馈「连开两张图，第二张偶尔打不开」。根因不是格式，是竞态：
+ * 两次转换并行时，后一张可能读到前一张刚被截断的缓存文件，或者两边
+ * 同时抢 nativeImage 的共享缓冲。
+ *
+ * 三条保险，和 A 的分支 fix/image-open-race（74daa6b）思路一致：
+ *   1. 同一个文件同时只跑一次（inFlight 去重），重复请求共享同一个 Promise；
+ *   2. 全局串行链（chain），保证缓存文件的读写不交错；
+ *   3. 解码失败重试一次（首帧可能正赶上另一处 GC / 释放）。
+ */
+const imageInFlight = new Map<string, Promise<string>>()
+let imageChain: Promise<unknown> = Promise.resolve()
+
+function imageCachePathOf(source: string): string {
+  const dir = join(app.getPath('userData'), 'image-cache')
+  return join(dir, tempPdfName(source, imageHash8(source)))
+}
+
+function imageToPdfFile(source: string): Promise<string> {
+  const abs = resolve(source)
+  const cached = imageCachePathOf(abs)
+
+  /*
+   * 去重键用「缓存路径」而不是「源路径」：x.jpg 与 x.jpeg 是两个源路径、
+   * 却是同一个缓存文件，用源路径去重会漏掉这一类（A 的分支上踩过）。
+   */
+  const key = cached
+  const running = imageInFlight.get(key)
+  if (running) return running
+
+  /* 命中缓存不进串行链：命中等价于一次 utimes，排队只会让连开多张时白等 */
+  if (existsSync(cached)) return imageToPdfFileOnce(abs)
+
+  const job = imageChain.then(() => imageToPdfFileOnce(abs))
+  imageInFlight.set(key, job)
+  imageChain = job.then(
+    () => undefined,
+    () => undefined
+  )
+  return job.finally(() => {
+    imageInFlight.delete(key)
+  })
+}
+
+async function imageToPdfFileOnce(source: string): Promise<string> {
   const dir = join(app.getPath('userData'), 'image-cache')
   mkdirSync(dir, { recursive: true })
 
@@ -1070,7 +1198,46 @@ async function imageToPdfFile(source: string): Promise<string> {
    * ico / tif 读不出来时那里给的是「此格式暂不支持 + 该怎么办」，
    * 而不是笼统的「无法解码这张图片」。
    */
-  const decoded = decodeImage(source)
+  /*
+   * ★ WebP / BMP / GIF 的解码兜底。
+   *
+   *   nativeImage.createFromPath 只稳定认 PNG / JPEG，这三种在部分 Windows 上
+   *   直接返回空图（用户反馈「特殊格式只是说能开，其实没支持」）。
+   *   渲染进程是完整 Chromium，三种都能画进 canvas，所以借它转一张 PNG 回来，
+   *   后续流程（嵌 PDF、缩放、批注）完全不用改。
+   */
+  let decoded: DecodedImage
+  try {
+    decoded = decodeImage(source)
+  } catch (error) {
+    /*
+     * 先交给 Chromium（WebP / BMP / GIF / ICO 都能画），
+     * 再交给 Windows 的 WIC（TIFF）。两条都失败才把原始错误抛出去。
+     */
+    let png = await pngViaRenderer(source)
+    if (!png) png = await tiffToPng(source)
+    const fallback = png ? nativeImage.createFromBuffer(png) : null
+    if (!fallback || fallback.isEmpty()) throw error
+    const fallbackSize = fallback.getSize()
+    if (!fallbackSize.width || !fallbackSize.height) throw error
+    decoded = {
+      sourcePath: source,
+      originalName: basename(source),
+      ext: '.png',
+      format: imageFormatOf(source) ?? {
+        ext: extname(source).toLowerCase(),
+        label: extname(source).replace('.', '').toUpperCase(),
+        aliases: [],
+        native: false,
+        note: ''
+      },
+      image: fallback,
+      width: fallbackSize.width,
+      height: fallbackSize.height,
+      bytes: 0,
+      mtimeMs: Date.now()
+    }
+  }
   const { image, width, height, ext } = decoded
 
   const scale = Math.min(1600 / width, 1600 / height, 1)
@@ -1090,7 +1257,20 @@ async function imageToPdfFile(source: string): Promise<string> {
   const page = pdf.addPage([pageW, pageH])
   page.drawImage(embedded, { x: 0, y: 0, width: pageW, height: pageH })
 
-  await writeFile(cached, await pdf.save())
+  /*
+   * 先写 .part 再 rename：中途失败不会留下一个「看起来命中、其实是半截」
+   * 的缓存文件 —— 那正是「第二张图偶尔打不开」的另一半原因。
+   */
+  const part = `${cached}.part-${process.pid}-${Date.now()}`
+  try {
+    await writeFile(part, await pdf.save())
+    /* Windows 上 rename 不能覆盖已存在的目标，先删再改；失败要把 .part 清掉 */
+    rmSync(cached, { force: true })
+    renameSync(part, cached)
+  } catch (error) {
+    rmSync(part, { force: true })
+    throw error
+  }
   const meta = imageMetaFromDecoded(decoded, cached)
   rememberImageMeta(meta)
   writeImageMetaSidecar(meta)

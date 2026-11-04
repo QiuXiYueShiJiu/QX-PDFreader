@@ -88,11 +88,35 @@ interface DocState {
   doc: PDFDocumentProxy | null
   error: string | null
   loading: boolean
+  /** 这份 PDF 加密了，需要用户输入打开密码 */
+  needPassword: boolean
+  /** 上一次输入的密码不对（pdf.js 回的是 INCORRECT_PASSWORD） */
+  wrongPassword: boolean
+  /** 提交密码后重新加载文档 */
+  submitPassword: (password: string) => void
 }
 
 /** 加载文档 */
 export function useDocument(filePath: string): DocState {
-  const [state, setState] = useState<DocState>({ doc: null, error: null, loading: false })
+  const [rawState, rawSetState] = useState<DocState>({
+    doc: null,
+    error: null,
+    loading: false,
+    needPassword: false,
+    wrongPassword: false,
+    submitPassword: () => {}
+  })
+  /* 允许只传变化的字段，其余保持原值（避免每次 setState 都要写全 DocState） */
+  const setState = (patch: Partial<DocState>): void => rawSetState((prev) => ({ ...prev, ...patch }))
+  const state = rawState
+
+  /* 用户输入的打开密码；null = 还没输过（第一次加载不带密码） */
+  const [password, setPassword] = useState<string | null>(null)
+
+  /* 换文件时把上一次的密码清掉，否则新文件会拿旧密码去试 */
+  useEffect(() => {
+    setPassword(null)
+  }, [filePath])
   const setLoading = useViewer((s) => s.setLoading)
   const setError = useViewer((s) => s.setError)
 
@@ -124,7 +148,9 @@ export function useDocument(filePath: string): DocState {
         // 允许按 Range 分块读取，大文件不必整份载入内存
         disableAutoFetch: false,
         // 关闭字体警告噪音
-        verbosity: 0
+        verbosity: 0,
+        /* 加密文档：第一次不带密码，用户输过之后带上再试 */
+        ...(password !== null ? { password } : {})
       })
     } catch (error) {
       // 同步抛出（例如参数非法）也要兜住，不能让渲染崩掉
@@ -142,7 +168,7 @@ export function useDocument(filePath: string): DocState {
           return
         }
         loaded = doc
-        setState({ doc, error: null, loading: false })
+        setState({ doc, error: null, loading: false, needPassword: false, wrongPassword: false })
         setLoading(null)
         // 回填页数，供状态栏与翻页使用
         useViewer.setState({ pageCount: doc.numPages })
@@ -160,6 +186,18 @@ export function useDocument(filePath: string): DocState {
       })
       .catch((error: unknown) => {
         if (cancelled) return
+        /*
+         * 加密文档：pdf.js 抛 PasswordException（code 1 = 没给密码，2 = 密码错）。
+         * 这时候不该把红字错误甩给用户 —— 弹密码框才是正常路径。
+         */
+        const name = (error as { name?: string } | null)?.name
+        if (name === 'PasswordException') {
+          const code = (error as { code?: number }).code
+          setState({ doc: null, error: null, loading: false, needPassword: true, wrongPassword: code === 2 })
+          setLoading(null)
+          setError(null)
+          return
+        }
         const message = error instanceof Error ? error.message : String(error)
         setState({ doc: null, error: message, loading: false })
         setLoading(null)
@@ -180,9 +218,13 @@ export function useDocument(filePath: string): DocState {
       if (loaded) void loaded.destroy()
       void task?.destroy()
     }
-  }, [filePath, setLoading, setError])
+  }, [filePath, password, setLoading, setError])
 
-  return state
+  /*
+   * submitPassword 用闭包里的 setPassword 覆盖占位实现：
+   * 密码一进 state，下面的 effect（依赖里有 password）就会重新 getDocument。
+   */
+  return { ...state, submitPassword: (next: string) => setPassword(next) }
 }
 
 /* ============================================================

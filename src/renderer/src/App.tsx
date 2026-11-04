@@ -33,6 +33,7 @@ import { LeftRail } from './components/LeftRail'
 import { RightRail } from './components/RightRail'
 import { DrawToolbar } from './components/DrawToolbar'
 import { BottomDock } from './components/BottomDock'
+import { PasswordPrompt } from './components/PasswordPrompt'
 import { ToolsPanel } from './components/ToolsPanel'
 import { ScreenMask } from './components/ScreenMask'
 import { UpdateToast } from './components/UpdateToast'
@@ -49,6 +50,7 @@ export default function App(): JSX.Element {
   const filePath = useViewer((s) => s.filePath)
   const fileName = useViewer((s) => s.fileName)
   const showSidebar = useViewer((s) => s.showSidebar)
+const closeActiveTab = useViewer((s) => s.closeActiveTab)
   const showSettings = useViewer((s) => s.showSettings)
   const showTools = useViewer((s) => s.showTools)
   const toast = useViewer((s) => s.toast)
@@ -153,7 +155,7 @@ export default function App(): JSX.Element {
   }, [])
 
   /* ---------- 文档加载 ---------- */
-  const { doc, error: docError } = useDocument(filePath)
+  const { doc, error: docError, needPassword, wrongPassword, submitPassword } = useDocument(filePath)
 
   /**
    * 把导出实现注册给 close-guard。
@@ -545,6 +547,14 @@ export default function App(): JSX.Element {
 
       {/* 下栏：底部悬浮画笔条（画笔 / 橡皮 / 调色盘 / 粗细 / 清屏） */}
       <BottomDock />
+
+      {/* 加密 PDF 的密码框：useDocument 抛 PasswordException 时出现 */}
+      <PasswordPrompt
+        open={needPassword}
+        wrong={wrongPassword}
+        onSubmit={submitPassword}
+        onCancel={() => closeActiveTab()}
+      />
 
 
       

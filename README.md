@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-2.0.2.0-2f6fed" />
+  <img alt="version" src="https://img.shields.io/badge/version-2.0.3.0-2f6fed" />
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078d4" />
   <img alt="license" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-e5484d" />
   <img alt="offline" src="https://img.shields.io/badge/network-%E5%8F%AA%E6%A3%80%E6%9F%A5%E6%9B%B4%E6%96%B0-16a34a" />
@@ -310,7 +310,7 @@
 |---|---|---|
 | 安装方式 | 向导（可选目录与快捷方式） | 一路到底静默装好 |
 | 适合 | 自己电脑、需要挑安装位置 | 教室一体机、批量部署 |
-| 文件名 | `秋夕-PDF阅读器-2.0.2.0-安装程序.exe` | `PDF阅读器-快速安装.exe` |
+| 文件名 | `QX-PDFreader-2.0.3.0-setup.exe`（公开下载用 ASCII 名） | `PDF阅读器-快速安装.exe` |
 
 ### 安装步骤
 
@@ -327,7 +327,7 @@ PDF阅读器-快速安装.exe /S
 ### 校验安装包
 
 ```powershell
-Get-FileHash .\秋夕-PDF阅读器-2.0.2.0-安装程序.exe -Algorithm SHA256
+Get-FileHash .\QX-PDFreader-2.0.3.0-setup.exe -Algorithm SHA256
 ```
 
 ---
@@ -457,6 +457,21 @@ A：工具箱「加密」可以加/解密码；带打开密码的 PDF 需先解�
 ---
 
 ## 更新日志
+
+### 2.0.3.0（2026-11-04）
+
+只修两个缺陷，界面与交互没有变化，旧设置、批注、最近文件全部兼容。
+
+- **修：常见图片格式打不开**。WebP / BMP / GIF 此前报「无法解码」，ICO / TIFF 报「暂不支持」——
+  根因是主进程只用 Electron 的 `nativeImage`，它在 Windows 上稳定认识的只有 PNG 与 JPEG。
+  现在三级兜底：`nativeImage` → 渲染进程 Chromium 解码（WebP / BMP / GIF / ICO）→
+  Windows WIC（TIFF）；解出的图继续走原来的「图片转一页 PDF」流程。
+- **修：连开两张图片，第二张偶尔打不开**。两次转换并行会互相踩缓存文件：
+  命中判断在写之前、`writeFile` 先截断再写、并行解码抢 `nativeImage`。
+  现在同一缓存路径去重、全局串行、缓存先写 `.part` 再原子替换、失败清临时文件、
+  命中缓存不进队列、解码失败重试一次。
+- **修：加密 PDF 打不开**。此前只有一行红字，现在弹密码框：输错提示「密码不对，再试一次」，
+  输对直接进文档；密码只在内存里解密，不记忆、不落盘。
 
 ### 2.0.2.0（2026-10-31）
 
