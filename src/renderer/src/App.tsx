@@ -95,8 +95,14 @@ const closeActiveTab = useViewer((s) => s.closeActiveTab)
    *   改用 store.getState() 取值，effect 只订阅一次，彻底断开这条链。
    */
   useEffect(() => {
+  /* 有未导出的批注就同步给主进程：静默更新靠这个判断「现在能不能装」 */
+  const exportDirty = useViewer((s) => s.exportDirty)
+  useEffect(() => {
+    void window.pdfApp.update.dirty(exportDirty)
+  }, [exportDirty])
+
     const off = window.pdfApp.onOpen((payload) => {
-      void useViewer.getState().openFile(payload.path, undefined, payload.name)
+      void useViewer.getState().openFile(payload.path, payload.page, payload.name)
     })
     /*
      * ★ 挂好监听后立刻向主进程报到（「不丢文件」握手）。

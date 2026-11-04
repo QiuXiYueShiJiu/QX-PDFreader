@@ -66,6 +66,8 @@ export function UpdateToast(): JSX.Element | null {
       const result = await window.pdfApp.update.download(updateInfo.asset!)
       if (result.ok) {
         setUpdateStage('ready', result.path)
+        /* 静默更新：登记好，退出应用时主进程用 /S 装掉，用户不用点任何按钮 */
+        if (result.path) void window.pdfApp.update.stage(result.path)
       } else {
         setError(result.error ?? '下载失败')
         setUpdateStage('error')
@@ -142,7 +144,7 @@ export function UpdateToast(): JSX.Element | null {
       {updateStage === 'ready' && (
         <>
           <p className="update-toast__hint" data-update-stage="ready">
-            下载完成，关闭程序后即可安装
+            已准备好，下次退出时自动装好，不用你操作
           </p>
           <div className="update-toast__actions">
             <button
@@ -152,7 +154,7 @@ export function UpdateToast(): JSX.Element | null {
               disabled={backingUp}
               onClick={install}
             >
-              {backingUp ? '备份数据中…' : '立即安装'}
+              {backingUp ? '备份数据中…' : '现在就装'}
             </button>
             <button
               type="button"
@@ -160,7 +162,7 @@ export function UpdateToast(): JSX.Element | null {
               data-tb-id="update-later"
               onClick={dismissUpdate}
             >
-              稍后
+              知道了
             </button>
           </div>
         </>

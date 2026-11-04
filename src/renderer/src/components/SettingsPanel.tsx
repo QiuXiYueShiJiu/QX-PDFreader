@@ -176,6 +176,8 @@ interface SettingsPanelProps {
 }
 
 /** 导出形式与同目录的 Sidebar / Toolbar / RightPanel 保持一致，统一用具名导出 */
+const ASSOC_EXTS = ['.pdf', '.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.ico', '.tif', '.tiff'] as const
+
 export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProps): JSX.Element {
   /** 打开时把焦点移进来，关闭时还给原来的元素 —— 键盘和读屏用户才不会迷路 */
   const panelRef = useRef<HTMLDivElement | null>(null)
@@ -820,27 +822,74 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
             </h3>
             <div className="sb-field sb-field--stack">
               <div className="sb-field-text">
-                <span className="sb-field-label">把图片交给秋夕打开</span>
+                <span className="sb-field-label">双击就用秋夕打开</span>
                 <span className="sb-field-hint">
-                  安装时已登记 PDF 与常见图片格式。Windows 10/11 把「默认打开方式」锁在用户设置里，
-                  安装器改不了，需要你在设置页点一次「秋夕-PDF阅读器」。
+                  勾上立刻生效，不用再去系统设置点一遍：这里直接改写当前用户的关联，并清掉系统锁定的默认项。
+                  取消勾选就还原。
                 </span>
+              </div>
+              <div className="sb-assoc-grid">
+                {ASSOC_EXTS.map((ext) => {
+                  const on = settings.associatedExts.includes(ext)
+                  return (
+                    <label key={ext} className="sb-assoc-item">
+                      <input
+                        type="checkbox"
+                        data-tb-id={`settings-assoc${ext}`}
+                        checked={on}
+                        onChange={(event) => {
+                          const next = event.target.checked
+                            ? [...settings.associatedExts, ext]
+                            : settings.associatedExts.filter((item) => item !== ext)
+                          onChange({ associatedExts: next })
+                          void window.pdfApp.app.assocApply(next)
+                        }}
+                      />
+                      <span>{ext}</span>
+                    </label>
+                  )
+                })}
               </div>
               <div className="sb-row">
                 <button
                   type="button"
-                  className="sb-btn sb-btn-primary"
-                  data-tb-id="settings-open-default-apps"
+                  className="sb-btn"
+                  data-tb-id="settings-assoc-all"
                   onClick={() => {
-                    void window.pdfApp.app.openDefaultApps()
+                    const all = ASSOC_EXTS.slice()
+                    onChange({ associatedExts: all })
+                    void window.pdfApp.app.assocApply(all)
                   }}
                 >
-                  打开默认应用设置
+                  全选
                 </button>
-                <span className="sb-field-hint">
-                  改完回到这里，双击 .png / .jpg 就会用秋夕打开。
-                </span>
+                <button
+                  type="button"
+                  className="sb-btn"
+                  data-tb-id="settings-assoc-none"
+                  onClick={() => {
+                    onChange({ associatedExts: [] })
+                    void window.pdfApp.app.assocApply([])
+                  }}
+                >
+                  全部取消
+                </button>
               </div>
+            </div>
+            <div className="sb-field">
+              <div className="sb-field-text">
+                <span className="sb-field-label">开机自启</span>
+                <span className="sb-field-hint">开机后在后台起来，双击文件直接显示</span>
+              </div>
+              <Switch
+                id={`${idPrefix}-autostart`}
+                label="开机自启"
+                checked={settings.autoStart}
+                onChange={(checked) => {
+                  onChange({ autoStart: checked })
+                  void window.pdfApp.app.assocAutoStart(checked)
+                }}
+              />
             </div>
           </section>
           {/* ---------------- 关于 ---------------- */}

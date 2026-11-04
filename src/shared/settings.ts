@@ -156,6 +156,9 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   showRightPanel: false,
   uiScale: 1.15,
   enableShortcuts: true,
+  /* 默认不抢别人的默认程序：用户勾了才写注册表 */
+  associatedExts: [],
+  autoStart: false,
   /* 启动声明默认显示：第一次用的人需要知道「免费 / 早期版本 / 到哪反馈」 */
   disclaimerHidden: false,
   /* 启动时静默查一次新版本：查到才提示，查不到什么都不显示 */
@@ -256,6 +259,12 @@ export function mergeSettings(raw: unknown): ReaderSettings {
     uiScale: Number.isFinite(input.uiScale) ? Number(input.uiScale) : base.uiScale,
     enableShortcuts:
       typeof input.enableShortcuts === 'boolean' ? input.enableShortcuts : base.enableShortcuts,
+    associatedExts: Array.isArray(input.associatedExts)
+      ? input.associatedExts
+          .map((e) => String(e).toLowerCase().trim())
+          .filter((e) => /^\.[a-z0-9]{2,5}$/.test(e))
+      : base.associatedExts,
+    autoStart: typeof input.autoStart === 'boolean' ? input.autoStart : base.autoStart,
     disclaimerHidden:
       typeof input.disclaimerHidden === 'boolean' ? input.disclaimerHidden : base.disclaimerHidden,
     /* 静默自动检查更新：默认开，用户可以关掉 */

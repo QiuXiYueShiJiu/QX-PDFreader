@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-2.0.3.0-2f6fed" />
+  <img alt="version" src="https://img.shields.io/badge/version-2.0.4.0-2f6fed" />
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078d4" />
   <img alt="license" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-e5484d" />
   <img alt="offline" src="https://img.shields.io/badge/network-%E5%8F%AA%E6%A3%80%E6%9F%A5%E6%9B%B4%E6%96%B0-16a34a" />
@@ -458,6 +458,12 @@ A：工具箱「加密」可以加/解密码；带打开密码的 PDF 需先解�
 
 ## 更新日志
 
+### 2.0.4.0（2026-11-04）
+
+- **同一文件夹的图片按一本相册打开**：双击文件夹里任意一张图，同目录图片按文件名顺序合成一本，顶栏「页面」可直接翻；整夹只有一张时仍按单页打开。
+- **静默更新**：更新包下载完成后，退出程序时自动以 `/S` 参数启动安装器，下次打开即为新版本；不需要手动点安装。
+- **文件关联与开机自启**：设置页可一键把 PDF 与 png/jpg/jpeg/webp/bmp/gif/ico/tif/tiff 关联到本程序，并可开启开机自启。取消勾选或卸载时，**只撤回确实由本程序写入的关联**（会先比对默认值），不会覆盖你后来指定的其他阅读器。
+- 卸载会清理本程序写入的 ProgID、Capabilities、RegisteredApplications、开机自启值与各后缀的默认值。
 ### 2.0.3.0（2026-11-04）
 
 只修两个缺陷，界面与交互没有变化，旧设置、批注、最近文件全部兼容。

@@ -156,6 +156,15 @@ export interface ReaderSettings {
   /** 是否启用键盘快捷键 */
   enableShortcuts: boolean
   /**
+   * 要由秋夕接管的文件后缀（小写、带点，如 ['.pdf', '.png']）。
+   *
+   * 勾了就写 HKCU\Software\Classes 并清掉该后缀的 UserChoice，
+   * 双击直接进秋夕，不再弹「你要用什么打开」——WPS 也是这么做的。
+   */
+  associatedExts: string[]
+  /** 开机自启（写 HKCU\...\Run） */
+  autoStart: boolean
+  /**
    * 是否已勾选「知道了，不再提示」而不再显示启动声明。
    *
    * 声明（免费提供 / 早期版本 / 反馈渠道）对第一次用的人是必要信息，

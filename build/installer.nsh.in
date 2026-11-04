@@ -498,6 +498,16 @@
 ;   并额外再杀一次进程 —— 这是最后一道保险。
 ; ============================================================
 
+; 单个后缀：默认值确实是 QiuXi.PDFReader 才删，别人的关联一个字都不动
+; （2.0.4 起设置页的「仿 WPS 关联」用的 ProgID；卸载必须把它清干净，
+;   否则会留下指向已删除 exe 的 .ext 默认值，双击直接报错。）
+!macro CleanQiuXiExt EXT
+  ReadRegStr $R1 SHCTX "Software\Classes\${EXT}" ""
+  StrCmp $R1 "QiuXi.PDFReader" 0 +2
+    DeleteRegValue SHCTX "Software\Classes\${EXT}" ""
+  DeleteRegValue SHCTX "Software\Classes\${EXT}\OpenWithProgids" "QiuXi.PDFReader"
+  DeleteRegValue SHCTX "Software\Classes\SystemFileAssociations\${EXT}\OpenWithProgids" "QiuXi.PDFReader"
+!macroend
 !macro customUnInstall
   ; 再杀一次进程：万一用户是在应用运行时点的卸载，
   ; 上面 customInit 的 taskkill 不会执行（那是安装路径才走的宏）。
@@ -538,6 +548,22 @@
   DeleteRegValue SHCTX "Software\Classes\SystemFileAssociations\.bmp\OpenWithProgids" "QiuXiImage"
   DeleteRegValue SHCTX "Software\Classes\SystemFileAssociations\.gif\OpenWithProgids" "QiuXiImage"
   DeleteRegKey SHCTX "Software\Classes\Applications\${APP_EXECUTABLE_FILENAME}"
+  ; ⑦ 2.0.4「仿 WPS」关联：ProgID = QiuXi.PDFReader
+  ;    associations.ts 写在 HKCU\Software\Classes\QiuXi.PDFReader，
+  ;    Capabilities 写在 HKCU\Software\秋夕-PDF阅读器\Capabilities（和安装器那条不是同一个键，两个都删）。
+  DeleteRegKey SHCTX "Software\Classes\QiuXi.PDFReader"
+  DeleteRegKey SHCTX "Software\秋夕-PDF阅读器\Capabilities"
+  DeleteRegValue SHCTX "Software\Microsoft\Windows\CurrentVersion\Run" "QiuXiPDFReader"
+  !insertmacro CleanQiuXiExt ".pdf"
+  !insertmacro CleanQiuXiExt ".png"
+  !insertmacro CleanQiuXiExt ".jpg"
+  !insertmacro CleanQiuXiExt ".jpeg"
+  !insertmacro CleanQiuXiExt ".webp"
+  !insertmacro CleanQiuXiExt ".bmp"
+  !insertmacro CleanQiuXiExt ".gif"
+  !insertmacro CleanQiuXiExt ".ico"
+  !insertmacro CleanQiuXiExt ".tif"
+  !insertmacro CleanQiuXiExt ".tiff"
   DeleteRegKey SHCTX "Software\${COMPANY_NAME}\${PRODUCT_NAME}\Capabilities"
   DeleteRegValue SHCTX "Software\RegisteredApplications" "${PRODUCT_NAME}"
 

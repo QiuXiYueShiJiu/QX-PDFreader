@@ -1073,3 +1073,24 @@ html[data-pack] .toolbar,
 html[data-pack] .statusbar {
   box-shadow: var(--panel-shadow, none);
 }
+
+.sb-assoc-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 6px 0 10px;
+}
+
+.sb-assoc-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.sb-assoc-item input {
+  margin: 0;
+  cursor: pointer;
+}

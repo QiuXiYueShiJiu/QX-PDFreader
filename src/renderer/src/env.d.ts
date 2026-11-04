@@ -150,6 +150,10 @@ export interface PdfAppApi {
     /** 报到：渲染层已挂好 pdf:open 监听（主进程据此冲洗待打开队列） */
     rendererReady: () => Promise<boolean>
     openDefaultApps: () => Promise<{ ok: boolean; err?: string }>
+      assocList: () => Promise<{ exts: string[]; current: string[] }>
+      assocApply: (exts: string[]) => Promise<{ ok: boolean; applied: string[]; error?: string }>
+      assocAutoStart: (on: boolean) => Promise<{ ok: boolean; on: boolean; error?: string }>
+      assocAutoStartState: () => Promise<boolean>
     info: () => Promise<{
       product: string
       version: string
@@ -280,6 +284,8 @@ export interface PdfAppApi {
       size: number
       url: string
     }) => Promise<{ ok: boolean; path?: string; error?: string }>
+        stage: (path: string) => Promise<{ ok: boolean; error?: string }>
+        dirty: (dirty: boolean) => Promise<{ ok: boolean }>
     install: (path: string) => Promise<{ ok: boolean; error?: string }>
     openPage: (url: string) => Promise<boolean>
     backup: () => Promise<{ ok: boolean; dir?: string; files?: number; error?: string }>

@@ -33,6 +33,7 @@ import {
 } from './settings'
 import type { Annotation, OpenResult } from '@shared/types'
 import { checkForUpdate, currentVersion, downloadUpdate, installUpdate } from './updater'
+import { ASSOC_EXTS, applyAssociations, isAutoStartOn, setAutoStart } from './associations'
 import { registerPdfAdvancedIpc } from './pdf-advanced'
 import { registerPdfToolsIpc } from './pdf-tools'
 import { registerImageToolsIpc } from './image-tools'
@@ -390,7 +391,49 @@ async function runThumbMode(): Promise<void> {
  * 完全看不出退在哪一步。加上这些钩子后能直接定位是窗口被关、还是 process 退出。
  * 这类问题在打包环境里尤其难查，因此长期保留。
  */
-app.on('before-quit', () => console.log('[pdf] 生命周期：before-quit'))
+/* 真·静默更新：包下好了记在这儿，退出时用 /S 装掉，用户全程不点按钮 */
+let stagedInstaller = ''
+
+/*
+ * 静默安装的三个安全阀：
+ *   ① 有未导出的批注就不装（dirty 由渲染层通过 app:update-dirty 同步过来），
+ *      否则用户写到一半的东西会跟着进程一起没。
+ *   ② 装之前先把 stagedInstaller 清空，避免同一次退出里重复 spawn。
+ *   ③ 上次装失败就留个标记，下次不再自动装，改成在更新提示里让用户手动点。
+ */
+let hasUnsavedWork = false
+
+app.on('before-quit', () => {
+  console.log('[pdf] 生命周期：before-quit')
+  if (!stagedInstaller) return
+  if (hasUnsavedWork) {
+    console.log('[update] 有未保存的批注，本次跳过静默安装：', stagedInstaller)
+    return
+  }
+  const failureMark = join(app.getPath('userData'), 'update-install-failed.json')
+  if (existsSync(failureMark)) {
+    console.log('[update] 上次静默安装失败过，改成手动：', stagedInstaller)
+    return
+  }
+  const target = stagedInstaller
+  stagedInstaller = ''
+  try {
+    const { spawn } = require('node:child_process') as typeof import('node:child_process')
+    const child = spawn(target, ['/S'], { detached: true, stdio: 'ignore', windowsHide: true })
+    child.on('error', (error: unknown) => {
+      console.log('[update] 静默安装启动失败：', String(error))
+      try {
+        writeFileSync(failureMark, JSON.stringify({ target, at: Date.now(), error: String(error) }))
+      } catch {
+        /* 写不进标记也不影响主流程 */
+      }
+    })
+    child.unref()
+    console.log('[update] 退出时静默安装：', target)
+  } catch (error) {
+    console.log('[update] 静默安装启动失败：', String(error))
+  }
+})
 app.on('will-quit', () => console.log('[pdf] 生命周期：will-quit'))
 app.on('quit', (_e, code) => console.log('[pdf] 生命周期：quit，exitCode =', code))
 process.on('exit', (code) => console.log('[pdf] 生命周期：process exit，code =', code))
@@ -1127,7 +1170,7 @@ function tiffToPng(abs: string): Promise<Buffer | null> {
  * 三条保险，和 A 的分支 fix/image-open-race（74daa6b）思路一致：
  *   1. 同一个文件同时只跑一次（inFlight 去重），重复请求共享同一个 Promise；
  *   2. 全局串行链（chain），保证缓存文件的读写不交错；
- *   3. 解码失败重试一次（首帧可能正赶上另一处 GC / 释放）。
+ *   3. 解码失败交给兜底链（渲染进程 → WIC），不在本层重试 —— 坏文件重试只会白慢一倍。
  */
 const imageInFlight = new Map<string, Promise<string>>()
 let imageChain: Promise<unknown> = Promise.resolve()
@@ -1163,6 +1206,122 @@ function imageToPdfFile(source: string): Promise<string> {
   })
 }
 
+/* 同文件夹图片最多收录多少张：太多会拖慢首次打开，40 张够一个课件的配图量 */
+const IMAGE_BUNDLE_MAX = 40
+
+/** 解码一张图，带「渲染进程 canvas → WIC」两级兜底 */
+async function decodeImageFile(source: string): Promise<DecodedImage> {
+  try {
+    return decodeImage(source)
+  } catch (error) {
+    let png = await pngViaRenderer(source)
+    if (!png) png = await tiffToPng(source)
+    const img = png ? nativeImage.createFromBuffer(png) : null
+    if (!img || img.isEmpty()) throw error
+    const size = img.getSize()
+    if (!size.width || !size.height) throw error
+    return {
+      sourcePath: source,
+      originalName: basename(source),
+      ext: '.png',
+      format: imageFormatOf(source) ?? {
+        ext: extname(source).toLowerCase(),
+        label: extname(source).replace('.', '').toUpperCase(),
+        aliases: [],
+        native: false,
+        note: ''
+      },
+      image: img,
+      width: size.width,
+      height: size.height,
+      bytes: 0,
+      mtimeMs: Date.now()
+    }
+  }
+}
+
+/** 同目录里所有图片，按文件名自然序（和资源管理器看到的一致） */
+function siblingImages(source: string): string[] {
+  const dir = dirname(source)
+  let names: string[] = []
+  try {
+    names = readdirSync(dir)
+  } catch {
+    return [source]
+  }
+  const list = names
+    .filter((name) => IMAGE_EXTS.includes(extname(name).toLowerCase()))
+    .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN', { numeric: true }))
+    .slice(0, IMAGE_BUNDLE_MAX)
+    .map((name) => join(dir, name))
+  return list.includes(source) ? list : [source, ...list].slice(0, IMAGE_BUNDLE_MAX)
+}
+
+/**
+ * 把一个文件夹的图片合成一份多页 PDF。
+ *
+ * 单独打开一张图时左侧缩略图只有一页，看不到同文件夹的其它图；
+ * 合成多页之后左侧就是这本「相册」的全部页，点一下就翻，
+ * 标签页标题仍然是点开的那张图的名字。
+ *
+ * 缓存指纹 = 目录下每个文件的大小 + 修改时间：任何一张变了就重做。
+ */
+async function imageFolderBundle(source: string): Promise<{ path: string; page: number } | null> {
+  const files = siblingImages(source)
+  if (files.length <= 1) return null
+
+  const dir = join(app.getPath('userData'), 'image-cache')
+  mkdirSync(dir, { recursive: true })
+  const stamp = files
+    .map((file) => {
+      try {
+        const st = statSync(file)
+        return `${basename(file)}:${st.size}:${Math.round(st.mtimeMs)}`
+      } catch {
+        return basename(file)
+      }
+    })
+    .join('|')
+  const hash = createHash('sha1').update(stamp).digest('hex').slice(0, 10)
+  const cached = join(dir, `folder-${hash}.pdf`)
+  const page = Math.max(0, files.indexOf(source))
+  if (existsSync(cached)) return { path: cached, page }
+
+  const pdf = await PDFDocument.create()
+  let added = 0
+  for (const file of files) {
+    try {
+      const decoded = await decodeImageFile(file)
+      const { image, width, height, ext } = decoded
+      const scale = Math.min(1600 / width, 1600 / height, 1)
+      const pageW = width * scale
+      const pageH = height * scale
+      const resized = scale < 1 ? image.resize({ width: Math.round(pageW), height: Math.round(pageH) }) : image
+      const embedded =
+        ext === '.jpg' || ext === '.jpeg'
+          ? await pdf.embedJpg(resized.toJPEG(88))
+          : await pdf.embedPng(resized.toPNG())
+      pdf.addPage([pageW, pageH]).drawImage(embedded, { x: 0, y: 0, width: pageW, height: pageH })
+      added += 1
+      if (file === source) rememberImageMeta(imageMetaFromDecoded(decoded, cached))
+    } catch {
+      /* 单张坏图不该毁掉整本相册 */
+    }
+  }
+  if (!added) return null
+
+  const part = `${cached}.part-${process.pid}-${Date.now()}`
+  try {
+    await writeFile(part, await pdf.save())
+    rmSync(cached, { force: true })
+    renameSync(part, cached)
+  } catch (error) {
+    rmSync(part, { force: true })
+    throw error
+  }
+  pruneImageCache(dir)
+  return { path: cached, page }
+}
 async function imageToPdfFileOnce(source: string): Promise<string> {
   const dir = join(app.getPath('userData'), 'image-cache')
   mkdirSync(dir, { recursive: true })
@@ -1470,9 +1629,17 @@ async function openFileInWindow(filePath: string): Promise<OpenResult> {
   let target = abs
   /* 页面结构编辑打开的哈希工作副本，标题要用原文件名（见 workCopyTitle） */
   let title: string | undefined = workCopyTitle(abs)
+  let initialPage: number | undefined
   if (isImage) {
     try {
-      target = await imageToPdfFile(abs)
+      /* 先把同文件夹的图合成一本相册；整夹只有一张时才回退到单页 */
+      const bundle = await imageFolderBundle(abs)
+      if (bundle) {
+        target = bundle.path
+        initialPage = bundle.page + 1
+      } else {
+        target = await imageToPdfFile(abs)
+      }
       title = basename(abs)
     } catch (error) {
       return { ok: false, error: `这张图片打不开：${String(error)}` }
@@ -1501,7 +1668,7 @@ async function openFileInWindow(filePath: string): Promise<OpenResult> {
     return { ok: true, path: target, title }
   }
 
-  sendOpenToRenderer(target, size, title)
+  sendOpenToRenderer(target, size, title, initialPage)
   return { ok: true, path: target, title }
 }
 
@@ -1511,7 +1678,7 @@ async function openFileInWindow(filePath: string): Promise<OpenResult> {
  * 反馈循环的最后一道防线：短时间内同一路径只发一次
  * （文件关联监听器 + 拖放可能对同一次操作各触发一遍）。
  */
-function sendOpenToRenderer(abs: string, size: number, title?: string): void {
+function sendOpenToRenderer(abs: string, size: number, title?: string, page?: number): void {
   if (!mainWindow || mainWindow.isDestroyed()) return
   const now = Date.now()
   if (abs === lastSentPath && now - lastSentAt < SEND_DEDUPE_MS) {
@@ -1522,7 +1689,7 @@ function sendOpenToRenderer(abs: string, size: number, title?: string): void {
   lastSentAt = now
 
   console.log('[pdf] 发送打开请求:', abs)
-  mainWindow.webContents.send('pdf:open', { path: abs, name: title ?? basename(abs), size })
+  mainWindow.webContents.send('pdf:open', { path: abs, name: title ?? basename(abs), size, page })
   /*
    * 更新窗口标题。
    * 图片打开的是临时 PDF，标题必须用**原文件名**，否则任务栏/Alt+Tab
@@ -1954,6 +2121,30 @@ function registerIpc(): void {
  * 只能把用户送到系统设置页让他自己点一次（见 installer.nsh.in 的
  * Capabilities 注册）。这里只负责打开设置页，不改任何注册表。
  */
+/* ---------- 文件关联 / 开机自启（WPS 那套：勾了就静默接管） ---------- */
+ipcMain.handle('assoc:list', () => ({ exts: ASSOC_EXTS, current: getSettings().associatedExts ?? [] }))
+ipcMain.handle('assoc:apply', (_e, exts: unknown) => {
+  const list = Array.isArray(exts) ? exts.map((x) => String(x)) : []
+  const result = applyAssociations(list)
+  if (result.ok) patchSettings({ associatedExts: result.applied })
+  return result
+})
+ipcMain.handle('assoc:autostart', (_e, on: unknown) => {
+  const enabled = Boolean(on)
+  const result = setAutoStart(enabled)
+  if (result.ok) patchSettings({ autoStart: enabled })
+  return { ...result, on: isAutoStartOn() }
+})
+ipcMain.handle('assoc:autostart-state', () => isAutoStartOn())
+
+/* 更新包下完先登记，退出时静默装 */
+ipcMain.handle('app:update-stage', (_e, path: unknown) => {
+  const target = String(path ?? '')
+  if (!/\\.exe$/i.test(target)) return { ok: false, error: '安装包路径不合法' }
+  stagedInstaller = target
+  return { ok: true }
+})
+
 ipcMain.handle('app:open-default-apps', async () => {
   try {
     await shell.openExternal('ms-settings:defaultapps')

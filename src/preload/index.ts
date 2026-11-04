@@ -153,6 +153,8 @@ export interface OpenPayload {
   path: string
   name: string
   size: number
+  /** 打开后要跳到第几页（1 起）。同一文件夹的图片会合成一份多页 PDF，靠它落到点的那张 */
+  page?: number
 }
 
 /** 更新检查结果（与 src/main/updater.ts 的形状保持一致） */
@@ -373,7 +375,15 @@ const api = {
      * 否则 `webContents.send` 会发给空气（无监听者时消息静默丢失），
      * 表现为「有概率打不开」。详见 src/main/index.ts 的 pendingOpens。
      */
-    openDefaultApps: (): Promise<{ ok: boolean; err?: string }> => invoke('app:open-default-apps'),    rendererReady: (): Promise<boolean> => invoke('app:renderer-ready'),
+    openDefaultApps: (): Promise<{ ok: boolean; err?: string }> => invoke('app:open-default-apps'),
+    /** 文件关联（WPS 那套）：勾了哪些后缀就静默接管哪些 */
+    assocList: (): Promise<{ exts: string[]; current: string[] }> => invoke('assoc:list'),
+    assocApply: (exts: string[]): Promise<{ ok: boolean; applied: string[]; error?: string }> =>
+      invoke('assoc:apply', exts),
+    assocAutoStart: (on: boolean): Promise<{ ok: boolean; on: boolean; error?: string }> =>
+      invoke('assoc:autostart', on),
+    assocAutoStartState: (): Promise<boolean> => invoke('assoc:autostart-state'),
+    rendererReady: (): Promise<boolean> => invoke('app:renderer-ready'),
     /** 选一张图片当阅读区背景（主进程负责落盘到 userData） */
     pickBackground: () =>
       invoke<{ ok: boolean; path?: string; error?: string; canceled?: boolean }>(
@@ -522,8 +532,13 @@ const api = {
     current: () => invoke<string>('app:update-current'),
     /** 下载安装包；进度走 onProgress */
     download: (asset: UpdateAsset) => invoke<{ ok: boolean; path?: string; error?: string }>('app:update-download', asset),
+    /** 登记安装包：下次退出应用时静默装掉 */
+    stage: (path: string) => invoke<{ ok: boolean; error?: string }>('app:update-stage', path),
+    /** 有未导出的批注时告诉主进程：这次退出别装 */
+    dirty: (dirty: boolean) => invoke<{ ok: boolean }>('app:update-dirty', dirty),
     /** 打开安装包，交给系统安装程序 */
     install: (path: string) => invoke<{ ok: boolean; error?: string }>('app:update-install', path),
+    /** 下载完成后登记：退出应用时用 /S 静默装掉，用户不用点任何按钮 */
     /** 在浏览器里打开 release 页面 */
     openPage: (url: string) => invoke<boolean>('app:update-open-page', url),
     /** 装之前备份 settings.json 等用户数据（失败不阻断安装） */
