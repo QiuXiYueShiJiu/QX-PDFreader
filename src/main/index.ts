@@ -2138,6 +2138,11 @@ ipcMain.handle('assoc:autostart', (_e, on: unknown) => {
 ipcMain.handle('assoc:autostart-state', () => isAutoStartOn())
 
 /* 更新包下完先登记，退出时静默装 */
+/* 渲染层同步「有没有未导出的批注」：静默安装前要看这个，别把没导出的东西装没了 */
+ipcMain.handle('app:update-dirty', (_e, dirty: unknown) => {
+  hasUnsavedWork = Boolean(dirty)
+  return true
+})
 ipcMain.handle('app:update-stage', (_e, path: unknown) => {
   const target = String(path ?? '')
   if (!/\\.exe$/i.test(target)) return { ok: false, error: '安装包路径不合法' }

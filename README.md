@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-2.0.4.0-2f6fed" />
+  <img alt="version" src="https://img.shields.io/badge/version-2.0.4.1-2f6fed" />
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078d4" />
   <img alt="license" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-e5484d" />
   <img alt="offline" src="https://img.shields.io/badge/network-%E5%8F%AA%E6%A3%80%E6%9F%A5%E6%9B%B4%E6%96%B0-16a34a" />
@@ -458,7 +458,12 @@ A：工具箱「加密」可以加/解密码；带打开密码的 PDF 需先解�
 
 ## 更新日志
 
-### 2.0.4.0（2026-11-04）
+### 2.0.4.1（2026-11-05）
+
+- **修复 2.0.4.0 启动白屏**：`App.tsx` 里一个 hook 被误放进 `useEffect` 回调（React #321），整棵组件树不挂载、窗口只剩空白。现已移回组件体顶层。
+- **补上缺失的 IPC**：渲染层调用 `app:update-dirty`、主进程没注册 handler（控制台持续报 No handler registered），已补 `ipcMain.handle('app:update-dirty')`，静默安装前的「是否有未导出批注」判断恢复生效。
+- 安装过 2.0.4.0 的机器：2.0.4.1 可直接覆盖安装，数据与设置不受影响。
+### 2.0.4.0（2026-11-04，**有白屏缺陷，请勿使用**）
 
 - **同一文件夹的图片按一本相册打开**：双击文件夹里任意一张图，同目录图片按文件名顺序合成一本，顶栏「页面」可直接翻；整夹只有一张时仍按单页打开。
 - **静默更新**：更新包下载完成后，退出程序时自动以 `/S` 参数启动安装器，下次打开即为新版本；不需要手动点安装。
