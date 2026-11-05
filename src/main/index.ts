@@ -18,7 +18,7 @@ import { app, BrowserWindow, dialog, ipcMain, nativeImage, net, protocol, screen
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { basename, dirname, extname, join, normalize, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { PDFDocument, rgb as pdfRgb } from 'pdf-lib'
@@ -234,6 +234,25 @@ if (!gotLock) {
     const file = extractFileArg(argv)
     if (file) void openFileInWindow(file)
     console.log('[pdf] 第二实例请求：', file ?? '(无文件)')
+
+    /*
+     * ★ 2026-11-05 用户报的「必须 kill 掉后台进程才能打开界面」。
+     *
+     *   根因：开机自启跑了一个 --hidden 实例，它握着单实例锁；
+     *   用户双击图标只是把请求转给这个隐藏实例，而 revealMainWindow()
+     *   在 HIDDEN_MODE 下故意拒绝显示 —— 于是双击毫无反应。
+     *
+     *   正确语义：**用户主动启动**（这次 argv 里没有 --hidden）就是
+     *   要求看到界面，隐藏状态应当被解除，而不是继续装死。
+     */
+    if (!argv.includes('--hidden')) {
+      HIDDEN_MODE = false
+      startGuardian()
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.setSkipTaskbar(false)
+        if (!mainWindow.isVisible()) mainWindow.showInactive()
+      }
+    }
     revealMainWindow()
   })
 
@@ -273,9 +292,80 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
+
+/* ───────────────────────── 后台守护进程 ───────────────────────── */
+
+/**
+ * 守护进程状态（独立可执行文件 QiuXiGuard.exe，**不是主程序自己**）。
+ *
+ * ★ 用户 2026-11-05 明确要求：
+ *   ① 保护进程必须是**另一个文件**，不能靠同一个 exe 换个参数冒充；
+ *   ② 必须**强制绑定** —— 主程序拿不到它就不该静默裸跑。
+ *
+ * 行为：
+ *   · 主程序启动时把它拉起来（隐藏、无窗口），告诉它自己的 PID 与干净退出标记路径；
+ *   · 主程序被强杀 → 标记文件不存在 → 它把主程序重新拉起来（最多 2 次，防止死循环）；
+ *   · 主程序正常退出 → 先写标记文件 → 它看到标记就自己退出。
+ */
+let guardPath = ''
+let guardCleanFlag = ''
+let guardStarted = false
+
+function guardExePath(): string {
+  if (guardPath) return guardPath
+  const dir = app.isPackaged ? process.resourcesPath : join(app.getAppPath(), 'build')
+  guardPath = join(dir, 'guard', 'QiuXiGuard.exe')
+  return guardPath
+}
+
+function startGuardian(): void {
+  if (guardStarted) return
+  if (HIDDEN_MODE) return // 自动化/隐藏实例不挂守护，免得测试时被杀就复活
+  if (process.argv.includes('--no-guard')) return
+  const exe = guardExePath()
+  guardCleanFlag = join(app.getPath('userData'), 'guard-clean.flag')
+  try {
+    if (existsSync(guardCleanFlag)) rmSync(guardCleanFlag, { force: true })
+  } catch {
+    /* 标记清不掉也不影响主流程 */
+  }
+  if (!existsSync(exe)) {
+    console.error('[pdf] 守护进程缺失：', exe)
+    dialog.showErrorBox(
+      '缺少保护进程',
+      '安装包不完整：找不到 QiuXiGuard.exe。\n请重新安装秋夕-PDF阅读器。',
+    )
+    app.quit()
+    return
+  }
+  try {
+    const child = spawn(exe, ['--pid', String(process.pid), '--exe', process.execPath, '--flag', guardCleanFlag], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    })
+    child.unref()
+    guardStarted = true
+    console.log('[pdf] 守护进程已启动 pid=', child.pid)
+  } catch (err) {
+    console.error('[pdf] 守护进程启动失败：', err)
+    dialog.showErrorBox('保护进程启动失败', String(err))
+    app.quit()
+  }
+}
+
+function markCleanExit(): void {
+  if (!guardCleanFlag) return
+  try {
+    writeFileSync(guardCleanFlag, String(Date.now()), 'utf8')
+  } catch {
+    /* 写不进去就让它多活一次，无害 */
+  }
+}
 async function onReady(): Promise<void> {
   console.log('[pdf] 秋夕-PDF阅读器启动')
   console.log('[pdf] 待打开文件:', pendingOpens.length ? pendingOpens.join(', ') : '(无)')
+  startGuardian()
 
   /* 渲染诊断（默认关闭，见 diag-log.ts 的说明） */
   if (initDiagLog()) {
@@ -434,7 +524,10 @@ app.on('before-quit', () => {
     console.log('[update] 静默安装启动失败：', String(error))
   }
 })
-app.on('will-quit', () => console.log('[pdf] 生命周期：will-quit'))
+app.on('will-quit', () => {
+  markCleanExit()
+  console.log('[pdf] 生命周期：will-quit')
+})
 app.on('quit', (_e, code) => console.log('[pdf] 生命周期：quit，exitCode =', code))
 process.on('exit', (code) => console.log('[pdf] 生命周期：process exit，code =', code))
 
@@ -530,7 +623,8 @@ function decodePathFromUrl(rawUrl: string): string | null {
  * 因此提供一个显式开关，让窗口从创建到销毁都保持隐藏，
  * 不依赖外部的 -WindowStyle Hidden 之类的技巧（实测不可靠且难以排查）。
  */
-const HIDDEN_MODE = process.argv.includes('--hidden')
+let HIDDEN_MODE = process.argv.includes('--hidden')
+
 /*
  * ★ 录屏模式（QX_CAPTURE=1）：窗口不显示在屏幕上，但保持「可见」状态并关掉节流，
  *   这样 Page.startScreencast 才能持续出帧（隐藏窗口没有合成帧，screencast 只会零星来几张）。

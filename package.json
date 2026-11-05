@@ -145,7 +145,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "秋夕-PDF阅读器",
-      "artifactName": "秋夕-PDF阅读器-2.0.4.1-安装程序.${ext}",
+      "artifactName": "秋夕-PDF阅读器-2.0.4.2-安装程序.${ext}",
       "include": "build/installer.nsh"
     },
     "afterPack": "scripts/after-pack.mjs",
@@ -181,9 +181,13 @@
       {
         "from": "build/shell-thumb/QXThumbNative.dll",
         "to": "shell-thumb/QXThumbNative.dll"
+      },
+      {
+        "from": "build/guard/QiuXiGuard.exe",
+        "to": "guard/QiuXiGuard.exe"
       }
     ]
   },
-  "buildVersion": "2.0.4.1",
+  "buildVersion": "2.0.4.2",
   "productName": "秋夕-PDF阅读器"
 }

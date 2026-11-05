@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-2.0.4.1-2f6fed" />
+  <img alt="version" src="https://img.shields.io/badge/version-2.0.4.2-2f6fed" />
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078d4" />
   <img alt="license" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-e5484d" />
   <img alt="offline" src="https://img.shields.io/badge/network-%E5%8F%AA%E6%A3%80%E6%9F%A5%E6%9B%B4%E6%96%B0-16a34a" />
@@ -458,6 +458,11 @@ A：工具箱「加密」可以加/解密码；带打开密码的 PDF 需先解�
 
 ## 更新日志
 
+### 2.0.4.2（2026-11-05）
+
+- **修复「双击图标没反应、必须杀掉后台进程」**：开机自启的隐藏实例握着单实例锁，用户双击只是把请求转给它，而它在隐藏模式下拒绝显示窗口。现在带前台参数进来的第二次启动会解除隐藏、重新出现在任务栏。
+- **新增保护进程 `QiuXiGuard.exe`**：独立可执行文件，随主程序启动；主程序被强制结束时把它重新拉起（最多 2 次）。主程序找不到它会弹「缺少保护进程」并退出——保护是强制的，不会静默裸跑。
+- 安装过 2.0.4.1 的机器可直接覆盖安装，数据与设置不受影响。
 ### 2.0.4.1（2026-11-05）
 
 - **修复 2.0.4.0 启动白屏**：`App.tsx` 里一个 hook 被误放进 `useEffect` 回调（React #321），整棵组件树不挂载、窗口只剩空白。现已移回组件体顶层。
