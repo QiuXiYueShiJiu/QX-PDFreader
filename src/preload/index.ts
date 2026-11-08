@@ -247,7 +247,10 @@ const api = {
   /* ---------- 设置 ---------- */
   settings: {
     get: () => invoke<ReaderSettings>('pdf:settings-get'),
-    patch: (patch: Partial<ReaderSettings>) => invoke<ReaderSettings>('pdf:settings-patch', patch)
+    patch: (patch: Partial<ReaderSettings>) => invoke<ReaderSettings>('pdf:settings-patch', patch),
+    /** 首启向导：写设置并在 onboarded=true 时关窗、建主窗口 */
+    onboardingApply: (patch: Partial<ReaderSettings>) =>
+      invoke<ReaderSettings>('app:onboarding-apply', patch)
   },
 
   /* ---------- 最近打开 ---------- */

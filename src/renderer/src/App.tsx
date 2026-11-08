@@ -163,6 +163,17 @@ const closeActiveTab = useViewer((s) => s.closeActiveTab)
   /* ---------- 文档加载 ---------- */
   const { doc, error: docError, needPassword, wrongPassword, submitPassword } = useDocument(filePath)
 
+  /*
+   * 密码框的「取消」要做两件事：关掉这个打不开的标签页，并且立刻把框收起来。
+   *
+   * useDocument 现在会在空路径时分复位 needPassword，但那只是兜底；这里再加一层本地开关，
+   * 保证「点了取消框一定消失」不依赖下游状态是否及时更新（大屏触控用户对这种事特别敏感）。
+   */
+  const [passwordDismissed, setPasswordDismissed] = useState(false)
+  useEffect(() => {
+    setPasswordDismissed(false)
+  }, [filePath])
+
   /**
    * 把导出实现注册给 close-guard。
    *
@@ -556,10 +567,13 @@ const closeActiveTab = useViewer((s) => s.closeActiveTab)
 
       {/* 加密 PDF 的密码框：useDocument 抛 PasswordException 时出现 */}
       <PasswordPrompt
-        open={needPassword}
+        open={needPassword && !passwordDismissed}
         wrong={wrongPassword}
         onSubmit={submitPassword}
-        onCancel={() => closeActiveTab()}
+        onCancel={() => {
+          setPasswordDismissed(true)
+          closeActiveTab()
+        }}
       />
 
 
@@ -591,6 +605,7 @@ const closeActiveTab = useViewer((s) => s.closeActiveTab)
         与设置面板互斥由 store 的 setShowTools / setShowSettings 保证。
       */}
       {showTools ? <ToolsPanel onClose={() => setShowTools(false)} /> : null}
+
       {showSettings ? (
         <SettingsPanel
           settings={settings}

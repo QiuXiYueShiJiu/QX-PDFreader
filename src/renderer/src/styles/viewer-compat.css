@@ -16,6 +16,17 @@
 
   /* 整条可拖动窗口；按钮区必须 no-drag，否则点不动 */
   -webkit-app-region: drag;
+
+  /*
+   * ★ 标题栏必须压在模态遮罩之上。
+   *
+   * 踩坑记录：密码框用 `position: fixed; inset: 0; z-index: 90` 铺满整个窗口，
+   * 而窗口是无边框自绘的，最小化/最大化/关闭三个按钮都在 .titlebar 里（层级默认 auto）。
+   * 结果密码框一出现，右上角三个按钮全被遮住，点不动也关不掉。
+   * 给标题栏一个更高的层级，遮罩就只压内容区，不压窗口按钮。
+   */
+  position: relative;
+  z-index: 120;
 }
 
 .titlebar__brand {

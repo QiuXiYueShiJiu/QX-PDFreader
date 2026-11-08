@@ -22,11 +22,18 @@ function userFile(name: string): string {
   return join(dir, name)
 }
 
-/** 读取 JSON，失败返回兜底值（不抛异常，保证应用能起来） */
+/**
+ * 读取 JSON，失败返回兜底值（不抛异常，保证应用能起来）。
+ *
+ * 先去掉 BOM：记事本、PowerShell 的 Set-Content -Encoding UTF8 都会写 `\uFEFF`，
+ * 而 JSON.parse 不认它，会把整份设置当成损坏直接退回默认值 ——
+ * 用户看到的就是「设置莫名其妙被重置」。
+ */
 function readJson<T>(path: string, fallback: T): T {
   try {
     if (!existsSync(path)) return fallback
-    return JSON.parse(readFileSync(path, 'utf8')) as T
+    const raw = readFileSync(path, 'utf8').replace(/^\uFEFF/, '')
+    return JSON.parse(raw) as T
   } catch (error) {
     console.warn(`[settings] 读取 ${path} 失败：`, error)
     return fallback

@@ -391,6 +391,16 @@ async function onReady(): Promise<void> {
     return
   }
 
+  /*
+   * 首次启动（全新安装，或从 2.0.x 第一次升到 2.1）：先开设置窗口。
+   * 主窗口要等向导结束才创建 —— 这样不存在「设置页闪一下」的时间窗。
+   */
+  if (!getSettings().onboarded) {
+    console.log('[pdf] 首次启动：先开设置窗口')
+    createOnboardingWindow()
+    return
+  }
+
   createMainWindow()
 }
 
@@ -707,6 +717,18 @@ let DIALOG_PROBE = process.argv.includes('--allow-native-dialogs')
 let contentReady = false
 
 /**
+ * 首启向导窗口（2.1 起）。
+ *
+ * 为什么必须是独立窗口，而不是主窗口里盖一层遮罩：
+ *   主窗口一创建就挂整套 App，设置还没读出来时 onboarded 先是默认 false，
+ *   遮罩会先画出来再消失 —— 用户看到的就是「每次启动都闪一下设置页」。
+ *   独立窗口从根上避免：向导没走完之前，主窗口根本不创建。
+ */
+let onboardingWindow: BrowserWindow | null = null
+/** 向导是否已经收尾（走完或关闭），防止 closed 事件重复拉起主窗口 */
+let onboardingSettled = false
+
+/**
  * 把主窗口带到前台。
  *
  * 两条硬规则（对应上面两个缺陷）：
@@ -856,6 +878,77 @@ function appVersionInfo(): {
   if (theme === 'dark') return '#1a1d24'
   if (theme === 'sepia') return '#e2d8c4'
   return '#f3f4f7'
+}
+
+/**
+ * 首启设置窗口。
+ *
+ * 用带边框的普通窗口（frame: true）：用户中途想关掉要有个关闭按钮，
+ * 关掉按「跳过」处理（写 onboarded，下次不再弹），否则会变成关不掉的坑。
+ */
+function createOnboardingWindow(): void {
+  const settings = getSettings()
+
+  onboardingWindow = new BrowserWindow({
+    width: 920,
+    height: 660,
+    useContentSize: true,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    show: false,
+    frame: true,
+    autoHideMenuBar: true,
+    backgroundColor: themeWindowBackground(settings.theme),
+    title: '秋夕-PDF阅读器 · 初次设置',
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.cjs'),
+      sandbox: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+      spellcheck: false,
+      webSecurity: true,
+      backgroundThrottling: !(HIDDEN_MODE && !CAPTURE_MODE)
+    }
+  })
+
+  onboardingWindow.once('ready-to-show', () => {
+    if (HIDDEN_MODE) {
+      console.log('[pdf] 隐藏模式：设置窗口不显示（供自动化测试使用）')
+      return
+    }
+    onboardingWindow?.show()
+  })
+
+  /* 用户直接关窗口 = 跳过：把 onboarded 写掉，避免每次启动都被拦一道 */
+  onboardingWindow.on('closed', () => {
+    onboardingWindow = null
+    if (onboardingSettled) return
+    onboardingSettled = true
+    patchSettings({ onboarded: true })
+    createMainWindow()
+  })
+
+  const devUrl = process.env['ELECTRON_RENDERER_URL']
+  const params = new URLSearchParams({ page: 'onboarding' })
+  if (process.argv.includes('--test-hooks')) params.set('test-hooks', '1')
+  const search = params.toString()
+
+  if (devUrl) {
+    void onboardingWindow.loadURL(`${devUrl}?${search}`)
+  } else {
+    void onboardingWindow.loadFile(join(__dirname, '../renderer/index.html'), { search })
+  }
+}
+
+/** 向导完成：关窗 → 建主窗口（只做一次） */
+function finishOnboarding(): void {
+  if (onboardingSettled) return
+  onboardingSettled = true
+  const win = onboardingWindow
+  onboardingWindow = null
+  if (win && !win.isDestroyed()) win.close()
+  createMainWindow()
 }
 
 function createMainWindow(): void {
@@ -1966,6 +2059,17 @@ function registerIpc(): void {
   /* ---------- 设置 ---------- */
 
   ipcMain.handle('pdf:settings-get', () => getSettings())
+  /*
+   * 首启向导的保存通道。
+   * 单独开一个 handler 而不是复用 pdf:settings-patch，是因为它还要负责
+   * 「写完之后关掉向导窗口、把主窗口建起来」这一步副作用。
+   */
+  ipcMain.handle('app:onboarding-apply', (_e, patch: Record<string, unknown>) => {
+    const next = patchSettings(patch as never)
+    if (next.onboarded) finishOnboarding()
+    return next
+  })
+
   ipcMain.handle('pdf:settings-patch', (_e, patch: Record<string, unknown>) => {
     const next = patchSettings(patch as never)
     // 主题变化时同步窗口底色，避免加载瞬间闪白

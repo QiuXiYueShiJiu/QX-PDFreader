@@ -131,7 +131,14 @@ export function useDocument(filePath: string): DocState {
      * 因此这里先判空直接返回，绝不把空值交给 getDocument。
      */
     if (!isLoadablePath(filePath)) {
-      setState({ doc: null, error: null, loading: false })
+      /*
+       * ★ 这里必须把 needPassword / wrongPassword 一起清掉。
+       *
+       * 踩坑记录：加密 PDF 弹出密码框后点「取消」= closeActiveTab()，filePath 变空串
+       * 走到这里只清了 doc/error/loading，needPassword 仍是 true，于是密码框永远关不掉
+       * ——用户看到的现象是「取消键按不了」，其实按了、tab 也关了，框还在。
+       */
+      setState({ doc: null, error: null, loading: false, needPassword: false, wrongPassword: false })
       return
     }
 

@@ -58,6 +58,7 @@ import './styles/glass.css'
 /* PDF 工具箱面板（合并/拆分/水印/压缩/加解密/图片互转/Office 转换） */
 import './styles/tools.css'
 import './styles/update-toast.css'
+import './styles/first-run.css'
 import './styles/market.css'
 /* 布局包放最后：它只写结构，需要能覆盖前面各主题对圆角/高度的设定 */
 import './styles/layout-office.css'
@@ -76,6 +77,13 @@ import './styles/layout-office.css'
  *   拿不到 process，而 location.search 始终可用。
  *   生产包正常打开时不会带这个参数，因此等于没有后门。
  */
+/*
+ * 首启向导跑在独立窗口里（主进程用 ?page=onboarding 打开）。
+ * 这个分支必须在挂 App 之前判掉：App 一挂载就会主动去开主界面那一套
+ * store、监听、缩略图逻辑，而向导窗口里一个都不需要。
+ */
+const onboardingMode = new URLSearchParams(window.location.search).get('page') === 'onboarding'
+
 const exposeTestHooks = new URLSearchParams(window.location.search).get('test-hooks') === '1'
 
 if (exposeTestHooks) {
@@ -154,6 +162,17 @@ const rootEl: HTMLElement = container
  */
 async function bootstrap(): Promise<void> {
   const api = window.pdfApp
+
+  if (onboardingMode) {
+    const { OnboardingWindow } = await import('./OnboardingWindow')
+    createRoot(rootEl).render(
+      <StrictMode>
+        <OnboardingWindow />
+      </StrictMode>
+    )
+    return
+  }
+
   let thumbMode = false
   if (api?.thumb) {
     let pdfPath = ''

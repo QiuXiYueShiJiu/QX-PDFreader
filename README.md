@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-2.0.4.2-2f6fed" />
+  <img alt="version" src="https://img.shields.io/badge/version-2.1.0.1-2f6fed" />
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078d4" />
   <img alt="license" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-e5484d" />
   <img alt="offline" src="https://img.shields.io/badge/network-%E5%8F%AA%E6%A3%80%E6%9F%A5%E6%9B%B4%E6%96%B0-16a34a" />
@@ -457,6 +457,13 @@ A：工具箱「加密」可以加/解密码；带打开密码的 PDF 需先解�
 ---
 
 ## 更新日志
+
+### 2.1.0.1（2026-11-08）
+
+- **首次设置向导**（2.1 新增）：全新安装或从 2.0.x 首次升到 2.1 时弹一次，五步走完写 `onboarded=true`，之后升多少版都不再出现。步骤：欢迎 → 主题 → 文件关联 → 快速启动 → 完成。
+- **修复加密 PDF 密码框「取消」点不动**：取消只关了标签页，空路径分支没复位 `needPassword`，框一直挂着。现在空路径时复位 `needPassword`/`wrongPassword`，App 层再加一个本地开关，点取消立刻收起。
+- **修复弹框后右上角最小化/关闭失灵**：窗口是无边框自绘，密码框遮罩 `inset:0; z-index:90` 把标题栏一起盖住了。标题栏提到 `z-index:120`，遮罩只压内容区。
+- 安装过 2.0.4.x 的机器直接覆盖安装，数据与设置不受影响。
 
 ### 2.0.4.2（2026-11-05）
 

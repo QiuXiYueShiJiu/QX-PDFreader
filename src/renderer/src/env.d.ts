@@ -81,6 +81,7 @@ export interface PdfAppApi {
   settings: {
     get: () => Promise<ReaderSettings>
     patch: (patch: Partial<ReaderSettings>) => Promise<ReaderSettings>
+    onboardingApply: (patch: Partial<ReaderSettings>) => Promise<ReaderSettings>
   }
   recent: {
     list: () => Promise<RecentFile[]>

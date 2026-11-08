@@ -1,0 +1,418 @@
+/*
+ * 首次设置向导（FirstRunWizard）。
+ *
+ * 显隐全由 App.tsx 的 settings.onboarded 控制，这里只管样式。
+ * 颜色一律走主题变量（--ink / --panel / --line / --accent 等），
+ * 所以用户在第 1 步换主题包时，卡片本身会当场跟着变 —— 这是刻意的，
+ * 让「换主题」这件事在向导里就能被看到。
+ */
+
+.frw-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 260;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: rgba(12, 16, 24, 0.42);
+  backdrop-filter: blur(3px);
+}
+
+.frw-card {
+  width: min(760px, 100%);
+  max-height: calc(100vh - 56px);
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-lg, 18px);
+  background: rgb(var(--surface, 255 255 255));
+  color: rgb(var(--text, 24 32 46));
+  border: 1px solid rgb(var(--border, 216 222 232) / 0.7);
+  box-shadow: var(--panel-shadow, 0 24px 64px rgba(0, 0, 0, 0.28));
+  overflow: hidden;
+}
+
+/* ---------- 头部 ---------- */
+.frw-head {
+  padding: 22px 26px 16px;
+  border-bottom: 1px solid rgb(var(--border, 216 222 232) / 0.7);
+}
+
+/* 每步的大标题区（五步文案由用户指定） */
+.frw-hero {
+  margin-top: 14px;
+}
+
+.frw-hero-title {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0.2px;
+}
+
+.frw-hero-sub {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgb(var(--muted, 110 122 140));
+}
+.frw-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.frw-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.frw-sub {
+  font-size: 13px;
+  color: rgb(var(--muted, 110 122 140));
+}
+
+.frw-steps {
+  list-style: none;
+  display: flex;
+  gap: 18px;
+  margin: 16px 0 0;
+  padding: 0;
+}
+
+.frw-steps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: rgb(var(--muted, 110 122 140));
+}
+
+.frw-steps li > span {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  background: rgb(var(--border, 216 222 232) / 0.5);
+  color: inherit;
+}
+
+.frw-steps li.is-now {
+  color: rgb(var(--text, 24 32 46));
+  font-weight: 600;
+}
+
+.frw-steps li.is-now > span {
+  background: rgb(var(--accent, 47 127 232));
+  color: #fff;
+}
+
+.frw-steps li.is-done > span {
+  background: rgb(var(--accent, 47 127 232) / 0.16);
+  color: rgb(var(--accent, 47 127 232));
+}
+
+/* ---------- 主体 ---------- */
+.frw-body {
+  padding: 20px 26px 6px;
+  overflow: auto;
+}
+
+.frw-block + .frw-block {
+  margin-top: 22px;
+}
+
+.frw-block h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.frw-hint {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: rgb(var(--muted, 110 122 140));
+}
+
+/* ---------- 主题包 ---------- */
+.frw-packs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.frw-pack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  text-align: left;
+  border-radius: var(--radius, 12px);
+  border: 1px solid rgb(var(--border, 216 222 232));
+  background: rgb(var(--surface-strong, 248 249 252));
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.12s;
+}
+
+.frw-pack strong {
+  font-size: 14px;
+}
+
+.frw-pack span {
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgb(var(--muted, 110 122 140));
+}
+
+.frw-pack:hover {
+  transform: translateY(-1px);
+}
+
+.frw-pack.is-on {
+  border-color: rgb(var(--accent, 47 127 232));
+  box-shadow: inset 0 0 0 1px rgb(var(--accent, 47 127 232));
+}
+
+/* ---------- 配色 ---------- */
+.frw-colors {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.frw-color {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  border-radius: 10px;
+  border: 1px solid rgb(var(--border, 216 222 232));
+  background: transparent;
+  color: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.frw-color i {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  flex: none;
+}
+
+.frw-color.is-on {
+  border-color: rgb(var(--accent, 47 127 232));
+  box-shadow: inset 0 0 0 1px rgb(var(--accent, 47 127 232));
+}
+
+/* ---------- 关联后缀 ---------- */
+.frw-exts {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.frw-ext {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid rgb(var(--border, 216 222 232));
+  font-size: 12.5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.frw-ext input {
+  margin: 0;
+  accent-color: rgb(var(--accent, 47 127 232));
+}
+
+.frw-ext.is-on {
+  border-color: rgb(var(--accent, 47 127 232));
+  background: rgb(var(--accent, 47 127 232) / 0.12);
+}
+
+.frw-inline {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.frw-inline button {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 12.5px;
+  color: rgb(var(--accent, 47 127 232));
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ---------- 开关 ---------- */
+.frw-switch {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.frw-switch input {
+  width: 16px;
+  height: 16px;
+  accent-color: rgb(var(--accent, 47 127 232));
+}
+
+/* ---------- 完成页 ---------- */
+.frw-done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 18px 0 8px;
+  text-align: center;
+}
+
+.frw-badge {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgb(var(--accent, 47 127 232) / 0.16);
+  color: rgb(var(--accent, 47 127 232));
+}
+
+.frw-done h4 {
+  margin: 6px 0 0;
+  justify-content: center;
+}
+
+/* ---------- 底部 ---------- */
+.frw-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 26px 18px;
+  border-top: 1px solid rgb(var(--border, 216 222 232) / 0.7);
+}
+
+.frw-nav {
+  display: flex;
+  gap: 10px;
+}
+
+.frw-ghost,
+.frw-nav button {
+  padding: 8px 16px;
+  border-radius: 9px;
+  font-size: 13px;
+  cursor: pointer;
+  border: 1px solid rgb(var(--border, 216 222 232));
+  background: transparent;
+  color: inherit;
+}
+
+.frw-ghost:hover,
+.frw-nav button:hover {
+  background: rgb(var(--border, 216 222 232) / 0.5);
+}
+
+/*
+ * 主按钮：背景与前景都吃主题变量。
+ * 有些主题的强调色是亮的（比如高对比的黄），白字贴上去等于看不见，
+ * 所以前景必须用 --accent-fg，而不是写死 #fff。
+ * 另外把 hover / focus / active / focus-visible 全部钉成同一个底色，
+ * 免得焦点态被别的规则改掉、出现「按钮变淡」的低对比状态。
+ */
+.frw-nav .frw-primary,
+.frw-nav .frw-primary:hover,
+.frw-nav .frw-primary:focus,
+.frw-nav .frw-primary:active {
+  border-color: transparent;
+  background: rgb(var(--accent, 47 127 232));
+  color: rgb(var(--accent-fg, 255 255 255));
+  font-weight: 600;
+}
+
+.frw-nav .frw-primary:focus-visible {
+  outline: 2px solid rgb(var(--accent, 47 127 232) / 0.55);
+  outline-offset: 2px;
+}
+
+.frw-nav .frw-primary:disabled {
+  opacity: 0.55;
+  cursor: default;
+  filter: none;
+}
+
+.frw-nav .frw-primary:hover {
+  filter: brightness(1.05);
+}
+
+.frw-ghost:focus-visible,
+.frw-nav button:focus-visible {
+  outline: 2px solid rgb(var(--accent, 47 127 232) / 0.45);
+  outline-offset: 2px;
+}
+
+.frw-ghost:disabled,
+.frw-nav button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@media (max-width: 720px) {
+  .frw-packs,
+  .frw-colors,
+  .frw-exts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* ---------- 独立设置窗口（2.1）：卡片铺满整窗，不再当遮罩用 ---------- */
+.frw-window {
+  height: 100vh;
+  background: rgb(var(--bg, 243 244 247));
+}
+
+.frw-window .frw-mask {
+  position: static;
+  inset: auto;
+  height: 100%;
+  padding: 0;
+  background: rgb(var(--bg, 243 244 247));
+  backdrop-filter: none;
+}
+
+.frw-window .frw-card {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* 独立窗口里正文要吃掉剩余高度，页脚才会贴在窗口底部 */
+.frw-window .frw-body {
+  flex: 1 1 auto;
+}
+
+.frw-window .frw-head {
+  padding-top: 18px;
+}
