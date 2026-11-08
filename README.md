@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-2.1.0.1-2f6fed" />
+  <img alt="version" src="https://img.shields.io/badge/version-2.1.0.2-2f6fed" />
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078d4" />
   <img alt="license" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-e5484d" />
   <img alt="offline" src="https://img.shields.io/badge/network-%E5%8F%AA%E6%A3%80%E6%9F%A5%E6%9B%B4%E6%96%B0-16a34a" />
@@ -457,6 +457,16 @@ A：工具箱「加密」可以加/解密码；带打开密码的 PDF 需先解�
 ---
 
 ## 更新日志
+
+### 2.1.0.2（2026-11-08）
+
+- **墨迹渲染性能优化**：笔记多的时候不再卡顿。四处改动——
+  1. 墨迹画布最长边封顶 2400，单页从 18 MPx / 72 MB 降到 4.07 MPx / 16 MB；
+  2. 新笔迹只按 id 前缀补画增量，不再整页重绘；
+  3. 视口外的页面不画墨迹，画布缩到 1×1，滚回来再整页重画；
+  4. `DocumentView` 的 `byPage` / `contentByPage` 进 `useMemo`，避免每帧新建引用连锁触发重绘。
+- 实测：已有 20 条时追加 20 条 67 ms，已有 420 条时追加 20 条仍是 67 ms（修复前随总数增长）。
+- 本版只改渲染性能，首次设置向导与密码框链路未动。
 
 ### 2.1.0.1（2026-11-08）
 

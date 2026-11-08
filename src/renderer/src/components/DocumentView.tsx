@@ -20,7 +20,7 @@
  *     快速滚动时会抖，用观察者取「可见面积最大」的页最稳。
  */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 // 用 Vite 的 ?url 导入，让打包器把路径重写成产物里的真实位置。
@@ -1514,6 +1514,7 @@ function PdfPage({
         pageWidth={width}
         pageHeight={height}
         erasing={erasing}
+        active={active}
       />
       {/*
         内容编辑层（涂白 / 文字 / 图片 / 矩形 / 椭圆）。
@@ -2308,15 +2309,18 @@ export function DocumentView({
    *   涂白会变成一块用 --anno-color 上色的方块（而不是白色），
    *   文字与图片更是只剩一个空框。它们由下面的 contentByPage 交给编辑层。
    */
-  const byPage = new Map<number, Annotation[]>()
-  const contentByPage = new Map<number, Annotation[]>()
-  for (const item of annotations) {
-    const isContent = CONTENT_ANNOTATION_TYPES.includes(item.type)
-    const bucket = isContent ? contentByPage : byPage
-    const list = bucket.get(item.page)
-    if (list) list.push(item)
-    else bucket.set(item.page, [item])
-  }
+  const { byPage, contentByPage } = useMemo(() => {
+    const byPage = new Map<number, Annotation[]>()
+    const contentByPage = new Map<number, Annotation[]>()
+    for (const item of annotations) {
+      const isContent = CONTENT_ANNOTATION_TYPES.includes(item.type)
+      const bucket = isContent ? contentByPage : byPage
+      const list = bucket.get(item.page)
+      if (list) list.push(item)
+      else bucket.set(item.page, [item])
+    }
+    return { byPage, contentByPage }
+  }, [annotations])
 
   /* ---------- 手绘 ---------- */
 

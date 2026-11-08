@@ -15,7 +15,7 @@
  *   因此选区矩形除以当前 scale 就得到 scale=1 的坐标。
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import type { Annotation, AnnotationRect, AnnotationType } from '@shared/types'
 import { InkCanvas, toStrokeShape, type StrokeShape } from '../ink-engine'
 
@@ -110,12 +110,13 @@ export function selectionText(maxLength = 300): string {
  * 这是有意的取舍：阅读时选文字远比点标注重要。
  * 需要操作批注时走右侧栏列表。
  */
-export function AnnotationLayer({
+export const AnnotationLayer = memo(function AnnotationLayer({
   items,
   scale,
   pageWidth,
   pageHeight,
-  erasing = false
+  erasing = false,
+  active = true
 }: {
   items: Annotation[]
   scale: number
@@ -125,24 +126,35 @@ export function AnnotationLayer({
   pageHeight: number
   /** 橡皮模式：墨迹层需要接收点击才能命中 */
   erasing?: boolean
-}): JSX.Element {
-  if (items.length === 0) return <div className="anno-layer" />
-
-  /*
-   * 先把手绘笔迹挑出来，交给 SVG 图层画；
-   * 剩下的才走高亮/下划线/便签的常规渲染。
+  /**
+   * 这一页是否接近视口。
    *
-   * ★ 这里原先漏了一步：笔迹只被当成普通便签渲染成一个小图标，
-   *   页面上完全看不到画出来的线。数据一直存着（quote 里的点序列），
-   *   只是没人把它画出来 —— 属于「存了但没显示」的缺陷。
+   * ★ 离得远的页不重绘墨迹：墨迹越多，一次全量重绘越慢，
+   *   而遥不可及的页画完也看不见 —— 这正是「笔记多了以后卡成 PPT」的主因之一。
+   *   翻到它附近时 active 变真，effect 依赖里带上 active 就会补画。
    */
-  const strokes: StrokeShape[] = []
-  const rest: Annotation[] = []
-  for (const item of items) {
-    const shape = toStrokeShape(item)
-    if (shape) strokes.push(shape)
-    else rest.push(item)
-  }
+  active?: boolean
+}): JSX.Element {
+  const { strokes, rest } = useMemo(() => {
+    /*
+     * 先把手绘笔迹挑出来，交给 SVG 图层画；
+     * 剩下的才走高亮/下划线/便签的常规渲染。
+     *
+     * ★ 这里必须 memo：
+     *   父组件每次渲染都会重新算一遍 byPage，若不 memo，
+     *   strokes 每次都是新数组 → InkCanvas 的 effect 每次都全量重绘。
+     */
+    const strokes: StrokeShape[] = []
+    const rest: Annotation[] = []
+    for (const item of items) {
+      const shape = toStrokeShape(item)
+      if (shape) strokes.push(shape)
+      else rest.push(item)
+    }
+    return { strokes, rest }
+  }, [items])
+
+  if (items.length === 0) return <div className="anno-layer" />
 
   return (
     <div className="anno-layer">
@@ -158,6 +170,7 @@ export function AnnotationLayer({
         baseWidth={scale > 0 ? pageWidth / scale : pageWidth}
         baseHeight={scale > 0 ? pageHeight / scale : pageHeight}
         erasing={erasing}
+        active={active}
       />
 
       {rest.map((item) =>
@@ -191,7 +204,7 @@ export function AnnotationLayer({
       <span className="anno-layer__probe" data-width={Math.round(pageWidth)} />
     </div>
   )
-}
+})
 
 /** 便签标记：用一个小图标指示此处有备注 */
 function NoteMarker({ item, scale }: { item: Annotation; scale: number }): JSX.Element {

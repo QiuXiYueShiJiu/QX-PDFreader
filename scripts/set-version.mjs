@@ -28,7 +28,7 @@ const PRODUCT = '秋夕-PDF阅读器'
 /** 三段式，给 npm / semver */
 const SEMVER = '2.1.0'
 /** 四段式，写进 exe 属性、也用于安装包文件名 */
-const WIN_VERSION = '2.1.0.1'
+const WIN_VERSION = '2.1.0.2'
 
 const path = 'package.json'
 const pkg = JSON.parse(readFileSync(path, 'utf8'))

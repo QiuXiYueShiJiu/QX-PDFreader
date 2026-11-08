@@ -752,6 +752,14 @@ export const PreviewInk = forwardRef<
 const INK_SUPERSAMPLE = 3
 
 /**
+ * 墨迹位图的**最长边上限**（像素）。
+ *
+ * 超采样 3 倍是为了放大后不糊，但整页位图会大到几十 MB，
+ * 连续滚动时多页并存直接把内存与重绘成本拖垮。封顶后按比例降倍。
+ */
+const INK_MAX_SIDE = 2400
+
+/**
  * 位图墨迹层。
  *
  * ── 架构（按市面阅读器的通行做法，第三轮重写）──────────────
@@ -781,7 +789,8 @@ export function InkCanvas({
   strokes,
   baseWidth,
   baseHeight,
-  erasing = false
+  erasing = false,
+  active = true
 }: {
   strokes: StrokeShape[]
   /** 页面在 scale = 1 坐标系下的原始宽度（PDF 单位） */
@@ -797,27 +806,71 @@ export function InkCanvas({
    *   （实测墨迹层的 pointer-events 始终是 none）。
    */
   erasing?: boolean
+  /**
+   * 这一页是否接近视口；为假时**不绘制**。
+   *
+   * ★ 性能（论坛反馈「笔记多了卡成 PPT」）：墨迹越多，一次全量重绘越慢。
+   *   离视口很远的页画了也看不见，干脆跳过；等它接近视口（active 变真）
+   *   时 effect 会再跑一次补画。
+   */
+  active?: boolean
 }): JSX.Element {
   const ref = useRef<HTMLCanvasElement>(null)
+  /**
+   * 上一次画了什么：笔迹 id 序列 + 位图尺寸。
+   *
+   * ★ 增量绘制：新笔迹总是**追加在末尾**（画一笔 push 一条），
+   *   只要旧序列是新序列的前缀、位图尺寸没变，就只画新增的那几条，
+   *   而不是「清空 + 从第一条重画」。笔记几百条时这一条能省掉 O(n²)。
+   */
+  const paintedRef = useRef<{ ids: string[]; width: number; height: number }>({
+    ids: [],
+    width: 0,
+    height: 0
+  })
 
   /*
    * 位图尺寸**固定**，不随窗口缩放变化。
    * 用 dpr 提升基础清晰度，再乘超采样倍率覆盖放大后的需求。
+   *
+   * ★ 但必须有上限（这是「笔记多了卡成 PPT」的另一半原因）：
+   *   A4 一页 595×842（PDF 单位），dpr=2、超采样 3 时位图是 3570×5052，
+   *   单页约 72 MB；连续滚动时几十页同时挂载，光画布内存就好几 GB，
+   *   一次重绘还要扫过 1800 万像素 —— 卡是必然的。
+   *   现在按最长边封顶，超出的按比例降采样倍数（视觉上几乎看不出差别）。
    */
   const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1))
-  const bitmapW = Math.max(1, Math.round(baseWidth * dpr * INK_SUPERSAMPLE))
-  const bitmapH = Math.max(1, Math.round(baseHeight * dpr * INK_SUPERSAMPLE))
+  const rawFactor = dpr * INK_SUPERSAMPLE
+  const rawW = baseWidth * rawFactor
+  const rawH = baseHeight * rawFactor
+  const over = Math.max(rawW, rawH) / INK_MAX_SIDE
+  const factor = over > 1 ? rawFactor / over : rawFactor
+  const bitmapW = Math.max(1, Math.round(baseWidth * factor))
+  const bitmapH = Math.max(1, Math.round(baseHeight * factor))
+  /** 一条笔迹都没有时不必分配大画布，1×1 即可（省下几十 MB/页） */
+  const idle = strokes.length === 0
 
   useEffect(() => {
     const canvas = ref.current
     if (!canvas) return
+
+    // 远景页 / 空白页：不画，并把画布缩到 1×1 释放后备存储
+    if (!active || idle) {
+      if (canvas.width !== 1 || canvas.height !== 1) {
+        canvas.width = 1
+        canvas.height = 1
+      }
+      paintedRef.current = { ids: [], width: 0, height: 0 }
+      return
+    }
 
     /*
      * 尺寸变化时重设会清空画布 —— 紧接着必须同步重绘，
      * 否则浏览器会在两次之间把空白帧画到屏幕上（白闪）。
      * 下面的重绘就在同一个 effect 里同步执行，不经过任何异步边界。
      */
-    if (canvas.width !== bitmapW || canvas.height !== bitmapH) {
+    const resized = canvas.width !== bitmapW || canvas.height !== bitmapH
+    if (resized) {
       canvas.width = bitmapW
       canvas.height = bitmapH
     }
@@ -825,22 +878,44 @@ export function InkCanvas({
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
-
     // 笔迹按「页面原始单位」描述，这里换算到位图像素
     const s = baseWidth > 0 ? bitmapW / baseWidth : 1
-    ctx.setTransform(s, 0, 0, s, 0, 0)
+    const ids = strokes.map((stroke) => stroke.id)
+    const prev = paintedRef.current
 
     /*
-     * 逐条绘制。
-     * 每条之间不叠加透明度 —— 交叠处如果做半透明会越叠越深，
-     * 看起来像脏点。整层透明度由 CSS 统一给（见 ink.css）。
+     * 能否只补画新增部分：尺寸没变、旧序列是新序列的前缀。
+     * 前缀比对按 id —— 笔迹对象本身每次渲染都是新的，只能比 id。
      */
-    for (const stroke of strokes) {
-      paintStroke(ctx, stroke.points, stroke.width, stroke.color)
+    const canAppend =
+      !resized &&
+      prev.width === canvas.width &&
+      prev.height === canvas.height &&
+      prev.ids.length <= ids.length &&
+      prev.ids.every((id, i) => ids[i] === id)
+
+    if (canAppend) {
+      ctx.setTransform(s, 0, 0, s, 0, 0)
+      for (let i = prev.ids.length; i < strokes.length; i++) {
+        paintStroke(ctx, strokes[i].points, strokes[i].width, strokes[i].color)
+      }
+    } else {
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      ctx.setTransform(s, 0, 0, s, 0, 0)
+
+      /*
+       * 逐条绘制。
+       * 每条之间不叠加透明度 —— 交叠处如果做半透明会越叠越深，
+       * 看起来像脏点。整层透明度由 CSS 统一给（见 ink.css）。
+       */
+      for (const stroke of strokes) {
+        paintStroke(ctx, stroke.points, stroke.width, stroke.color)
+      }
     }
-  }, [strokes, bitmapW, bitmapH, baseWidth])
+
+    paintedRef.current = { ids, width: canvas.width, height: canvas.height }
+  }, [strokes, bitmapW, bitmapH, baseWidth, active])
 
   return (
     <canvas
