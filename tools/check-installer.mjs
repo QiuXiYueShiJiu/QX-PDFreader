@@ -45,6 +45,21 @@ const DATA_DIRS = ['$APPDATA\\秋夕月拾旧-PDF阅读器']
 const DATA_FILES = ['settings.json', 'recent.json', 'lastread.json', 'window-state.json']
 
 /**
+ * 允许清除的「空壳目录」——必须逐个登记，未登记的一律拦下。
+ *
+ * 为什么用登记制而不是「不是 DATA_DIRS 就放行」：
+ * 「哪个目录装用户数据」这个事实会随 productName、setPath 调用、
+ * 甚至某次重构而变。放行制等于每次都要重新推演一遍；登记制把
+ * 「我认为这个目录不含数据」写进仓库，改一处就要改一次，审查时看得见。
+ * 2.1.1.0 的事故正是「以为某个 $APPDATA 目录是空壳」这类推断没被记录。
+ */
+const SAFE_SHELL_DIRS = [
+  '$APPDATA\\秋夕-PDF阅读器',
+  '$APPDATA\\智慧黑板PDF阅读器',
+  '$LOCALAPPDATA\\秋夕月拾旧-PDF阅读器'
+]
+
+/**
  * 允许的安装根目录。
  *
  * 公开版必须装到系统盘的标准位置；把 D:\QXClass\PDFReader 这种
@@ -96,6 +111,16 @@ for (const rel of FILES) {
       const prefix = DATA_DIRS.find((d) => target.toLowerCase().startsWith(d.toLowerCase() + '\\'))
       if (prefix) {
         errs.push(`${at} 递归删除了数据目录下的子路径 ${target} —— 用户数据目录不应被安装器改动`)
+        return
+      }
+      // 数据根下的任何目录都必须逐个登记为「空壳」，否则视为误删候选
+      const lower = target.toLowerCase()
+      const inDataRoot = lower.startsWith('$appdata\\') || lower.startsWith('$localappdata\\')
+      if (inDataRoot) {
+        const safe = SAFE_SHELL_DIRS.some((d) => lower === d.toLowerCase())
+        if (!safe) {
+          errs.push(`${at} 递归删除了未登记的数据根目录 ${target} —— 若确认不含用户数据，请加进 SAFE_SHELL_DIRS 并写明依据`)
+        }
       }
     }
 
