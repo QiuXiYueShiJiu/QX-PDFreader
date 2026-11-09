@@ -514,11 +514,20 @@
   nsExec::Exec 'taskkill /IM 秋夕-PDF阅读器.exe /T /F'
   Pop $0
 
-  ; ① 真实数据目录（设置 / 最近文件 / 阅读位置 / 缓存）
-  RMDir /r "$APPDATA\秋夕月拾旧-PDF阅读器"
-  ; ② Electron 按新 productName 建的空壳目录
+  ; ★ 真实数据目录（设置 / 最近文件 / 阅读位置 / 缓存）**不能删**（2.1.1.0）。
+  ;
+  ;   踩坑：这条 RMDir 原本连 $APPDATA\秋夕月拾旧-PDF阅读器 一起删。
+  ;   electron-builder 在**覆盖升级**时会先跑旧版的卸载程序，
+  ;   于是「升级 = 设置被清空、最近文件列表清空、首启向导重新弹」——
+  ;   而用户拿到的说明写的是「覆盖安装即可，笔记与设置不受影响」。
+  ;   实测：升级 2.1.1.0 后该目录整个消失，settings.json 也没了。
+  ;
+  ;   现在只清 Electron 按新 productName 建的空壳目录和更早版本的残留，
+  ;   真正装数据的那两个目录留着 —— 卸载后重装仍能续上原来的设置。
+  ;
+  ; ① Electron 按新 productName 建的空壳目录（里面没有用户数据）
   RMDir /r "$APPDATA\秋夕-PDF阅读器"
-  ; ③ 更早版本可能留下的目录（1.1.x / 1.2.x 时代）
+  ; ② 更早版本（1.1.x / 1.2.x）的旧目录，与当前版本互不相干
   RMDir /r "$APPDATA\智慧黑板PDF阅读器"
   RMDir /r "$LOCALAPPDATA\秋夕月拾旧-PDF阅读器"
 
