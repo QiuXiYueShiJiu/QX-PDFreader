@@ -1734,3 +1734,38 @@
 .empty__card .empty__recent {
   margin-top: 14px;
 }
+/* ============================================================
+ * PDF 内链热区（2.1.4.x，审计 P3「PDF 内链不可点」）
+ *
+ *   阅读器把页面画在画布上，pdf.js 的 AnnotationLayer 没接，
+ *   所以书里的目录、参考文献网址全是死的。这里铺一层透明按钮：
+ *   - 只有 hover 时给一点底色，让用户知道"这行能点"
+ *   - 平时 pointer-events: none，绝不能挡住文字选择
+ * ============================================================ */
+.pdf-page__links {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.pdf-page__link {
+  position: absolute;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 2px;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.pdf-page__link:hover,
+.pdf-page__link:focus-visible {
+  background: rgb(var(--accent) / 0.14);
+  outline: 1px solid rgb(var(--accent) / 0.45);
+}
+
+.pdf-page__link:focus:not(:focus-visible) {
+  outline: none;
+}

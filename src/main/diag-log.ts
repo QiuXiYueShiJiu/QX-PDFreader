@@ -70,7 +70,15 @@ export function initDiagLog(): boolean {
     written = 0
     diagLine('=== 诊断启动 ===')
     diagLine(`日志文件 ${logPath}`)
-    diagLine(`命令行 ${process.argv.slice(1).join(' ')}`)
+    /*
+     * ★ 审计 P1：原来把命令行整串写进日志，里面有用户目录和文件名
+     *   （作业/试卷名可能带学生姓名）。只记参数个数与是否有 --test-hooks。
+     */
+    diagLine(
+      `命令行 参数 ${process.argv.slice(1).length} 个，test-hooks=${
+        process.argv.includes('--test-hooks') ? 'yes' : 'no'
+      }`
+    )
     diagLine(`Electron ${process.versions.electron}  Chromium ${process.versions.chrome}`)
     return true
   } catch {

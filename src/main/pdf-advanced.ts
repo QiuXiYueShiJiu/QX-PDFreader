@@ -120,7 +120,11 @@ const fontkitRegistered = new WeakSet<PDFDocument>()
  * 失败时退回内置 Helvetica：至少 ASCII 页眉页脚还能画出来，
  * 而且不会让整个操作因为「机器上没有中文字体」直接失败。
  */
-async function cjkFont(doc: PDFDocument): Promise<PDFFont> {
+/**
+ * ★ 导出给插件接口用：把「文本 → PDF」交给插件时也必须是中文字体，
+ *   否则中文会变成一串问号或直接抛 WinAnsi 编码错误。
+ */
+export async function cjkFont(doc: PDFDocument): Promise<PDFFont> {
   const cached = fontPromiseCache.get(doc)
   if (cached) return cached
 

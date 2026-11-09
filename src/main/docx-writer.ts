@@ -22,7 +22,21 @@
 import { strToU8, zipSync } from 'fflate'
 
 /** XML 文本转义（& < > " 和换行由段落负责） */
+/**
+ * 去掉 XML 1.0 不允许的控制字符。
+ *
+ * ★ 审计 P2：从 PDF 拷来的文本里常有 \u0000-\u0008 / \u000B / \u000C / \u000E-\u001F
+ *   这些字符，写进 docx 后 Word 直接判「文件已损坏」，打不开。
+ */
+function stripXmlInvalid(text: string): string {
+  return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+}
+
 function escapeXml(text: string): string {
+  return escapeXmlCore(stripXmlInvalid(text))
+}
+
+function escapeXmlCore(text: string): string {
   return text
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')

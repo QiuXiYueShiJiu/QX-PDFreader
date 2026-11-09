@@ -21,7 +21,16 @@
 
 import { strToU8, zipSync } from 'fflate'
 
+/* ★ 审计 P2：Excel 对非法控制字符同样零容忍，会提示「发现不可读取的内容」 */
+function stripXmlInvalid(text: string): string {
+  return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+}
+
 function escapeXml(text: string): string {
+  return escapeXmlCore(stripXmlInvalid(text))
+}
+
+function escapeXmlCore(text: string): string {
   return text
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')

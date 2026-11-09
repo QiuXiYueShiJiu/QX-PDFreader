@@ -95,7 +95,28 @@ function readPackaging() {
 }
 
 const cfg = readPackaging()
-const installDir = (cfg.installDir ?? DEFAULT_INSTALL_DIR).replace(/\\+$/, '')
+
+/*
+ * ★ 按变体取安装目录（2026-11-09 修）。
+ *
+ * 原来 standard / quick / special 共用同一个 installDir，而打包时的
+ * packaging.json 里写的是 `C:\Program Files\QiuXiPDFReader`（校内机房的目录）——
+ * 结果**公开发的标准版也装到 C:\Program Files\QiuXiPDFReader**：
+ *   · 没有 D 盘的用户直接装失败；
+ *   · 有 D 盘的被塞进一个叫 QiuXiPDFReader 的目录，很莫名其妙。
+ *
+ * 现在按变体取：
+ *   standard  → C:\Program Files\QiuXiPDFReader（公开版的标准位置）
+ *   quick     → C:\Program Files\QiuXiPDFReader（校内机房）
+ *   special   → 同 quick
+ * 兼容旧配置：没配 installDirs 时仍读 cfg.installDir。
+ */
+const variantArg = (process.argv.find((a) => a.startsWith('--variant=')) ?? '--variant=standard')
+const variant = variantArg.split('=')[1] || 'standard'
+const installDirsByVariant = cfg.installDirs ?? {}
+const installDirRaw =
+  installDirsByVariant[variant] ?? cfg.installDir ?? DEFAULT_INSTALL_DIR
+const installDir = String(installDirRaw).replace(/\\+$/, '')
 
 /**
  * 需要顺带清掉的**旧安装目录**（交付值，源码里为空数组）。
@@ -104,8 +125,14 @@ const installDir = (cfg.installDir ?? DEFAULT_INSTALL_DIR).replace(/\\+$/, '')
  * 老机器上可能留着整个旧目录：两份 exe、两个卸载器、
  * 指向旧 exe 的快捷方式。安装时清掉，避免用户点错版本。
  */
-const legacyInstallDirs = Array.isArray(cfg.legacyInstallDirs)
-  ? cfg.legacyInstallDirs.filter((d) => typeof d === 'string' && d.trim() && d !== installDir)
+/* 旧目录同理按变体取：标准版的旧位置是 C:\Program Files\QiuXiPDFReader，
+   快速版还要顺带清 1.x 的 C:\Program Files\QiuXiPDFReader\QXPDFReader。 */
+const legacyByVariant = cfg.legacyInstallDirsByVariant ?? {}
+const legacyRaw = Array.isArray(legacyByVariant[variant])
+  ? legacyByVariant[variant]
+  : cfg.legacyInstallDirs
+const legacyInstallDirs = Array.isArray(legacyRaw)
+  ? legacyRaw.filter((d) => typeof d === 'string' && d.trim() && d !== installDir)
   : []
 
 /* ---------- 生成 installer.nsh（NSIS 不支持 include 外部数据，只能生成） ---------- */
@@ -232,7 +259,7 @@ sis.include 被包在宏里导致的 include guard 问题。
 writeFileSync(nshOut, renderNsh(VARIANT), 'utf8')
 console.log('  [setup] 变体 = ' + VARIANT)
 if (legacyInstallDirs.length) console.log(`  [setup] 迁移清理：${legacyInstallDirs.join('、')}`)
-console.log(`  [setup] 已生成 build/installer.nsh  默认安装目录（两版相同）= ${installDir}`)
+console.log(`  [setup] 已生成 build/installer.nsh  默认安装目录（${variant}）= ${installDir}`)
 
 /* ---------- 把产物名写回 package.json（electron-builder 从这里读） ---------- */
 const pkgPath = join(root, 'package.json')

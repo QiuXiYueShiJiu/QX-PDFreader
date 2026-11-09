@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-2.1.1.0-2f6fed" />
+  <img alt="version" src="https://img.shields.io/badge/version-2.1.6.0-2f6fed" />
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078d4" />
   <img alt="license" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-e5484d" />
   <img alt="offline" src="https://img.shields.io/badge/network-%E5%8F%AA%E6%A3%80%E6%9F%A5%E6%9B%B4%E6%96%B0-16a34a" />
@@ -342,7 +342,10 @@ Get-FileHash .\QX-PDFreader-2.0.3.0-setup.exe -Algorithm SHA256
 | `Ctrl++` / `Ctrl+-` | 放大 / 缩小 |
 | `←` `→` / `PageUp` `PageDown` | 上一页 / 下一页 |
 | `Home` / `End` | 首页 / 末页 |
-| `Ctrl+Z` / `Ctrl+Y` | 撤销 / 重做 |
+| `Ctrl+Z` / `Ctrl+Y` | 撤销 / 重做（`Ctrl+Shift+Z` 也是重做） |
+| `Ctrl+S` | 导出 PDF |
+| `Ctrl+,` | 打开设置 |
+| `Ctrl+Shift++` / `Ctrl+Shift+-` | 顺时针 / 逆时针旋转 |
 | `Esc` | 退出笔 / 橡皮 / 选择 / 课堂模式 |
 | `Ctrl+W` | 关闭当前标签 |
 
@@ -457,6 +460,33 @@ A：工具箱「加密」可以加/解密码；带打开密码的 PDF 需先解�
 ---
 
 ## 更新日志
+
+### 2.1.6.0（2026-11-09）
+
+这一版以安全与稳定性为主，界面改动很少。
+
+**插件运行环境**
+- 插件宿主从主进程迁到**独立进程**：插件再也拿不到主进程的对象引用，越权只能通过协议里声明的通道，声明之外的 request 一律拒绝。
+- 插件卸载时校验目标路径必须落在插件目录内，路径穿越（`..\..\` 指向系统目录）现在会被拒绝并记日志。
+- 插件可用的协议收窄为白名单，`file:`、`data:` 之外的内部协议不再透传。
+
+**开箱即用与关窗行为**
+- 退出时不再「静默安装更新的安装包」：更新包只由用户点「立即安装」触发，关窗不会顺手执行任意 exe。
+- IPC 通道收紧：渲染层可调用的通道由清单固定，未声明的调用直接丢弃。
+
+**批注与文档**
+- 批注（含手写墨迹）真正落盘，重开文档后仍在；此前部分场景只存在内存里。
+- 撤销栈跨文档隔离，切标签后 Ctrl+Z 不会再改到上一个文档。
+- 插页产生的副本不再泄漏（临时文件随文档关闭清理）。
+- PDF 内部链接可点，能跳正文里标注的章节/页码。
+
+**性能与稳定性**
+- 缩略图并发收敛为单队列，快速翻页不再同时起十几个渲染任务。
+- 快照编码与导出内存优化，导出大文档时的峰值内存明显下降。
+- OCR 进度不再串页，扫描页批量识别时进度归于对应页面。
+
+**许可**
+- 启动声明与本文末许可段统一为 PolyForm Noncommercial License 1.0.0：非商业用途免费，商业用途需授权。
 
 ### 2.1.1.0（2026-11-09）
 

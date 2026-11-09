@@ -46,7 +46,13 @@ export async function ensureShellThumb(): Promise<boolean> {
     const { dll, exe } = paths()
     if (!existsSync(dll)) { console.warn('[thumb] 缺少组件：', dll); return false }
     await writeTree(HKCU, dll, exe, app.getAppPath())
-    await writeTree(HKLM, dll, exe, app.getAppPath())
+    /*
+     * ★ 审计 P1：不再写 HKLM。
+     *   HKLM 需要管理员权限，非提权进程写不进去，全靠 reg add 静默失败撑着；
+     *   更关键的是 HKLM...InprocServer32 指向一个**用户可写目录**里的 DLL，
+     *   等于给任何本机用户留了一个「替换 DLL 后随资源管理器加载」的提权面。
+     *   HKCU 的 CLSID 注册对当前用户同样生效，够用且不需要提权。
+     */
     await reg(['delete', HKCU + '\\CLSID\\' + LEGACY_CLSID, '/f'])
     console.log('[thumb] 缩略图提供器已注册：', dll)
     return true

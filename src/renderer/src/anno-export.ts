@@ -128,6 +128,20 @@ export async function exportAnnotatedPdf(options: {
 
   const total = grouped.size
   let done = 0
+
+  /*
+   * ★ 导出倍率自适应（审计 P2「导出全页 PNG 堆内存」）。
+   *
+   *   固定 2 倍时 A4 一页是 1190×1684 ≈ 8MB 位图，PNG 再压成 1~3MB；
+   *   整本 100 页带批注的书，光是 pages 数组就 100~300MB，
+   *   再加上每页渲染时的位图，低配机器会直接 OOM 或卡死。
+   *   页数多就退成 1.5 倍（约 108 DPI），清晰度对"看批注"完全够用，
+   *   单页内存降到 ~4.5MB。
+   */
+  const scale = total > 40 ? 1.5 : EXPORT_SCALE
+  if (scale !== EXPORT_SCALE) {
+    store.showToast(`页数较多（${total} 页），导出按 ${scale}× 渲染以控制内存`, 3200)
+  }
   const pages: Array<{ page: number; data: ArrayBuffer }> = []
 
   try {
@@ -139,7 +153,7 @@ export async function exportAnnotatedPdf(options: {
        * 于是"页面坐标 × EXPORT_SCALE"就是这张 PNG 上的像素坐标，
        * 不需要任何额外的平移/旋转矩阵。
        */
-      const viewport = page.getViewport({ scale: EXPORT_SCALE, rotation: 0 })
+      const viewport = page.getViewport({ scale, rotation: 0 })
       const canvas = document.createElement('canvas')
       canvas.width = Math.max(1, Math.round(viewport.width))
       canvas.height = Math.max(1, Math.round(viewport.height))
@@ -159,7 +173,7 @@ export async function exportAnnotatedPdf(options: {
       await (renderTask as unknown as { promise: Promise<void> }).promise
 
       // 批注按创建顺序画：后创建的压在上面，与界面上的层叠顺序一致
-      for (const item of items) await paintAnnotation(ctx, item)
+      for (const item of items) await paintAnnotation(ctx, item, scale)
 
       const blob = await new Promise<Blob | null>((resolve) => {
         canvas.toBlob((b) => resolve(b), 'image/png')
@@ -167,9 +181,18 @@ export async function exportAnnotatedPdf(options: {
       if (!blob) throw new Error('PNG 编码失败')
 
       pages.push({ page: pageNumber, data: await blob.arrayBuffer() })
+      /*
+       * 编码完成立刻把画布缩成 1×1：GC 之前位图一直挂在这个 canvas 上，
+       * 100 页就是 100 张 8MB 的位图同时活着 —— 这是导出时"内存暴涨"的主因。
+       */
+      canvas.width = 1
+      canvas.height = 1
       done += 1
       options.onProgress?.(done, total)
     }
+
+    /* 导出结束清掉解码缓存，别把几百 KB 的 dataURL 图一直留在内存里 */
+    imageCache.clear()
 
     const result = await window.pdfApp.doc.exportPdf({
       sourcePath: filePath,
@@ -230,8 +253,11 @@ function defaultExportName(filePath: string, fileName?: string): string {
  * ============================================================ */
 
 /** 把一条批注画到导出画布上（坐标换算集中在这里，别的函数只管画） */
-async function paintAnnotation(ctx: CanvasRenderingContext2D, item: Annotation): Promise<void> {
-  const s = EXPORT_SCALE
+async function paintAnnotation(
+  ctx: CanvasRenderingContext2D,
+  item: Annotation,
+  s: number = EXPORT_SCALE
+): Promise<void> {
 
   switch (item.type) {
     case 'highlight': {

@@ -44,7 +44,7 @@ import {
   type FloatingAnchor
 } from './AnnotationLayer'
 import { useContentEdit } from './edit/useContentEdit'
-import { disposeOcr, recognizePage, warmUpOcr, type OcrLine } from '../ocr/ocr'
+import { disposeOcr, recognizePage, type OcrLine } from '../ocr/ocr'
 
 /**
  * pdf.js worker 路径。
@@ -153,7 +153,8 @@ export function useDocument(filePath: string): DocState {
       task = pdfjsLib.getDocument({
         url: toPdfUrl(filePath),
         // 允许按 Range 分块读取，大文件不必整份载入内存
-        disableAutoFetch: false,
+        /* ★ 审计 P2：这里原来写 false（= 自动拉完整份文件），大文件会一次性吃掉带宽与内存 */
+        disableAutoFetch: true,
         // 关闭字体警告噪音
         verbosity: 0,
         /* 加密文档：第一次不带密码，用户输过之后带上再试 */
@@ -556,6 +557,8 @@ function PdfPage({
   registerRef
 }: PageProps): JSX.Element {
   const textRef = useRef<HTMLDivElement>(null)
+  /* ★ 内链热区：PDF 里的 Link 注解画成透明按钮，见下面 effect 尾部 */
+  const linksRef = useRef<HTMLDivElement>(null)
   const [rendered, setRendered] = useState(false)
 
   /*
@@ -759,8 +762,29 @@ function PdfPage({
 
     if (usable) {
       try {
-        // JPEG + 0.6 质量：快照只用于过渡，体积小、转换快
-        wrap.style.backgroundImage = `url(${canvas.toDataURL('image/jpeg', 0.6)})`
+        /*
+         * ★ 快照先缩到长边 1400px 再编码（审计 P2「每页落定做整页 JPEG 快照」）。
+         *
+         *   原来直接把整张画布 toDataURL：4K 屏上一页是 3000×4200，
+         *   一次 JPEG 编码要几十毫秒，而且快照本身还占几百 KB 内存 ——
+         *   它只是缩放时那 200ms 的过渡底图，根本不需要原分辨率。
+         *   缩到长边 1400 后编码时间降到几毫秒，过渡效果肉眼看不出差别。
+         */
+        const snapMax = 1400
+        const snapScale = Math.min(1, snapMax / Math.max(canvas.width, canvas.height))
+        let snapshot = ''
+        if (snapScale < 1) {
+          const small = document.createElement('canvas')
+          small.width = Math.max(1, Math.round(canvas.width * snapScale))
+          small.height = Math.max(1, Math.round(canvas.height * snapScale))
+          const sctx = small.getContext('2d')
+          if (sctx) {
+            sctx.imageSmoothingQuality = 'medium'
+            sctx.drawImage(canvas, 0, 0, small.width, small.height)
+            snapshot = small.toDataURL('image/jpeg', 0.6)
+          }
+        }
+        wrap.style.backgroundImage = `url(${snapshot || canvas.toDataURL('image/jpeg', 0.6)})`
         // 标记进入渲染态：CSS 会把画布隐藏，露出背景上的旧画面
         wrap.dataset.rendering = '1'
       } catch {
@@ -1427,6 +1451,68 @@ function PdfPage({
          *   修法：每次渲染前按当前倍率写一次（自定义属性会继承给所有 span），
          *   不再手动写 width/height —— 那两行本来也会被 render() 覆盖。
          */
+        /*
+         * ★ PDF 内链（目录跳转、URL 链接）—— 审计 P3「PDF 内链不可点」。
+         *
+         *   阅读器把页面画成画布，pdf.js 自带的 AnnotationLayer 没接，
+         *   于是书里的目录页、参考文献里的网址全是死的。
+         *   这里把 Link 注解换算成本页坐标，铺一层透明按钮：
+         *   URL 走 app:open-url（主进程只放行 http/https），
+         *   页内目标走 store.setPage。
+         */
+        if (linksRef.current) {
+          const host = linksRef.current
+          host.innerHTML = ''
+          try {
+            const annots = await page.getAnnotations({ intent: 'display' })
+            if (cancelled) return
+            for (const a of annots) {
+              if ((a as { subtype?: string }).subtype !== 'Link') continue
+              const rect = (a as { rect?: number[] }).rect
+              if (!rect || rect.length < 4) continue
+              const v = viewport.convertToViewportRectangle(rect as [number, number, number, number])
+              const left = Math.min(v[0], v[2])
+              const top = Math.min(v[1], v[3])
+              const w = Math.abs(v[2] - v[0])
+              const h = Math.abs(v[3] - v[1])
+              if (w < 4 || h < 4) continue
+              const btn = document.createElement('button')
+              btn.type = 'button'
+              btn.className = 'pdf-page__link'
+              btn.style.left = `${left}px`
+              btn.style.top = `${top}px`
+              btn.style.width = `${w}px`
+              btn.style.height = `${h}px`
+              const url = (a as { url?: string }).url
+              const dest = (a as { dest?: unknown }).dest
+              btn.title = url ? url : '跳转'
+              btn.addEventListener('click', (ev) => {
+                ev.preventDefault()
+                ev.stopPropagation()
+                if (url) {
+                  void window.pdfApp.open.url(url)
+                  return
+                }
+                void (async () => {
+                  try {
+                    let target = dest
+                    if (typeof target === 'string') {
+                      target = await doc.getDestination(target)
+                    }
+                    const first = Array.isArray(target) ? target[0] : null
+                    if (typeof first === 'number') useViewer.getState().setPage(first + 1)
+                  } catch {
+                    /* 目标坏了就当没点 */
+                  }
+                })()
+              })
+              host.appendChild(btn)
+            }
+          } catch {
+            /* 注解读不出来不影响阅读 */
+          }
+        }
+
         container.style.setProperty('--scale-factor', String(scale))
 
         const itemCount = Array.isArray(textContent.items) ? textContent.items.length : -1
@@ -1453,14 +1539,55 @@ function PdfPage({
          */
         const kids = [...container.querySelectorAll<HTMLElement>(':scope > span')]
         if (kids.length > 1) {
-          const sorted = [...kids].sort((a, b) => {
-            const ra = a.getBoundingClientRect()
-            const rb = b.getBoundingClientRect()
-            if (Math.abs(ra.top - rb.top) > 2) return ra.top - rb.top
-            return ra.left - rb.left
-          })
-          if (sorted.some((el, i) => el !== kids[i])) {
-            for (const el of sorted) container.appendChild(el)
+          const rects = kids.map((el) => el.getBoundingClientRect())
+          /*
+           * ★ 双栏 / 多栏版面不能按 (top, left) 排（审计 P1）。
+           *
+           *   单栏时"从上到下、从左到右"就是阅读顺序；但试卷、期刊那种
+           *   两栏排版里，同一行左右两栏的 top 几乎相等，排序会把
+           *   左栏第 1 行、右栏第 1 行、左栏第 2 行… 交错串起来，
+           *   跨节点选区按 DOM 顺序取内容，选一段会选成"之字形"。
+           *
+           *   判据：把所有 span 的左边界按 4pt 容差聚成列；如果只有一列
+           *   （或列宽不足页宽 35%），说明是单栏，才做阅读顺序重排。
+           *   多栏时保持 pdf.js 的内容流顺序——那本来就是按栏生成的。
+           */
+          const pageW = container.clientWidth || 1
+          const lefts = rects.map((r) => r.left).sort((a, b) => a - b)
+          let columns = 1
+          for (let i = 1; i < lefts.length; i++) {
+            if (Math.abs(lefts[i] - lefts[i - 1]) > 4) columns++
+          }
+          /*
+           * 列数是"左边界跳变"的次数，正文每行缩进、居中标题都会虚增；
+           * 所以再用一个更硬的判据交叉验证：是否存在一批字整体在右半页、
+           * 且左侧同一水平带另有文字。两栏稿件的特征就是这个。
+           */
+          let sideBySide = false
+          for (let i = 0; i < rects.length && !sideBySide; i++) {
+            const a = rects[i]
+            if ((a.left + a.width / 2) < pageW * 0.55) continue
+            for (let j = 0; j < rects.length; j++) {
+              if (i === j) continue
+              const b = rects[j]
+              if (b.left + b.width > pageW * 0.5) continue
+              if (Math.abs(a.top - b.top) < Math.min(a.height, b.height) * 0.6) {
+                sideBySide = true
+                break
+              }
+            }
+          }
+
+          if (columns <= 2 || !sideBySide) {
+            const sorted = [...kids].sort((a, b) => {
+              const ra = a.getBoundingClientRect()
+              const rb = b.getBoundingClientRect()
+              if (Math.abs(ra.top - rb.top) > 2) return ra.top - rb.top
+              return ra.left - rb.left
+            })
+            if (sorted.some((el, i) => el !== kids[i])) {
+              for (const el of sorted) container.appendChild(el)
+            }
           }
         }
 
@@ -1514,6 +1641,8 @@ function PdfPage({
         <canvas className="pdf-page__canvas" />
       </div>
       <div ref={textRef} className="pdf-page__text textLayer" />
+      {/* 内链热区：由渲染 effect 直接填 DOM，位置与画布同倍率 */}
+      <div ref={linksRef} className="pdf-page__links" />
       {/*
         OCR 文字层（v2.1.3）。
         ★ 为什么是「叠一层文字」而不是直接把识别结果画到画布上：
@@ -2483,9 +2612,14 @@ export function DocumentView({
     setOcr(null)
   }, [doc])
 
-  /* 空闲预热 + 卸载释放：worker 线程不释放会一直占着两三百 MB */
+  /*
+   * 卸载释放：OCR worker 线程不释放会一直占着两三百 MB。
+   *
+   * ★ 审计 P2：原来这里还顺手 warmUpOcr() 预热，等于「只要打开任何 PDF 就
+   *   起一个 200MB 的识别 worker」，绝大多数文档根本用不到 OCR。
+   *   现在改成首次点「识别文字」时再由 ocr 模块自己初始化。
+   */
   useEffect(() => {
-    warmUpOcr()
     return () => {
       void disposeOcr()
     }
@@ -5079,6 +5213,36 @@ if (typeof window !== 'undefined' && !(window as PalmTestWindow).__sbSetPalmThre
 /** 复用的空数组：避免每次渲染都新建，减少子组件无谓的重渲染 */
 const EMPTY_ANNOTATIONS: Annotation[] = []
 
+/*
+ * ★ 缩略图渲染名额（审计 P2「缩略图对全部页一次性构建」）。
+ *
+ *   懒渲染只解决"看不见的不画"，但快速滚动时一屏能同时冒出十几张，
+ *   十几份 pdf.js 渲染任务抢主线程，正文翻页就跟着卡。
+ *   这里给缩略图单独限流：同时最多 3 张，其余排队。
+ *   名额与正文的渲染名额分开，避免缩略图把正文挤到队尾。
+ */
+const THUMB_CONCURRENCY = 3
+let thumbRunning = 0
+const thumbWaiters: Array<() => void> = []
+
+function acquireThumbSlot(): Promise<() => void> {
+  return new Promise((resolve) => {
+    const grant = (): void => {
+      thumbRunning += 1
+      let released = false
+      resolve(() => {
+        if (released) return
+        released = true
+        thumbRunning -= 1
+        const next = thumbWaiters.shift()
+        if (next) next()
+      })
+    }
+    if (thumbRunning < THUMB_CONCURRENCY) grant()
+    else thumbWaiters.push(grant)
+  })
+}
+
 /** 供缩略图使用的页面渲染 hook（把某页画到给定 canvas） */
 export function useThumbnail(
   doc: PDFDocumentProxy | null,
@@ -5108,8 +5272,16 @@ export function useThumbnail(
     }
     let cancelled = false
     let task: { cancel: () => void } | null = null
+    let release: (() => void) | null = null
 
     void (async () => {
+      /* 先排队拿名额，拿到再开画 —— 见文件里 THUMB_CONCURRENCY 的说明 */
+      release = await acquireThumbSlot()
+      if (cancelled) {
+        release()
+        release = null
+        return
+      }
       try {
         const p = await doc.getPage(pageNumber)
         if (cancelled) return
@@ -5138,6 +5310,11 @@ export function useThumbnail(
         if (name !== 'RenderingCancelledException' && !cancelled) {
           console.warn(`[pdf] 缩略图 ${pageNumber} 失败：`, error)
         }
+      } finally {
+        if (release) {
+          release()
+          release = null
+        }
       }
     })()
 
@@ -5147,6 +5324,11 @@ export function useThumbnail(
         task?.cancel()
       } catch {
         /* 忽略 */
+      }
+      /* 还在排队就被取消：名额也要还，否则队列会永久卡住 */
+      if (release) {
+        release()
+        release = null
       }
     }
   }, [doc, pageNumber, targetWidth, enabled])

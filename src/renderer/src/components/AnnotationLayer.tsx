@@ -177,7 +177,12 @@ export const AnnotationLayer = memo(function AnnotationLayer({
         item.type === 'note' ? (
           <NoteMarker key={item.id} item={item} scale={scale} />
         ) : (
-          item.rects.map((rect, i) => (
+          /*
+           * ★ 审计 P1：这里原来是 item.rects.map(...)。一旦批注文件的形状不对
+           *   （老版本写的、或手工/插件塞进来的），rects 是 undefined，
+           *   整棵 React 树直接崩成白屏 —— 一条坏数据毁掉整个文档。
+           */
+          (item.rects ?? []).map((rect, i) => (
             <div
               key={`${item.id}-${i}`}
               /*

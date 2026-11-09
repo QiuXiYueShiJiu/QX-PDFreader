@@ -161,6 +161,7 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   autoStart: false,
   /* 首次设置向导：全新安装/首次升到 2.1 时弹一次，走完写 true，之后永不弹 */
   onboarded: false,
+  tourSeen: false,
   /* 启动声明默认显示：第一次用的人需要知道「免费 / 早期版本 / 到哪反馈」 */
   disclaimerHidden: false,
   /* 启动时静默查一次新版本：查到才提示，查不到什么都不显示 */
@@ -268,6 +269,7 @@ export function mergeSettings(raw: unknown): ReaderSettings {
       : base.associatedExts,
     autoStart: typeof input.autoStart === 'boolean' ? input.autoStart : base.autoStart,
   onboarded: typeof input.onboarded === 'boolean' ? input.onboarded : base.onboarded,
+  tourSeen: typeof input.tourSeen === 'boolean' ? input.tourSeen : base.tourSeen,
     disclaimerHidden:
       typeof input.disclaimerHidden === 'boolean' ? input.disclaimerHidden : base.disclaimerHidden,
     /* 静默自动检查更新：默认开，用户可以关掉 */

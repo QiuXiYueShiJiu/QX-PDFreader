@@ -202,7 +202,9 @@ const api = {
     /** 在文件管理器中定位 */
     reveal: (filePath: string) => invoke<boolean>('pdf:reveal', filePath),
     /** 用系统默认程序打开（对照用） */
-    external: (filePath: string) => invoke<boolean>('pdf:open-external', filePath)
+    external: (filePath: string) => invoke<boolean>('pdf:open-external', filePath),
+    /** 打开网址（PDF 里的 http/https 内链） */
+    url: (url: string) => invoke<{ ok: boolean; error?: string }>('app:open-url', url)
   },
 
   /* ---------- 新建 ---------- */
@@ -273,7 +275,10 @@ const api = {
     remove: (filePath: string, id: string) => invoke<Annotation[]>('pdf:anno-remove', filePath, id),
     update: (filePath: string, id: string, patch: Partial<Annotation>) =>
       invoke<Annotation[]>('pdf:anno-update', filePath, id, patch),
-    clear: (filePath: string) => invoke<Annotation[]>('pdf:anno-clear', filePath)
+    clear: (filePath: string) => invoke<Annotation[]>('pdf:anno-clear', filePath),
+    /** 全量覆盖（撤销/重做后一次性同步） */
+    replace: (filePath: string, items: Annotation[]) =>
+      invoke<Annotation[]>('pdf:anno-replace', filePath, items)
   },
 
   /* ---------- 窗口控制（自绘标题栏用） ---------- */
@@ -386,6 +391,18 @@ const api = {
     assocAutoStart: (on: boolean): Promise<{ ok: boolean; on: boolean; error?: string }> =>
       invoke('assoc:autostart', on),
     assocAutoStartState: (): Promise<boolean> => invoke('assoc:autostart-state'),
+
+  /* 渲染层异常上报：写进同一个 crash.log，打包版才有线索可查 */
+  reportError: (payload: {
+    kind: string
+    message: string
+    stack?: string
+    source?: string
+    line?: number
+  }): Promise<boolean> => invoke('app:report-error', payload),
+
+  /* 设置页展示「崩溃日志在哪」 */
+  crashLog: (): Promise<{ path: string; bytes: number }> => invoke('app:crash-log'),
     rendererReady: (): Promise<boolean> => invoke('app:renderer-ready'),
     /** 选一张图片当阅读区背景（主进程负责落盘到 userData） */
     pickBackground: () =>
@@ -460,6 +477,21 @@ const api = {
    * 订阅「打开文件」通知，返回取消订阅函数。
    * 组件卸载时必须调用，否则热更新时会累积监听器。
    */
+  /**
+   * 插件宿主跑在独立 utilityProcess 里，它的 ui.toast 只能经主进程中转。
+   * 不接这条，插件的提示会静默丢失（用户以为插件坏了）。
+   */
+  onPluginToast: (
+    handler: (payload: { pluginId: string; message: string; kind?: string }) => void
+  ): (() => void) => {
+    const listener = (
+      _e: unknown,
+      payload: { pluginId: string; message: string; kind?: string }
+    ): void => handler(payload)
+    ipcRenderer.on('plugin:toast', listener)
+    return () => ipcRenderer.removeListener('plugin:toast', listener)
+  },
+
   onOpen: (handler: (payload: OpenPayload) => void): (() => void) => {
     const listener = (_e: unknown, payload: OpenPayload): void => handler(payload)
     ipcRenderer.on('pdf:open', listener)

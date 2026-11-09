@@ -693,9 +693,27 @@ let toastTimer: ReturnType<typeof setTimeout> | null = null
 /** 阅读位置防抖定时器（翻页很快时不希望每次都写盘） */
 let positionTimer: ReturnType<typeof setTimeout> | null = null
 
-/** 内容编辑是否还剩脏数据：删干净了就不该再挂「未导出」提示 */
-const hasContentEdits = (list: Annotation[]): boolean =>
-  list.some((a) => CONTENT_ANNOTATION_TYPES.includes(a.type))
+/*
+ * 批注回写：任何改动 600ms 后整份写盘。
+ *
+ * ★ 审计 P1-4：手写一节课的笔迹全在内存里，进程被杀 = 全丢。
+ *   整份覆盖而不是逐条增量，因为撤销/重做会成批改列表，增量既贵又容易错位。
+ */
+let annoSaveTimer: ReturnType<typeof setTimeout> | null = null
+let annoLastSaved = ''
+const scheduleAnnoSave = (filePath: string, list: Annotation[]): void => {
+  if (!filePath || !list) return
+  const snapshot = filePath + '\u0000' + JSON.stringify(list)
+  if (snapshot === annoLastSaved) return
+  if (annoSaveTimer) clearTimeout(annoSaveTimer)
+  annoSaveTimer = setTimeout(() => {
+    annoSaveTimer = null
+    annoLastSaved = snapshot
+    void window.pdfApp.annotations.replace(filePath, list).catch(() => {
+      /* 写盘失败不打扰用户，下次改动会再试 */
+    })
+  }, 600)
+}
 
 export const useViewer = create<ViewerState>((set, get) => ({
   filePath: '',
@@ -858,6 +876,22 @@ export const useViewer = create<ViewerState>((set, get) => ({
       searchIndex: 0,
       searchQuery: ''
     })
+
+    /*
+     * ★ 2026-11-09 审计 P1-4：把上次保存的批注读回来。
+     *   之前这里永远从空列表开始，关掉再打开图就「干净」了 —— 那不是特性，是丢数据。
+     */
+    try {
+      const saved = await window.pdfApp.annotations.list(result.path)
+      if (saved.length > 0 && get().filePath === result.path) {
+        set({
+          annotations: saved,
+          exportDirty: saved.some((a) => CONTENT_ANNOTATION_TYPES.includes(a.type))
+        })
+      }
+    } catch {
+      /* 读不回来就当新文档，不影响打开 */
+    }
   },
 
   /* ---------- 页面结构编辑（插入空白页 / 删除本页） ---------- */
@@ -908,7 +942,12 @@ export const useViewer = create<ViewerState>((set, get) => ({
     }
     /* 新页落在 result.index（0 起始），页码是 1 起始 */
     await get().reopenActiveTab(result.path, result.index + 1, tab.name, result.pages)
-    set({ loading: null })
+    /*
+     * ★ 审计 P1-5：插页改的是文档结构，必须让人知道「还没导出」。
+     *   reopenActiveTab 换的是工作副本，exportDirty 会被重置成 false，
+     *   用户以为已经保存，其实原文件一个字都没变。
+     */
+    set({ loading: null, exportDirty: true })
     get().showToast(`已在第 ${result.index + 1} 页插入空白页，共 ${result.pages} 页`, 2600)
   },
 
@@ -925,7 +964,7 @@ export const useViewer = create<ViewerState>((set, get) => ({
     }
     /* 删完之后停在被删页原来的位置（末页被删就落到新的末页） */
     await get().reopenActiveTab(result.path, result.index + 1, tab.name, result.pages)
-    set({ loading: null })
+    set({ loading: null, exportDirty: true })
     get().showToast(`已删除该页，还剩 ${result.pages} 页`, 2600)
   },
 
@@ -976,7 +1015,14 @@ export const useViewer = create<ViewerState>((set, get) => ({
        */
       searchHits: 0,
       searchIndex: 0,
-      searchQuery: ''
+      searchQuery: '',
+      /*
+       * ★ 审计 P1-2：撤销栈原来跨文档共享。
+       *   在 A 文档里画了五笔，切到 B 文档按 Ctrl+Z，撤销的是 A 的最后一笔 ——
+       *   B 上什么都不会变，用户以为撤销坏了；更糟的是重做会把 A 的笔迹塞进 B。
+       */
+      history: [],
+      future: []
     })
   },
 
@@ -1490,7 +1536,8 @@ export const useViewer = create<ViewerState>((set, get) => ({
     set({ annotations: [...get().annotations, item] })
 
     // 涂白/文字/图片/形状改的是页面内容，得让人知道「还没导出」
-    if (CONTENT_ANNOTATION_TYPES.includes(item.type)) set({ exportDirty: true })
+    // ★ 审计 P1-4：手写笔迹/高亮/便签也算未保存改动，原来只认内容编辑类
+    set({ exportDirty: true })
   },
   removeAnnotation: async (id) => {
     const rest = get().annotations.filter((a) => a.id !== id)
@@ -1499,7 +1546,7 @@ export const useViewer = create<ViewerState>((set, get) => ({
      *   不然「清空」之后编辑条常驻、角标一直提示「有未导出的编辑」，
      *   用户没有任何入口能把它消掉 —— 实测会被当成 bug 报上来。
      */
-    set({ annotations: rest, exportDirty: hasContentEdits(rest) && get().exportDirty })
+    set({ annotations: rest, exportDirty: rest.length > 0 && get().exportDirty })
   },
 
   updateAnnotationNote: async (id, note) => {
@@ -1938,3 +1985,14 @@ function applyTheme(settings: ReaderSettings): Partial<ReaderSettings> | null {
   /* 换包时要写回的三件套（调用方负责落库，见 patchSettings / init） */
   return packSwitchPatch
 }
+
+/*
+ * 批注自动保存的接线点。
+ *
+ * 订阅整个 store 而不是在 addAnnotation/removeAnnotation 里各写一次，
+ * 是为了把「撤销 / 重做 / 清空 / 载入」这些成批改动一并覆盖到；
+ * scheduleAnnoSave 内部按 JSON 快照去重，没变化不会真的写盘。
+ */
+useViewer.subscribe((state) => {
+  scheduleAnnoSave(state.filePath, state.annotations)
+})

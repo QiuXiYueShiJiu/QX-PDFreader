@@ -52,7 +52,14 @@ function assetUrl(path: string): string {
 }
 
 let workerPromise: Promise<import('tesseract.js').Worker> | null = null
-let progressSink: ((p: OcrProgress) => void) | null = null
+/*
+ * ★ 审计 P2：这里原来是单个 progressSink。
+ *
+ *   多页批量识别时后一页会把前一页的 sink 顶掉，前一页结束时又把全局置空，
+ *   于是进度条要么停住、要么显示到别的页上（用户看到"识别完一页突然归零"）。
+ *   改成集合：谁在识别谁登记，进度广播给所有在跑的识别任务。
+ */
+const progressSinks = new Set<(p: OcrProgress) => void>()
 
 /**
  * 取（并缓存）OCR worker。
@@ -86,10 +93,11 @@ async function getWorker(): Promise<import('tesseract.js').Worker> {
          */
         gzip: false,
         logger: (m: { status?: string; progress?: number }) => {
-          progressSink?.({
+          const next: OcrProgress = {
             fraction: typeof m.progress === 'number' ? m.progress : -1,
             stage: m.status ?? ''
-          })
+          }
+          for (const sink of progressSinks) sink(next)
         }
       })
     })().catch((err) => {
@@ -138,7 +146,7 @@ export async function recognizePage(
   pixelRatio: number,
   onProgress?: (p: OcrProgress) => void
 ): Promise<OcrLine[]> {
-  progressSink = onProgress ?? null
+  if (onProgress) progressSinks.add(onProgress)
   try {
     const worker = await getWorker()
     const { data } = await worker.recognize(imageDataUrl, {}, { text: true, blocks: true })
@@ -159,7 +167,7 @@ export async function recognizePage(
     }
     return out
   } finally {
-    progressSink = null
+    if (onProgress) progressSinks.delete(onProgress)
   }
 }
 

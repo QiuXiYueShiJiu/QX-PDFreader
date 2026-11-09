@@ -37,12 +37,13 @@ import { PasswordPrompt } from './components/PasswordPrompt'
 import { ToolsPanel } from './components/ToolsPanel'
 import { ScreenMask } from './components/ScreenMask'
 import { UpdateToast } from './components/UpdateToast'
+import { FeatureTour } from './components/FeatureTour'
 import { MarketPanel } from './components/MarketPanel'
 import { PluginStore } from './components/PluginStore'
 import { ComparePane } from './components/ComparePane'
 import { ImageToolsPanel } from './components/ImageToolsPanel'
 import { useDropZone } from './hooks/useDropZone'
-import { guardUnsaved, installCloseGuard, registerExporter } from './close-guard'
+import { exportNow, guardUnsaved, installCloseGuard, registerExporter } from './close-guard'
 
 export default function App(): JSX.Element {
   const init = useViewer((s) => s.init)
@@ -99,6 +100,19 @@ const closeActiveTab = useViewer((s) => s.closeActiveTab)
   useEffect(() => {
     void window.pdfApp.update.dirty(exportDirty)
   }, [exportDirty])
+
+  /*
+   * 插件宿主的 ui.toast：插件跑在独立进程，提示得由主进程中转到这里。
+   * ★ 2026-11-09 插件隔离改造要求接入，否则插件提示静默丢失。
+   */
+  useEffect(() => {
+    const off = window.pdfApp.onPluginToast((payload) => {
+      useViewer.getState().showToast(payload.message, 3200)
+    })
+    return () => {
+      off()
+    }
+  }, [])
 
   useEffect(() => {
     const off = window.pdfApp.onOpen((payload) => {
@@ -353,7 +367,8 @@ const closeActiveTab = useViewer((s) => s.closeActiveTab)
             e.preventDefault()
             s.setShowSearch(true)
             return
-          case 's':
+          /* Ctrl+, 打开设置（原来的 Ctrl+S 让位给「导出」） */
+          case ',':
             e.preventDefault()
             s.setShowSettings(true)
             return
@@ -403,13 +418,29 @@ const closeActiveTab = useViewer((s) => s.closeActiveTab)
             return
           case 'r':
             /*
-             * 保留 Ctrl+R 旋转，但只在**用户明确按住 Shift**时才动手，
-             * 这样 Ctrl+R 单独按下仍能走 Electron 的重新加载
-             * （调试时有用），而不会在正常使用中误伤。
+             * ★ 审计 P3：Ctrl+R 原来会走 Electron 的重新加载，等于把没导出的
+             *   批注全丢掉（重载后渲染层内存里的东西就没了，磁盘上只有已保存的）。
+             *   现在：Shift+Ctrl+R 仍是旋转（原有约定），Ctrl+R 直接拦下并提示。
              */
-            if (!e.shiftKey) return
+            if (!e.shiftKey) {
+              e.preventDefault()
+              useViewer.getState().showToast('Ctrl+R 会丢掉未导出的批注，已拦下', 2600)
+              return
+            }
             e.preventDefault()
             s.rotate(90)
+            return
+
+          case 's':
+            /*
+             * ★ 审计 P3：Ctrl+S 原来是打开「设置」。用户按保存，弹出的是设置，
+             *   手一抖就把主题改了。改为走「导出 PDF」。
+             */
+            e.preventDefault()
+            void exportNow()
+            return
+
+          case 'p':
             return
           case 'home':
             e.preventDefault()
@@ -468,6 +499,24 @@ const closeActiveTab = useViewer((s) => s.closeActiveTab)
     },
     [patchSettings]
   )
+
+  /*
+   * 功能介绍：只在设置里没标记「看过」时弹一次。
+   *
+   * 用本地 state 而不是直接读 settings.tourSeen：
+   * 用户取消勾选「以后不再显示」时，本次要关掉、但下次还得弹 ——
+   * 那就不写设置；直接绑 settings 会让它关不掉。
+   */
+  const [tourOpen, setTourOpen] = useState(settings.tourSeen === false)
+
+  const closeTour = useCallback(
+    (remember: boolean) => {
+      setTourOpen(false)
+      if (remember) void onSettingsChange({ tourSeen: true })
+    },
+    [onSettingsChange]
+  )
+
 
   const hasDoc = filePath !== ''
   const viewMode = useViewer((s) => s.viewMode)
@@ -589,6 +638,7 @@ const closeActiveTab = useViewer((s) => s.closeActiveTab)
 
       {/* 版本更新：右下角浮层，自动下载、下完再问装不装 */}
       <UpdateToast />
+      <FeatureTour open={tourOpen} onClose={closeTour} />
       <MarketPanel />
       {/* 插件商店：右栏入口打开，与主题商店（设置→外观）分家 */}
       <PluginStore />

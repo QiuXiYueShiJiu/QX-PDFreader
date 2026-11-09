@@ -57,6 +57,7 @@ export interface PdfAppApi {
     path: (filePath: string) => Promise<OpenResult>
     reveal: (filePath: string) => Promise<boolean>
     external: (filePath: string) => Promise<boolean>
+    url: (url: string) => Promise<{ ok: boolean; error?: string }>
   }
   create: {
     /** 新建空白 PDF（页数/纸张/方向/底色），成功后直接作为文档打开 */
@@ -98,6 +99,7 @@ export interface PdfAppApi {
     remove: (filePath: string, id: string) => Promise<Annotation[]>
     update: (filePath: string, id: string, patch: Partial<Annotation>) => Promise<Annotation[]>
     clear: (filePath: string) => Promise<Annotation[]>
+    replace: (filePath: string, items: Annotation[]) => Promise<Annotation[]>
   }
   win: {
     minimize: () => Promise<void>
@@ -131,6 +133,16 @@ export interface PdfAppApi {
   app: {
     /** 选一张图片当阅读区背景 */
     pickBackground: () => Promise<{ ok: boolean; path?: string; error?: string; canceled?: boolean }>
+
+  /* 崩溃日志：渲染层异常上报 + 设置页展示日志位置 */
+  reportError: (payload: {
+    kind: string
+    message: string
+    stack?: string
+    source?: string
+    line?: number
+  }) => Promise<boolean>
+  crashLog: () => Promise<{ path: string; bytes: number }>
     /** 退出应用（渲染层已弹确认框；主进程负责落盘后退出） */
     quit: () => Promise<void>
     /** 问完用户后真正退出（不再弹一次「确定退出吗」） */
@@ -296,6 +308,9 @@ export interface PdfAppApi {
     ) => () => void
   }
   onOpen: (handler: (payload: OpenPayload) => void) => () => void
+  onPluginToast: (
+    handler: (payload: { pluginId: string; message: string; kind?: string }) => void
+  ) => () => void
 }
 
 /** 更新检查结果（与 src/main/updater.ts 的 UpdateCheckResult 同形） */

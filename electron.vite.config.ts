@@ -10,7 +10,21 @@ export default defineConfig({
     },
     build: {
       rollupOptions: {
-        input: { index: resolve('src/main/index.ts') }
+        /**
+         * plugin-host 必须是独立产物。
+         *
+         * 插件代码跑在 utilityProcess 里，主进程用
+         * `utilityProcess.fork(join(__dirname, 'plugin-host.js'))` 启动它；
+         * 如果不在这里加第二个入口，host 会被打进 index.js，
+         * 运行时就会找不到文件（Electron 只会报模块加载失败）。
+         *
+         * 多入口共享同一份 externalizeDepsPlugin 配置，fflate/vm 等
+         * 依赖仍按外部模块处理，host 产物是 CJS，和主进程一致。
+         */
+        input: {
+          index: resolve('src/main/index.ts'),
+          'plugin-host': resolve('src/main/plugin-host.ts')
+        }
       }
     }
   },

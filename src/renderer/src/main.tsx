@@ -58,6 +58,7 @@ import './styles/glass.css'
 /* PDF 工具箱面板（合并/拆分/水印/压缩/加解密/图片互转/Office 转换） */
 import './styles/tools.css'
 import './styles/update-toast.css'
+import './styles/feature-tour.css'
 import './styles/first-run.css'
 import './styles/market.css'
 /* 布局包放最后：它只写结构，需要能覆盖前面各主题对圆角/高度的设定 */
@@ -160,6 +161,32 @@ const rootEl: HTMLElement = container
  *   ② 正常启动：文档打开后顺手把首页缩略图写进缓存，用户在资源管理器里马上就能看到。
  *      用 store 订阅而不是改组件，避免把「顺带做的事」散进渲染路径。
  */
+/*
+ * 窗口级错误统一上报。
+ *
+ * ★ 打包版没有控制台，渲染层的 window.onerror / unhandledrejection
+ *   以前等于直接丢掉。现在转给主进程写进 crash.log（只发消息与堆栈，
+ *   不发文档内容），下次用户报「闪退」时才有东西可查。
+ */
+function hookErrorReporting(): void {
+  const send = (kind: string, message: string, stack?: string, source?: string, line?: number) => {
+    try {
+      void window.pdfApp?.app?.reportError?.({ kind, message, stack, source, line })
+    } catch {
+      /* 上报失败不能影响页面 */
+    }
+  }
+  window.addEventListener('error', (event) => {
+    const err = event.error as Error | undefined
+    send('window.onerror', event.message || String(err?.message ?? ''), err?.stack, event.filename, event.lineno)
+  })
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason as unknown
+    const err = reason instanceof Error ? reason : undefined
+    send('unhandledrejection', err ? err.message : String(reason ?? ''), err?.stack)
+  })
+}
+
 async function bootstrap(): Promise<void> {
   const api = window.pdfApp
 
@@ -231,4 +258,5 @@ async function bootstrap(): Promise<void> {
   )
 }
 
+hookErrorReporting()
 void bootstrap()

@@ -1,0 +1,106 @@
+/* ============================================================
+ * 功能介绍（FeatureTour）
+ * 颜色全部走主题变量，深色/高对比主题下自动跟随。
+ * ============================================================ */
+.ft-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(12 14 18 / 42%);
+  backdrop-filter: blur(2px);
+}
+
+.ft-card {
+  width: min(560px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  padding: 24px 26px 18px;
+  border-radius: 16px;
+  border: 1px solid rgb(var(--border, 0 0 0) / 12%);
+  background: rgb(var(--surface, 255 255 255));
+  color: rgb(var(--text, 24 26 30));
+  box-shadow: 0 24px 60px rgb(0 0 0 / 22%);
+}
+
+.ft-title {
+  margin: 0 0 6px;
+  font-size: 19px;
+  font-weight: 600;
+}
+
+.ft-sub {
+  margin: 0 0 18px;
+  font-size: 13px;
+  color: rgb(var(--muted, 110 116 128));
+}
+
+.ft-item {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 12px 0;
+  border-top: 1px solid rgb(var(--border, 0 0 0) / 8%);
+}
+
+.ft-art {
+  flex: 0 0 120px;
+  width: 120px;
+  height: 64px;
+}
+
+.ft-paper { fill: rgb(var(--bg, 246 246 248)); stroke: rgb(var(--border, 0 0 0) / 14%); }
+.ft-ink { stroke: rgb(var(--accent, 156 100 40)); stroke-width: 2.6; stroke-linecap: round; }
+.ft-dot { fill: rgb(var(--accent, 156 100 40)); }
+.ft-palm-ring { stroke: rgb(var(--accent, 156 100 40)); stroke-width: 1.6; }
+.ft-palm { fill: rgb(var(--accent, 156 100 40) / 26%); stroke: rgb(var(--accent, 156 100 40) / 55%); stroke-width: 1.4; }
+
+.ft-text h3 {
+  margin: 2px 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ft-text p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.65;
+  color: rgb(var(--muted, 90 96 108));
+}
+
+.ft-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgb(var(--border, 0 0 0) / 8%);
+}
+
+.ft-remember {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: rgb(var(--muted, 90 96 108));
+  cursor: pointer;
+}
+
+.ft-ok {
+  min-width: 92px;
+  height: 34px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 9px;
+  background: rgb(var(--accent, 156 100 40));
+  color: rgb(var(--accent-fg, 255 255 255));
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ft-ok:hover,
+.ft-ok:focus-visible { filter: brightness(1.06); }

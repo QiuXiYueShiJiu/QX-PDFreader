@@ -14,25 +14,32 @@
  *       "description": "把当前页导出成 Markdown",
  *       "minAppVersion": "2.0.0",
  *       "permissions": ["document.read", "files.write"],
+ *       "allowedHosts": ["api.example.com"],  // 可选：联网白名单，只支持 https
  *       "main": "main.js",
  *       "icon": "icon.png"            // 可选
  *     }
  *   代码入口 `main.js` 里必须导出 `activate(api)`。
  *
- * ── 为什么在主进程 + vm 沙箱 ─────────────────────────────────────
- *   用户选了「在主进程执行」：插件因此能碰本地文件、能联网、能做批量处理，
- *   这些渲染层沙箱做不到。代价是「权限声明」必须**真的拦得住**，
- *   否则那五项权限只是装饰。
+ * ── 为什么要放进 utilityProcess ─────────────────────────────────
+ *   插件能碰本地文件、能联网、能做批量处理，这些渲染层沙箱做不到，
+ *   所以必须有一个“有权限”的执行环境。但**不能是主进程**：
+ *   旧实现用 `vm.runInNewContext` 把插件关进一个只有 `module` / `exports` /
+ *   `console` / `api` 的上下文，看起来没给 `require` —— 可 vm 不是安全边界，
+ *   插件只要拿到 `api` 上的任意函数，就能顺着 `constructor.constructor`
+ *   拿到主进程的 `Function`，再拿到 `process` / `require` / `fs`，
+ *   等于任意代码执行。所以 vm 里那五项权限声明其实拦不住任何东西。
  *
- *   做法：插件代码不在全局环境里 `require`，而是用 `vm.runInNewContext`
- *   跑在一个只有 `module` / `exports` / `console` / 受控 `api` 的上下文里，
- *   连 `require` 都不给 —— 想读文件只能走 `api.files`，想联网只能走
- *   `api.net`，两者都先查权限，没声明就抛错。这样即使插件作者写了
- *   `require('fs')`，也只会拿到 `undefined` 而不是真实模块。
+ *   现在插件代码跑在独立的 utilityProcess（见 plugin-host.ts）：
+ *   即使插件拿到那个进程的 `process` / `require`，也只是子进程，
+ *   碰不到主进程的窗口、IPC、用户数据目录。真正需要的能力全部以消息
+ *   请求主进程，由 plugin-broker.ts 按本文件从磁盘 manifest 读出的
+ *   permissions 逐条放行 —— 子进程自称有权限不作数。
  *
  * ── 崩溃策略 ───────────────────────────────────────────────────
  *   用户选了「弹框问禁用还是重试」。命令执行一律包在 try/catch 里，
  *   出错就弹原生对话框：禁用 → 标记该插件禁用并落盘；重试 → 直接再跑一次。
+ *   进程级崩溃（OOM、未捕获异常）由 broker 记 `plugin-crash` 到 crash.log，
+ *   并且只影响那一个插件的宿主，不会带崩应用。
  *
  * ── 生效方式 ───────────────────────────────────────────────────
  *   安装/卸载/启停之后由界面提示「重启应用生效」。宿主在启动时一次性加载，
@@ -42,21 +49,33 @@
 import { app, dialog, ipcMain, net, shell } from 'electron'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
-import vm from 'node:vm'
+import { dirname, join, resolve, sep } from 'node:path'
 import { unzipSync } from 'fflate'
+import { crashLog } from './crash-log'
+import {
+  findHostedCommand,
+  listHostedCommands,
+  runHostedCommand,
+  setCurrentDocument,
+  startPlugin,
+  stopAllHosts,
+  stopPlugin,
+  waitForHostsReady
+} from './plugin-broker'
+import type { PluginHostSpec, PluginPermission } from './plugin-protocol'
+
+/*
+ * 权限类型搬到了 plugin-protocol.ts（主进程与子进程共用的纯类型文件）。
+ * 这里重新导出，保持 `import { PluginPermission } from './plugins'` 的旧写法可用。
+ */
+export type { PluginPermission } from './plugin-protocol'
+
+/** 当前文档状态现在归 broker 管（插件读的是它那份），这里原样转出去 */
+export { setCurrentDocument }
 
 /* ------------------------------------------------------------------ */
 /* 类型                                                               */
 /* ------------------------------------------------------------------ */
-
-/** 权限：声明了才有对应能力，没声明调用即抛错 */
-export type PluginPermission =
-  | 'document.read'
-  | 'files.write'
-  | 'network'
-  | 'ui.dialog'
-  | 'settings.write'
 
 export interface PluginManifest {
   id: string
@@ -66,6 +85,11 @@ export interface PluginManifest {
   description?: string
   minAppVersion?: string
   permissions?: PluginPermission[]
+  /**
+   * 插件自己需要联网的域名（不含协议，只写主机名，子域自动允许）。
+   * 插件能碰哪些站必须写进清单让用户看见，不能靠运行期随便请求。
+   */
+  allowedHosts?: string[]
   main?: string
   icon?: string
 }
@@ -77,6 +101,7 @@ export interface InstalledPlugin {
   author: string
   description: string
   permissions: PluginPermission[]
+  allowedHosts: string[]
   enabled: boolean
   dir: string
   /** 加载失败时的原因（清单坏了、代码抛异常），界面直接显示 */
@@ -88,19 +113,13 @@ interface PluginState {
   enabled: Record<string, boolean>
 }
 
-/** 插件注册给界面的命令 */
-interface PluginCommand {
-  pluginId: string
-  id: string
-  label: string
-  run: () => void | Promise<void>
-}
-
 /* ------------------------------------------------------------------ */
 /* 路径与状态                                                          */
 /* ------------------------------------------------------------------ */
 
 const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9._-]{1,63}$/
+/** 主机名：允许普通域名/IP，不允许协议、路径、端口写成白名单项 */
+const HOSTNAME_RE = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i
 const ALLOWED_PERMISSIONS: PluginPermission[] = [
   'document.read',
   'files.write',
@@ -189,6 +208,7 @@ export function listInstalled(): InstalledPlugin[] {
       author: manifest?.author ?? '',
       description: manifest?.description ?? '',
       permissions: manifest?.permissions ?? [],
+      allowedHosts: manifest?.allowedHosts ?? [],
       enabled: state.enabled[id] !== false,
       dir,
       error
@@ -209,6 +229,14 @@ export function validateManifest(manifest: PluginManifest): string | null {
     if (!Array.isArray(manifest.permissions)) return 'permissions 必须是数组'
     const bad = manifest.permissions.find((p) => !ALLOWED_PERMISSIONS.includes(p as PluginPermission))
     if (bad) return `未知权限 ${String(bad)}`
+  }
+  if (manifest.allowedHosts !== undefined) {
+    if (!Array.isArray(manifest.allowedHosts)) return 'allowedHosts 必须是数组'
+    if (manifest.allowedHosts.length > 32) return 'allowedHosts 最多 32 条'
+    const bad = manifest.allowedHosts.find(
+      (host) => typeof host !== 'string' || host.length > 253 || !HOSTNAME_RE.test(host)
+    )
+    if (bad !== undefined) return `allowedHosts 里有不合法的主机名：${String(bad)}`
   }
   return null
 }
@@ -297,7 +325,19 @@ export function installFromArchive(archivePath: string): InstallResult {
 }
 
 export function uninstall(pluginId: string): { ok: boolean; error?: string } {
-  const idDir = join(pluginsRoot(), pluginId)
+  /*
+   * ★ 2026-11-09 安全审计 P0：这里以前直接 join 后 rmSync，没有校验 id。
+   *   plugin:uninstall('..\\..') 会让 idDir 指到 %APPDATA% 并递归删除 ——
+   *   一次 IPC 就能删光用户目录。现在三重校验：形态、父级、resolve 前缀。
+   */
+  if (!PLUGIN_ID_RE.test(pluginId)) {
+    return { ok: false, error: '插件 id 不合法' }
+  }
+  const root = pluginsRoot()
+  const idDir = join(root, pluginId)
+  if (dirname(idDir) !== root || !resolve(idDir).startsWith(resolve(root) + sep)) {
+    return { ok: false, error: '插件目录越界' }
+  }
   if (!existsSync(idDir)) return { ok: false, error: '没有这个插件' }
   try {
     rmSync(idDir, { recursive: true, force: true })
@@ -320,186 +360,88 @@ export function setEnabled(pluginId: string, enabled: boolean): { ok: boolean } 
 }
 
 /* ------------------------------------------------------------------ */
-/* 运行时：vm 沙箱 + 权限闸门                                          */
+/* 运行时：utilityProcess 宿主 + 权限闸门                              */
 /* ------------------------------------------------------------------ */
 
-const commands = new Map<string, PluginCommand>()
-
-/** 当前打开的文档（由主进程维护，插件通过 api.document 读） */
-let currentDocument: { path: string; text: string } = { path: '', text: '' }
-
-export function setCurrentDocument(path: string, text: string): void {
-  currentDocument = { path, text }
-}
-
-function hasPermission(plugin: InstalledPlugin, permission: PluginPermission): boolean {
-  return plugin.permissions.includes(permission)
-}
-
-function deny(plugin: InstalledPlugin, permission: PluginPermission): never {
-  throw new Error(`插件 ${plugin.id} 没有声明 ${permission} 权限，已拦截`)
-}
+/**
+ * 每次 loadPlugins 自增；异步启动完成时如果 token 已经过期，
+ * 说明期间又 reload 过（装/卸/启停），这个结果直接丢弃，
+ * 否则旧插件的宿主进程会赖在内存里。
+ */
+let loadSeq = 0
 
 /**
- * 给插件用的受控 API。
+ * 启动时加载全部启用的插件。
  *
- * 每个方法都先过权限；没声明就抛错，错误信息里带上插件 id 与权限名，
- * 用户从弹框里能直接看出是哪个插件越权。
+ * 这里只做「读清单、拼 spec、交给 broker」三件事；代码执行、api 代理、
+ * 权限判断全在子进程 / broker 侧（见 plugin-host.ts、plugin-broker.ts）。
+ * 主进程里没有 vm，也没有给插件准备的任何宿主对象。
  */
-function createApi(plugin: InstalledPlugin): Record<string, unknown> {
-  const commandsOfPlugin: string[] = []
-
-  return {
-    manifest: {
-      id: plugin.id,
-      name: plugin.name,
-      version: plugin.version,
-      permissions: [...plugin.permissions]
-    },
-    document: {
-      /** 当前文档路径（没打开文档返回空串） */
-      getPath(): string {
-        if (!hasPermission(plugin, 'document.read')) deny(plugin, 'document.read')
-        return currentDocument.path
-      },
-      /** 当前页纯文本（由渲染层在切换页面时推上来） */
-      getText(): string {
-        if (!hasPermission(plugin, 'document.read')) deny(plugin, 'document.read')
-        return currentDocument.text
-      }
-    },
-    files: {
-      /** 写文件：只允许写到用户选的目录（这里用保存对话框拿路径） */
-      async save(defaultName: string, content: string): Promise<string> {
-        if (!hasPermission(plugin, 'files.write')) deny(plugin, 'files.write')
-        const picked = await dialog.showSaveDialog({
-          title: `${plugin.name} · 保存`,
-          defaultPath: defaultName
-        })
-        if (picked.canceled || !picked.filePath) return ''
-        writeFileSync(picked.filePath, content, 'utf8')
-        return picked.filePath
-      }
-    },
-    net: {
-      /** 联网取文本：走 Electron net（带代理与系统证书），只返回 body */
-      async fetchText(url: string): Promise<string> {
-        if (!hasPermission(plugin, 'network')) deny(plugin, 'network')
-        if (!/^https?:\/\//i.test(url)) throw new Error('只允许 http/https')
-        const res = await net.fetch(url)
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        return await res.text()
-      }
-    },
-    ui: {
-      /** 弹一个原生提示（插件不能自绘窗口） */
-      notify(message: string): void {
-        if (!hasPermission(plugin, 'ui.dialog')) deny(plugin, 'ui.dialog')
-        void dialog.showMessageBox({ type: 'info', message: String(message), buttons: ['好'] })
-      },
-      confirm(message: string): Promise<boolean> {
-        if (!hasPermission(plugin, 'ui.dialog')) deny(plugin, 'ui.dialog')
-        return dialog
-          .showMessageBox({ type: 'question', message: String(message), buttons: ['取消', '确定'], defaultId: 1, cancelId: 0 })
-          .then((r) => r.response === 1)
-      }
-    },
-    settings: {
-      get(): Record<string, unknown> {
-        if (!hasPermission(plugin, 'settings.write')) deny(plugin, 'settings.write')
-        return {}
-      },
-      set(): void {
-        if (!hasPermission(plugin, 'settings.write')) deny(plugin, 'settings.write')
-        throw new Error('修改设置需要在界面上显式确认，当前版本尚未开放写入')
-      }
-    },
-    commands: {
-      /**
-       * 注册一个命令，它会出现在上栏「工具」选项卡的「插件」组里。
-       * 命令 id 全局唯一：`<插件 id>:<名字>`，避免两个插件撞名。
-       */
-      register(input: { id: string; label: string; run: () => void | Promise<void> }): void {
-        if (!input || typeof input.id !== 'string' || typeof input.label !== 'string') {
-          throw new Error('commands.register 需要 { id, label, run }')
-        }
-        if (typeof input.run !== 'function') throw new Error('commands.register 缺少 run')
-        const fullId = `${plugin.id}:${input.id}`
-        commands.set(fullId, {
-          pluginId: plugin.id,
-          id: fullId,
-          label: input.label,
-          run: input.run
-        })
-        commandsOfPlugin.push(fullId)
-      }
-    }
-  }
-}
-
-/** 启动时加载全部启用的插件 */
 export function loadPlugins(): void {
-  commands.clear()
+  const token = ++loadSeq
+  stopAllHosts()
   for (const plugin of listInstalled()) {
     if (!plugin.enabled) continue
     if (plugin.error) {
       console.warn(`[plugin] 跳过 ${plugin.id}：${plugin.error}`)
       continue
     }
-    try {
-      const manifestRaw = readFileSync(join(plugin.dir, 'manifest.json'), 'utf8')
-      const manifest = JSON.parse(manifestRaw) as PluginManifest
-      const entry = join(plugin.dir, manifest.main ?? 'main.js')
-      const code = readFileSync(entry, 'utf8')
-      const api = createApi(plugin)
-
-      const sandbox: Record<string, unknown> = {
-        module: { exports: {} as Record<string, unknown> },
-        exports: {},
-        console: {
-          log: (...args: unknown[]) => console.log(`[plugin:${plugin.id}]`, ...args),
-          warn: (...args: unknown[]) => console.warn(`[plugin:${plugin.id}]`, ...args),
-          error: (...args: unknown[]) => console.error(`[plugin:${plugin.id}]`, ...args)
-        },
-        api,
-        setTimeout,
-        clearTimeout
-      }
-      sandbox.exports = (sandbox.module as { exports: unknown }).exports
-
-      vm.createContext(sandbox)
-      vm.runInContext(code, sandbox, { filename: `${plugin.id}/main.js`, timeout: 5000 })
-
-      const exported = (sandbox.module as { exports: Record<string, unknown> }).exports
-      const activate = exported?.activate
-      if (typeof activate !== 'function') {
-        console.warn(`[plugin] ${plugin.id} 没有导出 activate(api)，已跳过`)
-        continue
-      }
-      void Promise.resolve((activate as (a: unknown) => unknown)(api)).catch((error) => {
-        console.error(`[plugin] ${plugin.id} activate 抛错`, error)
-      })
-      console.log(`[plugin] 已加载 ${plugin.id}@${plugin.version}`)
-    } catch (error) {
-      console.error(`[plugin] ${plugin.id} 加载失败`, error)
-    }
+    void startOne(plugin, token)
   }
 }
 
+async function startOne(plugin: InstalledPlugin, token: number): Promise<void> {
+  try {
+    const manifestRaw = readFileSync(join(plugin.dir, 'manifest.json'), 'utf8')
+    const manifest = JSON.parse(manifestRaw) as PluginManifest
+    const problem = validateManifest(manifest)
+    if (problem) throw new Error(problem)
+
+    /*
+     * manifest.main 是插件作者写的字符串，必须挡住 `../` 越界：
+     * 入口只能在插件自己的目录里，否则等于让插件决定主进程去读哪个文件。
+     */
+    const entry = resolve(join(plugin.dir, manifest.main ?? 'main.js'))
+    if (!entry.startsWith(resolve(plugin.dir) + sep)) throw new Error('入口文件越界')
+
+    const code = readFileSync(entry, 'utf8')
+    if (token !== loadSeq) return
+
+    // spec 完全来自磁盘清单；子进程之后说什么都不会改变这里的权限
+    const spec: PluginHostSpec = {
+      id: plugin.id,
+      name: manifest.name,
+      version: manifest.version,
+      permissions: manifest.permissions ?? [],
+      allowedHosts: manifest.allowedHosts ?? []
+    }
+    await startPlugin(spec, code)
+  } catch (error) {
+    if (token !== loadSeq) return
+    console.error(`[plugin] ${plugin.id} 加载失败`, error)
+    crashLog('plugin-load-error', {
+      pluginId: plugin.id,
+      error: (error as Error)?.message ?? String(error)
+    })
+  }
+}
+
+/* 命令表在 broker 里，和宿主进程同生命周期；这里只负责转发给界面 */
 export function listCommands(): { id: string; label: string; pluginId: string }[] {
-  return [...commands.values()].map((c) => ({ id: c.id, label: c.label, pluginId: c.pluginId }))
+  return listHostedCommands()
 }
 
 /**
  * 执行命令。失败由这里弹原生对话框问「禁用还是重试」——
- * 用户选禁用就把插件停用并落盘，选重试就再跑一次（只重试一次，避免死循环）。
+ * 用户选禁用就把插件停用并落盘（同时杀掉宿主进程），选重试就再跑一次
+ * （只重试一次，避免死循环）。
  */
 export async function runCommand(commandId: string): Promise<{ ok: boolean; error?: string }> {
-  const command = commands.get(commandId)
+  const command = findHostedCommand(commandId)
   if (!command) return { ok: false, error: '命令不存在（插件可能没加载）' }
 
   try {
-    await command.run()
+    await runHostedCommand(commandId)
     return { ok: true }
   } catch (error) {
     const message = (error as Error)?.message ?? String(error)
@@ -516,13 +458,11 @@ export async function runCommand(commandId: string): Promise<{ ok: boolean; erro
     })
     if (choice.response === 0) {
       setEnabled(command.pluginId, false)
-      commands.forEach((c, key) => {
-        if (c.pluginId === command.pluginId) commands.delete(key)
-      })
+      stopPlugin(command.pluginId)
       return { ok: false, error: `${message}（插件已禁用，重启后生效）` }
     }
     try {
-      await command.run()
+      await runHostedCommand(commandId)
       return { ok: true }
     } catch (again) {
       return { ok: false, error: (again as Error)?.message ?? String(again) }
@@ -611,10 +551,19 @@ export function registerPluginIpc(): void {
     fetchPluginIndex(prefer === 'mirror' ? 'mirror' : 'github')
   )
 
-  ipcMain.handle('plugin:commands', () => listCommands())
+  /*
+   * 宿主是异步启动的：界面一上来就取命令表，必须等这一轮启动落地，
+   * 否则会稳定拿到空列表（旧实现同步 vm，没这个窗口）。
+   * 某个插件启动失败不影响其他插件，waitForHostsReady 内部吞掉失败。
+   */
+  ipcMain.handle('plugin:commands', async () => {
+    await waitForHostsReady()
+    return listCommands()
+  })
 
   ipcMain.handle('plugin:run', async (_e, commandId: unknown) => {
     if (typeof commandId !== 'string') return { ok: false, error: '命令 id 不合法' }
+    await waitForHostsReady()
     return runCommand(commandId)
   })
 
@@ -647,10 +596,37 @@ export function registerPluginIpc(): void {
     if (typeof url !== 'string' || !/^https:\/\//i.test(url)) {
       return { ok: false, error: '下载地址不合法' }
     }
+    /*
+     * ★ 审计 P1：原来只要求 https，于是网页里任何地址都能让主进程下载并安装。
+     *   现在只放行自己的商店域名与 GitHub（插件清单的两个来源）。
+     */
+    const host = (() => {
+      try {
+        return new URL(url).hostname.toLowerCase()
+      } catch {
+        return ''
+      }
+    })()
+    const ALLOWED_HOSTS = [
+      'xn--6rso4u4lc86ad09c.top',
+      'github.com',
+      'objects.githubusercontent.com',
+      'raw.githubusercontent.com'
+    ]
+    if (!ALLOWED_HOSTS.includes(host)) {
+      return { ok: false, error: `不接受来自 ${host || '未知地址'} 的安装包` }
+    }
     try {
       const res = await net.fetch(url)
       if (!res.ok) return { ok: false, error: `下载失败：HTTP ${res.status}` }
+      const declared = Number(res.headers.get('content-length') ?? 0) || 0
+      if (declared > 32 * 1024 * 1024) {
+        return { ok: false, error: '安装包过大（插件上限 32 MB）' }
+      }
       const bytes = new Uint8Array(await res.arrayBuffer())
+      if (bytes.byteLength > 32 * 1024 * 1024) {
+        return { ok: false, error: '安装包过大（插件上限 32 MB）' }
+      }
       const expect = typeof sha256 === 'string' ? sha256.trim().toLowerCase() : ''
       let verified = false
       if (expect) {

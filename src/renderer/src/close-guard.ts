@@ -74,13 +74,17 @@ export async function guardUnsaved(action: string): Promise<boolean> {
 
     if (!exporter) {
       // 理论上到不了：有脏数据就说明用了编辑工具，导出实现必然已注册
-      window.alert('导出功能还没准备好，暂时不能保存。请用工具条的「导出 PDF」按钮。')
+      /*
+       * ★ 审计 P3：原来用 window.alert —— 无边框窗口里这是浏览器模态框，
+       *   会把整个渲染进程冻住，样式也和主题完全脱节。改成应用内提示。
+       */
+      useViewer.getState().showToast('导出还没准备好，请用工具条的「导出 PDF」', 3200)
       return false
     }
 
     // 导出实现必须属于当前这份文档，否则会存错文件
     if (!(await waitForExporter(state.filePath))) {
-      window.alert('文档刚切换过来还没加载完，请稍后再试一次。本次操作已取消，编辑内容还在。')
+      useViewer.getState().showToast('文档还在加载，本次操作已取消，编辑内容仍在', 3200)
       return false
     }
 
@@ -88,7 +92,9 @@ export async function guardUnsaved(action: string): Promise<boolean> {
     if (result.ok) return true
     if (result.canceled) return false
 
-    window.alert(`保存失败：${result.error ?? '未知错误'}\n${action}已取消，编辑内容还在。`)
+    useViewer
+      .getState()
+      .showToast(`保存失败：${result.error ?? '未知错误'}；${action}已取消，编辑内容还在`, 4000)
     return false
   } finally {
     running = false
@@ -101,6 +107,19 @@ export async function guardUnsaved(action: string): Promise<boolean> {
  * 主进程要这个标志来判断「用户点关闭窗口」时该不该拦（见 main/index.ts 的
  * hasUnsavedEdits）：主进程看不到渲染层的 store，只能靠这条通知。
  */
+/**
+ * 主动导出当前文档（Ctrl+S 用）。
+ *
+ * 复用 App 注册进来的那一份实现：它带「这份实现属于哪个文件」的路径校验
+ * （exporterPath），另写一套会绕过它，把 A 文档导出到 B 的文件名上。
+ *
+ * @returns null 表示当前没有可导出的文档
+ */
+export async function exportNow(): Promise<ExportOutcome | null> {
+  if (!exporter) return null
+  return exporter()
+}
+
 export function installCloseGuard(): () => void {
   const push = (dirty: boolean): void => {
     window.pdfApp?.doc.setDirty(dirty)

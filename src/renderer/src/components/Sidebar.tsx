@@ -222,7 +222,17 @@ function Outline({ doc }: { doc: PDFDocumentProxy | null }): JSX.Element {
       const resolved =
         typeof dest === 'string' ? await doc.getDestination(dest) : (dest as unknown[] | null)
       if (!resolved || !Array.isArray(resolved)) return
-      const index = await doc.getPageIndex(resolved[0] as never)
+      /*
+       * ★ 审计 P1：dest 的第一项可能是「页码整数」，也可能是一个页面引用对象。
+       *   原来一律丢给 getPageIndex()，传整数会抛异常，被下面的 catch 吞掉 ——
+       *   用户点目录什么都没发生，也不知道为什么。
+       */
+      const first = resolved[0]
+      if (typeof first === 'number') {
+        setPage(first + 1)
+        return
+      }
+      const index = await doc.getPageIndex(first as never)
       setPage(index + 1)
     } catch (e) {
       console.warn('[pdf] 目录跳转失败：', e)
@@ -319,8 +329,18 @@ function SearchPanel({ doc }: { doc: PDFDocumentProxy | null }): JSX.Element {
   const cancelRef = useRef(0)
 
   useEffect(() => {
-    const keyword = query.trim()
-    if (!doc || keyword.length < 1) {
+    /*
+     * ★ 审计 P1：搜索原来没有防抖，每按一个键就从第 1 页扫到最后一页。
+     *   777 页的教材上输入五个字 = 触发五轮全量扫描，界面直接卡住。
+     *   这里延迟 300ms，且旧一轮靠 cancelRef 立刻作废（见下）。
+     */
+    const delay = window.setTimeout(() => {
+      void runSearch()
+    }, 300)
+
+    async function runSearch(): Promise<void> {
+      const keyword = query.trim()
+      if (!doc || keyword.length < 1) {
       setHits([])
       setSearchResult(0, 0)
       return
@@ -346,17 +366,28 @@ function SearchPanel({ doc }: { doc: PDFDocumentProxy | null }): JSX.Element {
           const text = content.items
             .map((item) => ('str' in item ? item.str : ''))
             .join('')
-          const idx = text.toLowerCase().indexOf(lower)
-          if (idx >= 0) {
-            const from = Math.max(0, idx - 24)
-            const to = Math.min(text.length, idx + keyword.length + 40)
+          /*
+           * ★ 审计 P1：原来每页只取 indexOf 的第一个命中，
+           *   一页里出现 8 次也只显示 1 条，用户以为「只找到一处」。
+           *   这里用 matchAll 收全，最多保留每页 20 条，防止极端页撑爆列表。
+           */
+          const haystack = text.toLowerCase()
+          let from = 0
+          let perPage = 0
+          for (;;) {
+            const idx = haystack.indexOf(lower, from)
+            if (idx < 0 || perPage >= 20) break
+            const snippetFrom = Math.max(0, idx - 24)
+            const snippetTo = Math.min(text.length, idx + keyword.length + 40)
             found.push({
               page: i,
               snippet:
-                (from > 0 ? '…' : '') +
-                text.slice(from, to) +
-                (to < text.length ? '…' : '')
+                (snippetFrom > 0 ? '…' : '') +
+                text.slice(snippetFrom, snippetTo) +
+                (snippetTo < text.length ? '…' : '')
             })
+            perPage += 1
+            from = idx + Math.max(1, keyword.length)
           }
         } catch {
           /* 单页解析失败不影响整体搜索 */
@@ -369,7 +400,13 @@ function SearchPanel({ doc }: { doc: PDFDocumentProxy | null }): JSX.Element {
       setHits(found)
       setSearching(false)
       setSearchResult(found.length, 0)
-    })()
+      })()
+    }
+
+    return () => {
+      window.clearTimeout(delay)
+      cancelRef.current += 1
+    }
 
     return () => {
       // 关键词变化时让上一轮循环提前退出

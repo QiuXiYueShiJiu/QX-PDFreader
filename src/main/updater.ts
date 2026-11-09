@@ -27,6 +27,12 @@
  */
 
 import { app, net, shell } from 'electron'
+
+/*
+ * ★ 审计 P0-4：更新包没有完整性校验。镜像站返回的清单里若带 sha256，
+ *   下载完必须比对；不带就至少卡住「离谱大文件」，避免被塞一个 GB 级垃圾。
+ */
+const MAX_INSTALLER_BYTES = 300 * 1024 * 1024
 import { createHash } from 'node:crypto'
 import { createReadStream, createWriteStream, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -512,6 +518,9 @@ export async function downloadUpdate(
 
     if (!res.body) {
       const buf = new Uint8Array(await res.arrayBuffer())
+      if (buf.byteLength > MAX_INSTALLER_BYTES) {
+        return { ok: false, error: '安装包体积异常，已拒绝' }
+      }
       await new Promise<void>((resolvePromise, reject) => {
         const out = createWriteStream(target)
         out.on('error', reject)
@@ -532,6 +541,12 @@ export async function downloadUpdate(
         if (finished) break
         if (!value) continue
         received += value.byteLength
+        if (received > MAX_INSTALLER_BYTES) {
+          out.destroy()
+          await reader.cancel().catch(() => {})
+          rmSync(target, { force: true })
+          return { ok: false, error: '安装包体积异常，已中止下载' }
+        }
         out.write(Buffer.from(value))
         onProgress({
           received,

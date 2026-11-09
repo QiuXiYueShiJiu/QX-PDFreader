@@ -14,15 +14,21 @@
  * 单实例：文件关联双击时需要把新文件交给已运行实例打开，而不是开新窗口。
  */
 
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, net, protocol, screen, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, protocol, screen, shell } from 'electron'
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
-import { basename, dirname, extname, join, normalize, resolve } from 'node:path'
+import { basename, dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { PDFDocument, rgb as pdfRgb } from 'pdf-lib'
+/*
+ * ★ 审计 P2：原来这里用 pdf-lib，而 pdf-tools / pdf-advanced 用的是 @cantoo/pdf-lib。
+ *   两个包各自带一份完整的 PDF 解析器，安装包体积和内存里都多一份。
+ *   源码树里 @cantoo/pdf-lib 已经是主力（加密、表单等扩展只有它有），统一到它。
+ */
+import { PDFDocument, rgb as pdfRgb } from '@cantoo/pdf-lib'
 import { diagEnabled, diagLine, diagLogPath, diagMarkerPath, initDiagLog } from './diag-log'
+import { crashLog, crashLogBytes, crashLogPath, initCrashLog } from './crash-log'
 import {
   getSettings,
   patchSettings,
@@ -38,6 +44,7 @@ import { registerPdfAdvancedIpc } from './pdf-advanced'
 import { registerPdfToolsIpc } from './pdf-tools'
 import { registerImageToolsIpc } from './image-tools'
 import { loadPlugins, registerPluginIpc } from './plugins'
+import { setPdfOpenHandler } from './plugin-host-io'
 import { askRollbackIfUnstable, bootFailures, listRollback, markBootOk, markBootStart, rollbackTo } from './rollback'
 import {
   decodeImage,
@@ -64,7 +71,7 @@ const IMAGE_EXTS = IMAGE_OPEN_EXTS
  * ★ 必须在模块加载时立刻声明特权协议，位置不能挪到文件底部。
  *
  * 踩坑记录：把这段写在文件末尾，编译产物里它的执行顺序落在
- * `app.whenReady().then(onReady)` 之后 —— 于是 onReady 里的
+ * 请求根本不会到达处理器，渲染层拿到 404。
  * `protocol.handle('pdf-file', …)` 在一个**尚未成为特权协议**的 scheme 上注册，
  * 请求根本不会到达处理器，渲染层拿到 404。
  * 表现是 pdf.js 报 `Missing PDF "pdf-file://c/Users/..."`，
@@ -120,6 +127,10 @@ const LEGACY_USER_DATA_NAME = '秋夕月拾旧-PDF阅读器'
     try {
       mkdirSync(pinned, { recursive: true })
       app.setPath('userData', pinned)
+
+  /* 崩溃日志：放在 userData 钉定之后，路径才正确 */
+  initCrashLog()
+  prunePageCopies()
       console.log('[pdf] userData 目录已钉定到:', pinned)
     } catch (error) {
       console.error('[pdf] userData 目录钉定失败，继续用默认目录:', error)
@@ -230,6 +241,11 @@ const gotLock = THUMB_MODE ? true : app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
 } else {
+  /* GPU / 工具进程退出：闪退里很常见，但默认完全无日志 */
+  app.on('child-process-gone', (_e, details) => {
+    console.error('[pdf] ★子进程退出：', JSON.stringify(details))
+    crashLog('child-process-gone', details)
+  })
   app.on('second-instance', (_event, argv) => {
     const file = extractFileArg(argv)
     if (file) void openFileInWindow(file)
@@ -284,7 +300,11 @@ if (!gotLock) {
    */
   markBootStart()
 
-  void app.whenReady().then(onReady)
+  void /* ★ 2026-11-09 审计：阅读器不需要任何浏览器权限，全部拒绝 */
+app.on('web-contents-created', (_e, contents) => {
+  contents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
+})
+app.whenReady().then(onReady)
 }
 
 app.on('window-all-closed', () => {
@@ -492,6 +512,67 @@ async function runThumbMode(): Promise<void> {
  * 这类问题在打包环境里尤其难查，因此长期保留。
  */
 /* 真·静默更新：包下好了记在这儿，退出时用 /S 装掉，用户全程不点按钮 */
+/**
+ * 清掉用完的插页工作副本。
+ *
+ * ★ 审计 P1：插页/删页会把整份 PDF 复制到 userData/pages/<sha1>.pdf，
+ *   改完从不删 —— 用一学期能攒出几十 GB；而且最近文件列表里会混进
+ *   这些 pages 下的副本，点开是一份没有名字的文档。
+ *
+ * 策略：保留最近 12 个（够 undo / 回滚用），其余按修改时间删掉，
+ * 连带删掉同名的 .name 旁注文件。启动时跑一次，不占运行时开销。
+ */
+function prunePageCopies(keep = 12): void {
+  try {
+    const dir = join(app.getPath('userData'), 'pages')
+    if (!existsSync(dir)) return
+    const items = readdirSync(dir)
+      .filter((n) => n.endsWith('.pdf'))
+      .map((n) => {
+        const full = join(dir, n)
+        return { full, at: statSync(full).mtimeMs }
+      })
+      .sort((x, y) => y.at - x.at)
+    for (const item of items.slice(keep)) {
+      try {
+        rmSync(item.full, { force: true })
+        rmSync(item.full + '.name', { force: true })
+      } catch {
+        /* 删不掉就算了，下次启动再试 */
+      }
+    }
+  } catch {
+    /* 清理失败不影响启动 */
+  }
+}
+
+
+/**
+ * 主进程兜底：未捕获异常与未处理的 Promise 拒绝。
+ *
+ * ★ 2026-11-09 用户报「容易闪退」。线上包没有控制台，原来的 console.error
+ *   等于把线索丢掉了 —— 现在统一写进 %APPDATA%\秋夕月拾旧-PDF阅读器\crash.log，
+ *   用户下次再遇到，把那个文件发来就能定位。
+ *
+ *   处理策略（2026-11-09 审计 P0-9 修订）：
+ *   未捕获异常意味着「主进程状态可能已经损坏」，继续跑会写坏 settings、
+ *   让窗口/文件句柄错乱。所以记完日志就退出（exit 1），由守护进程决定是否重启；
+ *   未处理的 Promise 拒绝不致命，只记日志。
+ */
+process.on('uncaughtException', (error) => {
+  console.error('[pdf] 未捕获异常：', error)
+  crashLog('uncaughtException', error)
+  try {
+    app.exit(1)
+  } catch {
+    process.exit(1)
+  }
+})
+process.on('unhandledRejection', (reason) => {
+  console.error('[pdf] 未处理的 Promise 拒绝：', reason)
+  crashLog('unhandledRejection', reason instanceof Error ? reason : String(reason))
+})
+
 let stagedInstaller = ''
 
 /*
@@ -504,6 +585,8 @@ let stagedInstaller = ''
 let hasUnsavedWork = false
 
 app.on('before-quit', () => {
+  enteringQuit = true
+  crashLog('before-quit', '用户或更新流程发起退出')
   console.log('[pdf] 生命周期：before-quit')
   if (!stagedInstaller) return
   if (hasUnsavedWork) {
@@ -534,6 +617,18 @@ app.on('before-quit', () => {
     console.log('[update] 静默安装启动失败：', String(error))
   }
 })
+/*
+ * 去掉 Electron 默认菜单。
+ *
+ * ★ 审计 P0-9：默认菜单带 Reload(Ctrl+R)、Toggle DevTools(F12)、Zoom，
+ *   正式包里教师误按 Ctrl+R 会整页重载 —— 未导出的批注在内存里，直接没了。
+ */
+try {
+  Menu.setApplicationMenu(null)
+} catch {
+  /* 菜单模块异常不该拦住启动 */
+}
+
 app.on('will-quit', () => {
   markCleanExit()
   console.log('[pdf] 生命周期：will-quit')
@@ -551,12 +646,43 @@ process.on('exit', (code) => console.log('[pdf] 生命周期：process exit，co
  * 必须在 app ready 之前调用 registerSchemesAsPrivileged（见文件顶部的声明），
  * 否则 fetch 会受 CORS 限制、且不能使用流式响应。
  */
+/*
+ * 协议允许集。
+ *
+ * ★ 2026-11-09 审计 P0-2：协议原先对任意路径 existsSync 后直接 net.fetch，
+ *   而 CSP 里允许了 `connect-src pdf-file:`，于是渲染层一行
+ *   `fetch('pdf-file:///C:/Users/x/AppData/Roaming/.../settings.json')`
+ *   就能把本机任意文件读成 ArrayBuffer 再外发。
+ *   现在只放行「本次进程打开过的文档」与 userData 下的 pages / image-cache。
+ */
+const allowedDocPaths = new Set<string>()
+
+function allowDocPath(p: string): void {
+  if (!p) return
+  allowedDocPaths.add(normalize(resolve(p)).toLowerCase())
+}
+
+function isPathAllowed(p: string): boolean {
+  const full = normalize(resolve(p)).toLowerCase()
+  if (allowedDocPaths.has(full)) return true
+  const ud = normalize(resolve(app.getPath('userData'))).toLowerCase()
+  for (const sub of ['pages', 'image-cache']) {
+    if (full.startsWith(ud + '\\' + sub + '\\')) return true
+  }
+  return false
+}
+
 function registerPdfProtocol(): void {
   protocol.handle('pdf-file', async (request) => {
     const filePath = decodePathFromUrl(request.url)
     if (!filePath) {
       console.warn('[pdf] 协议：无法从 URL 解析路径 →', request.url)
       return new Response('bad request', { status: 400 })
+    }
+    if (!isPathAllowed(filePath)) {
+      console.warn('[pdf] 协议：路径不在允许集内，已拒绝')
+      crashLog('protocol-path-blocked', filePath)
+      return new Response('forbidden', { status: 403 })
     }
 
     const exists = existsSync(filePath)
@@ -727,6 +853,12 @@ let contentReady = false
 let onboardingWindow: BrowserWindow | null = null
 /** 向导是否已经收尾（走完或关闭），防止 closed 事件重复拉起主窗口 */
 let onboardingSettled = false
+
+/** 是否已进入退出流程（用来判断窗口 close 是正常退出还是异常） */
+let enteringQuit = false
+
+/** 上一次因渲染进程崩溃而重载的时间（防止崩溃循环） */
+let lastRendererReloadAt = 0
 
 /**
  * 把主窗口带到前台。
@@ -1086,17 +1218,56 @@ function createMainWindow(): void {
    */
   mainWindow.webContents.on('render-process-gone', (_e, details) => {
     console.error('[pdf] ★渲染进程退出：', JSON.stringify(details))
+    crashLog('render-process-gone', details)
+    /* 崩溃后自动重载一次：用户看到的是「闪一下恢复」，而不是白窗口。
+       反复崩溃时不无限重载——60 秒内只救一次。 */
+    const now = Date.now()
+    if (now - lastRendererReloadAt > 60_000) {
+      lastRendererReloadAt = now
+      crashLog('render-process-reload', '尝试重载渲染层')
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reload()
+      }, 400)
+    }
   })
   mainWindow.webContents.on('unresponsive', () => {
     console.error('[pdf] ★渲染进程无响应')
+    crashLog('renderer-unresponsive')
   })
   mainWindow.webContents.on('preload-error', (_e, preloadPath, error) => {
     console.error('[pdf] ★preload 出错：', preloadPath, error)
+    crashLog('preload-error', { preloadPath, error: String(error) })
   })
-  mainWindow.on('unresponsive', () => console.error('[pdf] ★窗口无响应'))
+  mainWindow.on('unresponsive', () => {
+    console.error('[pdf] ★窗口无响应')
+    crashLog('window-unresponsive')
+  })
   mainWindow.on('responsive', () => console.log('[pdf] 窗口恢复响应'))
+  /* 窗口自己关掉时，至少留下一条「是谁关的」 */
+  mainWindow.on('close', () => crashLog('window-close', enteringQuit ? '进入退出流程' : '非退出流程（可能是崩溃或外部关闭）'))
+  mainWindow.on('closed', () => crashLog('window-closed'))
 
   // 拦截外部链接，用系统浏览器打开而不是在阅读器里导航
+  /* ★ 2026-11-09 审计 P0-4：没有 will-navigate 时，窗口一旦被导航到远程页，
+     注入过的 preload 仍然在，远程页面可以直接调 plugin:install-path 等 IPC。
+     这里只允许 file:// 自有页面，其余一律拦下；同时拒绝 webview 挂载与一切权限申请。 */
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!url.startsWith('file://')) {
+      event.preventDefault()
+      crashLog('nav-blocked', url)
+    }
+  })
+  mainWindow.webContents.on('will-attach-webview', (event) => {
+    event.preventDefault()
+    crashLog('webview-blocked', 'will-attach-webview')
+  })
+  /* ★ 审计 P0-9：屏蔽 F12 / Ctrl+Shift+I，避免正式包被打开调试面板改状态 */
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    const key = (input.key || '').toLowerCase()
+    const devtoolsCombo = input.control && input.shift && (key === 'i' || key === 'j' || key === 'c')
+    if (key === 'f12' || devtoolsCombo) event.preventDefault()
+  })
+
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/i.test(url)) void shell.openExternal(url)
     return { action: 'deny' }
@@ -1394,6 +1565,38 @@ function imageToPdfFile(source: string): Promise<string> {
 }
 
 /* 同文件夹图片最多收录多少张：太多会拖慢首次打开，40 张够一个课件的配图量 */
+/**
+ * `pdf:open-external` 允许交给系统打开的后缀白名单。
+ *
+ * 只放「文档 / 图片 / 音视频」这类双击不会执行代码的类型。
+ * 特别注意不要放 .exe .lnk .bat .cmd .ps1 .vbs .js .msi .scr .com ——
+ * 那些等于把任意代码执行交给调用方。
+ */
+/** 是否带着自动化测试钩子启动（决定是否接受渲染层指定输出路径） */
+const TEST_HOOKS = process.argv.includes('--test-hooks')
+
+/* 允许写入/打开的目录：用户主目录、文档、桌面、下载、userData */
+function isInsideUserWritable(p: string): boolean {
+  const full = normalize(resolve(p)).toLowerCase()
+  const bases = [
+    app.getPath('userData'),
+    app.getPath('documents'),
+    app.getPath('desktop'),
+    app.getPath('downloads'),
+    app.getPath('home')
+  ]
+  return bases.some((b) => {
+    const base = normalize(resolve(b)).toLowerCase()
+    return full === base || full.startsWith(base + '\\')
+  })
+}
+
+const OPENABLE_EXTS = new Set([
+  '.pdf', '.txt', '.md', '.csv', '.json',
+  '.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.ico', '.tif', '.tiff',
+  '.mp4', '.mp3', '.wav', '.ogg',
+  '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'
+])
 const IMAGE_BUNDLE_MAX = 40
 
 /** 解码一张图，带「渲染进程 canvas → WIC」两级兜底 */
@@ -1866,6 +2069,9 @@ async function openFileInWindow(filePath: string): Promise<OpenResult> {
  * （文件关联监听器 + 拖放可能对同一次操作各触发一遍）。
  */
 function sendOpenToRenderer(abs: string, size: number, title?: string, page?: number): void {
+  /* 登记到协议允许集：只有真正打开过的文档才允许经 pdf-file:// 读取 */
+  allowDocPath(abs)
+
   if (!mainWindow || mainWindow.isDestroyed()) return
   const now = Date.now()
   if (abs === lastSentPath && now - lastSentAt < SEND_DEDUPE_MS) {
@@ -1905,7 +2111,478 @@ function flushPendingOpens(): void {
  * IPC
  * ============================================================ */
 
+/**
+ * 其余 IPC handler（从 registerIpc 里拆出来的历史代码）。
+ *
+ * ★ 2026-11-09 修复插页副本清理时误把这一段移到了模块级，导致括号失衡、
+ *   整个主进程文件语法错误。这里包成函数，跟 registerIpc() 一起调用，
+ *   顺序不变（先 registerIpc 注册前半段，再注册这一段）。
+ */
+function registerIpcRest(): void {
+  ipcMain.handle('app:info', () => appVersionInfo())
+
+    /* ---------- 版本更新 ---------- */
+
+    /**
+     * 查最新版本。
+     *
+     * 走镜像站（见 src/main/updater.ts），返回结构化结果而不是抛异常：
+     * 断网/镜像挂了都只是「查不到」，界面据此显示一句话即可。
+     */
+    ipcMain.handle('app:update-check', async () => {
+      const result = await checkForUpdate(undefined, getSettings().updateChannel ?? 'auto')
+      console.log(
+        `[update] 检查完成（${result.source ?? '未知通道'}）：本地 ${result.current}，远端 ${result.latest}` +
+          (result.newer ? '（有新版本）' : result.ok ? '（已是最新）' : `（${result.error}）`)
+      )
+      return result
+    })
+
+    /* ---------- 插件市场（主题扩展包） ---------- */
+
+    /**
+     * 拉取插件市场清单。
+     *
+     * 只做一件事：GET 镜像站的 `/contact/plugins.php`，把 JSON 原样交给渲染层。
+     * 校验放在渲染层做（它是纯展示逻辑），主进程只负责「别让渲染层直接连外网」。
+     * 结果缓存 10 分钟：用户来回开关面板不该反复打服务器。
+     */
+    /**
+     * 更新前备份用户数据。
+     *
+     * 「更新时保存历史数据」的落点：settings.json 里有主题、背景图路径、
+     * 界面缩放、快捷键开关等全部偏好，阅读位置也在同一个文件里，
+     * 所以备份这一个文件就够；再带上 customThemes 里引用的背景图副本。
+     * 备份目录按时间戳分，保留最近 10 份，避免无限长大。
+     */
+    ipcMain.handle('app:update-backup', async () => {
+      try {
+        const dir = app.getPath('userData')
+        const root = join(dir, 'backups')
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+        const target = join(root, `update-${stamp}`)
+        mkdirSync(target, { recursive: true })
+        let copied = 0
+        for (const name of ['settings.json', 'positions.json', 'reading-positions.json']) {
+          const from = join(dir, name)
+          try {
+            copyFileSync(from, join(target, name))
+            copied += 1
+          } catch {
+            /* 文件不存在是正常的：不是每个版本都写这几个文件 */
+          }
+        }
+        const entries = (() => {
+          try {
+            return readdirSync(root, { withFileTypes: true })
+          } catch {
+            return []
+          }
+        })()
+        const olds = entries
+          .filter((e) => e.isDirectory() && e.name.startsWith('update-'))
+          .map((e) => e.name)
+          .sort()
+        for (const name of olds.slice(0, Math.max(0, olds.length - 10))) {
+          rmSync(join(root, name), { recursive: true, force: true })
+        }
+        console.log(`[update] 已备份用户数据 ${copied} 个文件 → ${target}`)
+        return { ok: true, dir: target, files: copied }
+      } catch (error) {
+        console.error('[update] 备份用户数据失败', error)
+        return { ok: false, error: (error as Error).message }
+      }
+    })
+
+    /** 测试挂钩：替换市场源（不联网、只改内存） */
+    ipcMain.handle('market:set-sources', (_e, list: unknown) => {
+      if (!process.argv.includes('--test-hooks')) {
+        console.warn('[market] 拒绝了源替换：未带 --test-hooks')
+        return false
+      }
+      if (!Array.isArray(list)) return false
+      const next = list
+        .map((one) => one as { name?: unknown; url?: unknown })
+        .filter((one) => typeof one?.name === 'string' && typeof one?.url === 'string')
+        .map((one) => ({ name: String(one.name), url: String(one.url) }))
+      MARKET_SOURCES = next.length > 0 ? next : null
+      MARKET_CACHE = null
+      console.log(`[market] 源已替换为 ${next.map((s) => s.name).join(', ') || '默认'}`)
+      return true
+    })
+
+    /** 测试挂钩：清掉 10 分钟缓存，让下一次 market:list 真的重新拉 */
+    ipcMain.handle('market:clear-cache', () => {
+      MARKET_CACHE = null
+      return true
+    })
+
+    ipcMain.handle('market:list', async (_e, prefer?: unknown) => {
+      const now = Date.now()
+      /*
+       * 偏好在缓存键里 —— 否则用户把「GitHub / 镜像」切过来，10 分钟内仍然拿到
+       * 上一个源的清单，看着像开关没反应。
+       */
+      const preferKey = prefer === 'mirror' ? 'mirror' : 'github'
+      if (MARKET_CACHE && MARKET_CACHE.sourceKey === preferKey && now - MARKET_CACHE.at < 10 * 60_000) {
+        return MARKET_CACHE.value
+      }
+
+      /*
+       * 两个源，同一份 schema，偏好只决定「先问谁」：
+       *   ① 用户选的那个源；
+       *   ② 另一个源兜底（镜像站被墙 / GitHub 被墙时都还能用）。
+       * 任一成功就返回；两个都失败才报错（文案合并两边的失败原因）。
+       * 测试挂钩 MARKET_SOURCES 一旦设置，就完全替换这份列表（离线用例要可控）。
+       */
+      const preferred = MARKET_SOURCE_LIST.find((s) => s.name === preferKey)
+      const other = MARKET_SOURCE_LIST.find((s) => s.name !== preferKey)
+      const sources = MARKET_SOURCES ?? (preferred && other ? [preferred, other] : [...MARKET_SOURCE_LIST])
+
+      const errors: string[] = []
+      for (const source of sources) {
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 8000)
+        try {
+          const res = await net.fetch(source.url, { signal: controller.signal })
+          if (!res.ok) {
+            errors.push(`${source.name} ${res.status}`)
+            continue
+          }
+          const json = (await res.json()) as { items?: unknown[] }
+          const items = Array.isArray(json.items) ? json.items : []
+          const value = { ok: true, items, at: now, source: source.name }
+          MARKET_CACHE = { at: now, sourceKey: preferKey, value }
+          console.log(`[market] 清单 ${items.length} 项（来源 ${source.name}）`)
+          return value
+        } catch (error) {
+          const aborted = (error as Error)?.name === 'AbortError'
+          errors.push(`${source.name} ${aborted ? '超时' : '连不上'}`)
+        } finally {
+          clearTimeout(timer)
+        }
+      }
+
+      return { ok: false, error: `市场不可用（${errors.join(' / ')}）`, items: [] }
+    })
+
+    /** 当前版本号（界面显示用，不触发网络） */
+
+    ipcMain.handle('app:update-current', () => currentVersion())
+
+    /**
+     * 下载安装包。进度用 send 推给渲染层，避免 IPC invoke 一直挂着。
+     * 下载是长任务（约 100 MB），这里不设超时 —— 由用户取消或断网结束。
+     */
+    ipcMain.handle('app:update-download', async (event, asset: unknown) => {
+      const item = asset as {
+        name?: string
+        size?: number
+        url?: string
+        sha256?: string
+        token?: string
+        source?: string
+      }
+      if (!item || typeof item.url !== 'string' || typeof item.name !== 'string') {
+        return { ok: false, error: '下载信息不完整' }
+      }
+      const result = await downloadUpdate(
+        {
+          name: item.name,
+          size: Number(item.size ?? 0),
+          url: item.url,
+          sha256: item.sha256,
+          token: item.token,
+          source: item.source as never
+        },
+        (p) => {
+          if (event.sender.isDestroyed()) return
+          event.sender.send('app:update-progress', p)
+        }
+      )
+      console.log(`[update] 下载${result.ok ? '完成' : '失败'}：${result.path ?? result.error}`)
+      return result
+    })
+
+    /**
+     * 打开下载好的安装包（用系统默认方式，装不装由用户决定）。
+     *
+     * ★ 装之前先把用户数据备份一份（v1.0.5.0）：
+     *   设置、阅读位置、最近列表、背景图都在 userData 里，装机/回滚时最容易丢；
+     *   这里在打开安装包之前拷到 `userData/update-backups/<版本>-<时间>/`，
+     *   只保留最近 3 份，避免越攒越多。备份失败不影响安装（只打个日志）。
+     */
+    ipcMain.handle('app:update-install', (_e, path: unknown) => {
+      const target = String(path ?? '')
+      if (!target) return installUpdate(target)
+      try {
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+        const version = currentVersion()
+        const dir = join(app.getPath('userData'), 'update-backups')
+        mkdirSync(dir, { recursive: true })
+        const dest = join(dir, `${version}-${stamp}`)
+        mkdirSync(dest, { recursive: true })
+        let copied = 0
+        for (const name of ['settings.json', 'positions.json', 'recent.json']) {
+          const src = join(app.getPath('userData'), name)
+          if (!existsSync(src)) continue
+          copyFileSync(src, join(dest, name))
+          copied += 1
+        }
+        const bgDir = join(app.getPath('userData'), 'backgrounds')
+        if (existsSync(bgDir)) {
+          cpSync(bgDir, join(dest, 'backgrounds'), { recursive: true })
+        }
+        // 只留最近 3 份
+        const keep = readdirSync(dir)
+          .filter((name) => !name.endsWith('.txt'))
+          .sort()
+          .slice(-3)
+        for (const name of readdirSync(dir)) {
+          if (!keep.includes(name)) rmSync(join(dir, name), { recursive: true, force: true })
+        }
+        writeFileSync(
+          join(dest, 'README.txt'),
+          `升级前自动备份\n版本：${version}\n时间：${new Date().toISOString()}\n内容：${copied} 个 json（设置 / 阅读位置 / 最近列表）\n`,
+          'utf8'
+        )
+        console.log(`[update] 升级前已备份用户数据 → ${dest}（${copied} 个文件）`)
+      } catch (error) {
+        console.warn('[update] 备份用户数据失败（不影响安装）：', error)
+      }
+      return installUpdate(target)
+    })
+
+    /** 在浏览器里打开 release 页面，供用户自己看说明/手动下载 */
+    ipcMain.handle('app:update-open-page', (_e, url: unknown) => {
+      const target = String(url ?? '')
+      if (!/^https:\/\//i.test(target)) return false
+      void shell.openExternal(target)
+      return true
+    })
+
+    /*
+     * ---------- PDF 工具箱 ----------
+     * 合并 / 拆分 / 水印 / 压缩 / 加解密 / 图片互转 / Office→PDF。
+     * 实现集中在 src/main/pdf-tools.ts；这里只把「当前窗口」的取值函数交过去。
+     */
+    registerPdfToolsIpc(() => mainWindow)
+
+    /*
+     * ---------- 文档编辑（进阶） ----------
+     * 页面整理 / 页眉页脚 / 贝茨编号 / 元数据 / 书签 / 附件 / 表单 / 签名 /
+     * PDF/A / 安全遮盖 / 导出 Word、Excel / 对比 / 打印。
+     * 实现集中在 src/main/pdf-advanced.ts。
+     */
+    registerPdfAdvancedIpc(() => mainWindow)
+
+    /*
+     * ---------- 图片工具 ----------
+     * 编辑 / 调色 / 滤镜 / 格式转换 / 批量压缩。
+     * 像素运算在渲染层（ImageToolsPanel）用 canvas 做，
+     * 落盘与安全校验集中在 src/main/image-tools.ts。
+     */
+    registerImageToolsIpc(() => mainWindow)
+
+    /*
+     * ---------- 插件宿主（2.0.0） ----------
+     * 第三方插件的安装 / 启停 / 命令执行都在 src/main/plugins.ts。
+     * 插件跑在主进程的 vm 沙箱里（用户选的），权限靠清单声明 + 运行时闸门。
+     * 这里注册完通道后立刻加载已启用的插件，命令会出现在上栏「工具」的「插件」组。
+     */
+    registerPluginIpc()
+
+/*
+ * 插件生成的 PDF 要交给应用打开，但 broker 不能直接 import 本文件（循环依赖）。
+ * 这里把「打开一份 PDF」的实现登记过去，插件侧调 api.pdf.createFromText 时走这条路。
+ */
+setPdfOpenHandler(async (filePath: string) => {
+  await openFileInWindow(filePath)
+})
+    loadPlugins()
+
+    /*
+     * 连续启动失败就主动问一句要不要回滚（B13）。
+     * 放在窗口创建之前：界面可能根本起不来，提示必须比渲染层更早。
+     */
+    void askRollbackIfUnstable()
+
+    /* ---------- 回滚（2.0.0 / B13） ---------- */
+    ipcMain.handle('rollback:list', () => listRollback())
+    ipcMain.handle('rollback:apply', (_e, version: unknown) =>
+      typeof version === 'string' ? rollbackTo(version) : { ok: false, error: '版本号不合法' }
+    )
+    ipcMain.handle('rollback:boot-ok', () => {
+      markBootOk()
+      return true
+    })
+    ipcMain.handle('rollback:failures', () => bootFailures())
+
+    /**
+     * 标签页切换时同步窗口标题。
+     *
+     * 不做的话，切到第二个文件后任务栏/Alt+Tab 里还写着第一个文件名，
+     * 对「一个窗口多个文件」的浏览器式用法来说很别扭。
+     */
+    ipcMain.on('doc:active', (_e, filePath: unknown) => {
+      if (!mainWindow || mainWindow.isDestroyed()) return
+      /*
+       * ★ 审计 P3：页面结构编辑打开的是 userData/pages/<sha1>.pdf 工作副本，
+       *   直接 basename 会让任务栏显示一串哈希名。workCopyTitle 会翻出原始文件名。
+       */
+      const name =
+        typeof filePath === 'string' && filePath
+          ? (workCopyTitle(resolve(filePath)) ?? basename(filePath))
+          : ''
+      mainWindow.setTitle(name ? `${name} - 秋夕-PDF阅读器` : '秋夕-PDF阅读器')
+    })
+
+    /* ---------- 导出：把批注烘焙成新 PDF ---------- */
+
+    /**
+     * 把渲染层画好的「批注图层」烘焙进一份**新** PDF（原文件一个字节都不动）。
+     *
+     * ── 为什么用位图而不是矢量 ─────────────────────────────────
+     *   · 文本框/图片/涂白/笔迹本来就是渲染层用 canvas 画的，同一套
+     *     绘制代码再往离屏 canvas 上画一遍，所见即所得，不会出现
+     *     「界面上是这样、导出后错位」的经典问题；
+     *   · 走矢量就得嵌入中文字体（pdf-lib 内置标准字体不含 CJK），
+     *     还要自己处理换行、字距、下划线 —— 代码量和出错面都大得多。
+     *   代价：导出的批注是位图，不能在别的软件里再编辑/搜索。
+     *   这个取舍在界面上有说明（导出对话框的提示语）。
+     *
+     * ── 为什么不需要旋转补偿 ───────────────────────────────────
+     *   渲染层保证每张 PNG 都在**未旋转**的页面框坐标系里绘制，
+     *   尺寸与 pdf-lib 的 page.getSize() 一致，所以这里直接铺满整页。
+     *
+     * ── 为什么禁止覆盖原文件 ───────────────────────────────────
+     *   导出是「另存为」语义：源文件可能正被别的程序占用，
+     *   写回原路径要么失败要么把用户的原稿改掉，都不合适。
+     */
+    ipcMain.handle('pdf:export', async (_e, payload: ExportPayload) => {
+      try {
+        if (!payload || typeof payload.sourcePath !== 'string' || !existsSync(payload.sourcePath)) {
+          return { ok: false, error: '源文件不存在' }
+        }
+
+        /*
+         * ★ 2026-11-09 审计 P0-3：targetPath 来自渲染层，原先有值就直接 writeFile，
+         *   等于「任意路径写入」（可覆盖 settings.json、别的文档、可写的系统目录）。
+         *   现在只有自动化测试（--test-hooks）才接受，且必须落在用户可写目录内。
+         */
+        let target = ''
+        if (typeof payload.targetPath === 'string' && payload.targetPath) {
+          if (!TEST_HOOKS) return { ok: false, error: '不允许指定输出路径' }
+          const candidate = resolve(payload.targetPath)
+          if (!isInsideUserWritable(candidate)) {
+            crashLog('export-path-rejected', candidate)
+            return { ok: false, error: '输出路径不在允许目录内' }
+          }
+          target = candidate
+        }
+        if (!target) {
+          const result = await dialog.showSaveDialog(mainWindow ?? undefined!, {
+            title: '导出为 PDF',
+            defaultPath:
+              payload.defaultName ??
+              `${basename(payload.sourcePath, extname(payload.sourcePath))}-已批注.pdf`,
+            filters: [{ name: 'PDF 文档', extensions: ['pdf'] }]
+          })
+          if (result.canceled || !result.filePath) return { ok: false, canceled: true }
+          target = result.filePath
+        }
+
+        if (resolve(target) === resolve(payload.sourcePath)) {
+          return { ok: false, error: '不能覆盖原文件，请换一个文件名' }
+        }
+
+        const pdfDoc = await PDFDocument.load(readFileSync(payload.sourcePath), {
+          ignoreEncryption: true
+        })
+        const total = pdfDoc.getPageCount()
+        const list = Array.isArray(payload.pages) ? payload.pages : []
+
+        let baked = 0
+        for (const item of list) {
+          const index = Math.max(0, Math.min(total - 1, Math.floor(item.page) - 1))
+          const bytes = item.data instanceof Uint8Array ? item.data : new Uint8Array(item.data)
+          if (bytes.byteLength === 0) continue
+          const png = await pdfDoc.embedPng(bytes)
+          const page = pdfDoc.getPage(index)
+          const { width, height } = page.getSize()
+          page.drawImage(png, { x: 0, y: 0, width, height })
+          baked++
+        }
+
+        await writeFile(target, await pdfDoc.save())
+        console.log(`[pdf] 导出完成：${target}（${baked} 页批注图层 / 共 ${total} 页）`)
+        return { ok: true, path: target, baked, pages: total }
+      } catch (error) {
+        console.error('[pdf] 导出失败:', error)
+        return { ok: false, error: String(error) }
+      }
+    })
+
+    /* ---------- 在系统文件管理器中定位 ---------- */
+
+    ipcMain.handle('pdf:reveal', (_e, filePath: string) => {
+      shell.showItemInFolder(resolve(filePath))
+      return true
+    })
+
+    /* ---------- 用系统默认程序打开（便于对照） ---------- */
+
+    /*
+     * 用系统默认程序打开一个文件。
+     *
+     * ★ 安全：这个接口以前是「渲染层给什么路径就 openPath 什么」，
+     *   等于把「执行任意程序」的能力借给了渲染层 —— 一旦渲染层被 XSS
+     *   或恶意插件碰到，传个 .exe / .lnk / .bat 就是任意代码执行。
+     *   现在只允许「已存在的、常见文档/图片后缀」，且必须在用户目录或
+     *   当前打开的文档目录下；可执行类后缀一律拒绝。
+     */
+    ipcMain.handle('pdf:open-external', async (_e, filePath: unknown) => {
+      if (typeof filePath !== 'string' || !filePath) return false
+      let target: string
+      try {
+        target = resolve(filePath)
+      } catch {
+        return false
+      }
+      if (!existsSync(target)) return false
+
+      const ext = extname(target).toLowerCase()
+      /*
+       * ★ 2026-11-09 审计 P0-3：openPath 之前对任意路径直接交给系统 Shell，
+       *   传一个 .exe 就是执行。这里除了后缀白名单，还要求文件在用户可写目录内，
+       *   并且必须是真实存在的普通文件（防符号链接/目录）。
+       */
+      /* 必须是普通文件：目录 / 设备 / 符号链接一律不交给 Shell */
+      let stat: import('node:fs').Stats
+      try {
+        stat = statSync(target)
+      } catch {
+        return false
+      }
+      if (!stat.isFile()) return false
+      if (!isInsideUserWritable(target)) {
+        crashLog('open-external-path-rejected', target)
+        return false
+      }
+      if (!OPENABLE_EXTS.has(ext)) {
+        crashLog('open-external-blocked', `被拒绝的后缀 ${ext}`)
+        return false
+      }
+
+      const error = await shell.openPath(target)
+      return error === ''
+    })
+}
+
 function registerIpc(): void {
+  /* 后半段 handler（app:info 起）在 registerIpcRest 里，定义在本函数内部，声明提升可用 */
+  registerIpcRest()
+
   /*
    * 渲染层回报「我已经挂好 pdf:open 监听了」。
    *
@@ -2064,6 +2741,30 @@ function registerIpc(): void {
    * 单独开一个 handler 而不是复用 pdf:settings-patch，是因为它还要负责
    * 「写完之后关掉向导窗口、把主窗口建起来」这一步副作用。
    */
+  /*
+   * 渲染层异常上报。
+   *
+   * 渲染进程里 window.onerror / unhandledrejection 抓到的错误，
+   * 通过这里落到同一个 crash.log —— 否则渲染层崩溃在打包版里什么都不留。
+   * 只收 message / stack / 来源，不收文档内容。
+   */
+  ipcMain.handle('app:report-error', (_e, payload: unknown) => {
+    try {
+      const p = (payload ?? {}) as Record<string, unknown>
+      crashLog('renderer-' + String(p['kind'] ?? 'error'), {
+        message: String(p['message'] ?? ''),
+        stack: String(p['stack'] ?? ''),
+        source: String(p['source'] ?? ''),
+        line: Number(p['line'] ?? 0) || 0
+      })
+    } catch {
+      /* 日志失败不影响渲染层 */
+    }
+    return true
+  })
+
+  /* 设置页要展示「日志在哪」，顺便给字节数，方便判断有没有内容 */
+  ipcMain.handle('app:crash-log', () => ({ path: crashLogPath(), bytes: crashLogBytes() }))
   ipcMain.handle('app:onboarding-apply', (_e, patch: Record<string, unknown>) => {
     const next = patchSettings(patch as never)
     if (next.onboarded) finishOnboarding()
@@ -2111,18 +2812,80 @@ function registerIpc(): void {
    * 保留通道是为了不改动渲染层结构（它仍按「有后端」的方式调用），
    * 以后若恢复持久化，改这里即可。
    */
-  ipcMain.handle('pdf:anno-list', () => [])
+  /*
+   * ---------- 批注持久化 ----------
+   *
+   * ★ 2026-11-09 审计 P1-4：这里原先全是「返回空数组」的桩函数，
+   *   而 README 三处承诺「批注随文档自动保存、异常退出后可恢复」。
+   *   实际是崩溃/断电/误关窗 = 全部手写笔迹消失，这是本应用最高频的数据丢失。
+   *
+   *   现在按文档路径的 sha1 存到 userData/annos/<hash>.json，写入走
+   *   临时文件 + rename，避免写一半断电留下半截 JSON。
+   */
+  const annoFile = (filePath: string): string => {
+    const key = createHash('sha1').update(resolve(filePath).toLowerCase()).digest('hex').slice(0, 16)
+    return join(app.getPath('userData'), 'annos', key + '.json')
+  }
 
-  // 追加/修改：原样回显传入的那一条，让渲染层能拿到统一的返回值
-  ipcMain.handle('pdf:anno-add', (_e, _filePath: string, item: Annotation) => [item])
-  ipcMain.handle(
-    'pdf:anno-update',
-    (_e, _filePath: string, id: string, patch: Partial<Annotation>) => [{ ...patch, id }]
+  const readAnnos = (filePath: string): Annotation[] => {
+    try {
+      const file = annoFile(filePath)
+      if (!existsSync(file)) return []
+      const data = JSON.parse(readFileSync(file, 'utf8')) as { items?: Annotation[] }
+      return Array.isArray(data.items) ? data.items : []
+    } catch {
+      return []
+    }
+  }
+
+  const writeAnnos = (filePath: string, items: Annotation[]): boolean => {
+    try {
+      const file = annoFile(filePath)
+      mkdirSync(dirname(file), { recursive: true })
+      const tmp = file + '.tmp'
+      writeFileSync(tmp, JSON.stringify({ file: basename(filePath), savedAt: Date.now(), items }))
+      renameSync(tmp, file)
+      return true
+    } catch (error) {
+      crashLog('anno-save-failed', error as Error)
+      return false
+    }
+  }
+
+  ipcMain.handle('pdf:anno-list', (_e, filePath: string) =>
+    typeof filePath === 'string' && filePath ? readAnnos(filePath) : []
   )
 
-  // 删除/清空：不保存也就无从谈起，直接回空列表
-  ipcMain.handle('pdf:anno-remove', () => [])
-  ipcMain.handle('pdf:anno-clear', () => [])
+  ipcMain.handle('pdf:anno-add', (_e, filePath: string, item: Annotation) => {
+    const next = [...readAnnos(filePath), item]
+    writeAnnos(filePath, next)
+    return next
+  })
+  ipcMain.handle(
+    'pdf:anno-update',
+    (_e, filePath: string, id: string, patch: Partial<Annotation>) => {
+      const next = readAnnos(filePath).map((a) => (a.id === id ? { ...a, ...patch } : a))
+      writeAnnos(filePath, next)
+      return next
+    }
+  )
+  ipcMain.handle('pdf:anno-remove', (_e, filePath: string, id: string) => {
+    const next = readAnnos(filePath).filter((a) => a.id !== id)
+    writeAnnos(filePath, next)
+    return next
+  })
+  ipcMain.handle('pdf:anno-clear', (_e, filePath: string) => {
+    writeAnnos(filePath, [])
+    return []
+  })
+
+  /* 全量覆盖：渲染层撤销/重做后一次性同步，避免逐条 IPC */
+  ipcMain.handle('pdf:anno-replace', (_e, filePath: string, items: Annotation[]) => {
+    if (typeof filePath !== 'string' || !filePath) return []
+    const list = Array.isArray(items) ? items : []
+    writeAnnos(filePath, list)
+    return list
+  })
 
   /* ---------- 窗口控制（自绘标题栏需要） ---------- */
 
@@ -2341,11 +3104,49 @@ ipcMain.handle('app:update-dirty', (_e, dirty: unknown) => {
   hasUnsavedWork = Boolean(dirty)
   return true
 })
+/* 安装包只允许落在 userData/updates 下（updater 的下载目录） */
+function isStagedInstallerPath(target: string): boolean {
+  try {
+    if (!target.toLowerCase().endsWith('.exe')) return false
+    const dir = resolve(join(app.getPath('userData'), 'updates'))
+    const full = resolve(target)
+    return full === dir || full.startsWith(dir + sep)
+  } catch {
+    return false
+  }
+}
+
 ipcMain.handle('app:update-stage', (_e, path: unknown) => {
+  /*
+   * ★ 安全审计 P0：原先只校验 .exe 后缀，渲染层可让任意程序在退出时被 /S 静默安装。
+   *   现在只接受 userData/updates 内的文件；before-quit 执行前再校验一次。
+   */
   const target = String(path ?? '')
-  if (!/\\.exe$/i.test(target)) return { ok: false, error: '安装包路径不合法' }
+  if (!isStagedInstallerPath(target)) {
+    crashLog('update-stage-rejected', '路径不在 updates 目录内')
+    return { ok: false, error: '安装包路径不合法' }
+  }
   stagedInstaller = target
   return { ok: true }
+})
+/**
+ * 打开网址（PDF 里的外部链接）。
+ *
+ * ★ 审计 P3：PDF 内链点了没反应，用户以为软件坏了。
+ *   只放行 http/https —— file:/ms-settings:/search-ms: 这些交给 shell
+ *   就是任意本地文件或系统设置被打开，等于把 shell 借给渲染层。
+ */
+ipcMain.handle('app:open-url', async (_e, url: unknown) => {
+  if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
+    crashLog('open-url-blocked', String(url).slice(0, 120))
+    return { ok: false, error: '只支持 http/https 链接' }
+  }
+  try {
+    await shell.openExternal(url)
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, error: String(error) }
+  }
 })
 
 ipcMain.handle('app:open-default-apps', async () => {
@@ -2356,397 +3157,4 @@ ipcMain.handle('app:open-default-apps', async () => {
     return { ok: false, err: String(error) }
   }
 })
-ipcMain.handle('app:info', () => appVersionInfo())
-
-  /* ---------- 版本更新 ---------- */
-
-  /**
-   * 查最新版本。
-   *
-   * 走镜像站（见 src/main/updater.ts），返回结构化结果而不是抛异常：
-   * 断网/镜像挂了都只是「查不到」，界面据此显示一句话即可。
-   */
-  ipcMain.handle('app:update-check', async () => {
-    const result = await checkForUpdate(undefined, getSettings().updateChannel ?? 'auto')
-    console.log(
-      `[update] 检查完成（${result.source ?? '未知通道'}）：本地 ${result.current}，远端 ${result.latest}` +
-        (result.newer ? '（有新版本）' : result.ok ? '（已是最新）' : `（${result.error}）`)
-    )
-    return result
-  })
-
-  /* ---------- 插件市场（主题扩展包） ---------- */
-
-  /**
-   * 拉取插件市场清单。
-   *
-   * 只做一件事：GET 镜像站的 `/contact/plugins.php`，把 JSON 原样交给渲染层。
-   * 校验放在渲染层做（它是纯展示逻辑），主进程只负责「别让渲染层直接连外网」。
-   * 结果缓存 10 分钟：用户来回开关面板不该反复打服务器。
-   */
-  /**
-   * 更新前备份用户数据。
-   *
-   * 「更新时保存历史数据」的落点：settings.json 里有主题、背景图路径、
-   * 界面缩放、快捷键开关等全部偏好，阅读位置也在同一个文件里，
-   * 所以备份这一个文件就够；再带上 customThemes 里引用的背景图副本。
-   * 备份目录按时间戳分，保留最近 10 份，避免无限长大。
-   */
-  ipcMain.handle('app:update-backup', async () => {
-    try {
-      const dir = app.getPath('userData')
-      const root = join(dir, 'backups')
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-      const target = join(root, `update-${stamp}`)
-      mkdirSync(target, { recursive: true })
-      let copied = 0
-      for (const name of ['settings.json', 'positions.json', 'reading-positions.json']) {
-        const from = join(dir, name)
-        try {
-          copyFileSync(from, join(target, name))
-          copied += 1
-        } catch {
-          /* 文件不存在是正常的：不是每个版本都写这几个文件 */
-        }
-      }
-      const entries = (() => {
-        try {
-          return readdirSync(root, { withFileTypes: true })
-        } catch {
-          return []
-        }
-      })()
-      const olds = entries
-        .filter((e) => e.isDirectory() && e.name.startsWith('update-'))
-        .map((e) => e.name)
-        .sort()
-      for (const name of olds.slice(0, Math.max(0, olds.length - 10))) {
-        rmSync(join(root, name), { recursive: true, force: true })
-      }
-      console.log(`[update] 已备份用户数据 ${copied} 个文件 → ${target}`)
-      return { ok: true, dir: target, files: copied }
-    } catch (error) {
-      console.error('[update] 备份用户数据失败', error)
-      return { ok: false, error: (error as Error).message }
-    }
-  })
-
-  /** 测试挂钩：替换市场源（不联网、只改内存） */
-  ipcMain.handle('market:set-sources', (_e, list: unknown) => {
-    if (!process.argv.includes('--test-hooks')) {
-      console.warn('[market] 拒绝了源替换：未带 --test-hooks')
-      return false
-    }
-    if (!Array.isArray(list)) return false
-    const next = list
-      .map((one) => one as { name?: unknown; url?: unknown })
-      .filter((one) => typeof one?.name === 'string' && typeof one?.url === 'string')
-      .map((one) => ({ name: String(one.name), url: String(one.url) }))
-    MARKET_SOURCES = next.length > 0 ? next : null
-    MARKET_CACHE = null
-    console.log(`[market] 源已替换为 ${next.map((s) => s.name).join(', ') || '默认'}`)
-    return true
-  })
-
-  /** 测试挂钩：清掉 10 分钟缓存，让下一次 market:list 真的重新拉 */
-  ipcMain.handle('market:clear-cache', () => {
-    MARKET_CACHE = null
-    return true
-  })
-
-  ipcMain.handle('market:list', async (_e, prefer?: unknown) => {
-    const now = Date.now()
-    /*
-     * 偏好在缓存键里 —— 否则用户把「GitHub / 镜像」切过来，10 分钟内仍然拿到
-     * 上一个源的清单，看着像开关没反应。
-     */
-    const preferKey = prefer === 'mirror' ? 'mirror' : 'github'
-    if (MARKET_CACHE && MARKET_CACHE.sourceKey === preferKey && now - MARKET_CACHE.at < 10 * 60_000) {
-      return MARKET_CACHE.value
-    }
-
-    /*
-     * 两个源，同一份 schema，偏好只决定「先问谁」：
-     *   ① 用户选的那个源；
-     *   ② 另一个源兜底（镜像站被墙 / GitHub 被墙时都还能用）。
-     * 任一成功就返回；两个都失败才报错（文案合并两边的失败原因）。
-     * 测试挂钩 MARKET_SOURCES 一旦设置，就完全替换这份列表（离线用例要可控）。
-     */
-    const preferred = MARKET_SOURCE_LIST.find((s) => s.name === preferKey)
-    const other = MARKET_SOURCE_LIST.find((s) => s.name !== preferKey)
-    const sources = MARKET_SOURCES ?? (preferred && other ? [preferred, other] : [...MARKET_SOURCE_LIST])
-
-    const errors: string[] = []
-    for (const source of sources) {
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 8000)
-      try {
-        const res = await net.fetch(source.url, { signal: controller.signal })
-        if (!res.ok) {
-          errors.push(`${source.name} ${res.status}`)
-          continue
-        }
-        const json = (await res.json()) as { items?: unknown[] }
-        const items = Array.isArray(json.items) ? json.items : []
-        const value = { ok: true, items, at: now, source: source.name }
-        MARKET_CACHE = { at: now, sourceKey: preferKey, value }
-        console.log(`[market] 清单 ${items.length} 项（来源 ${source.name}）`)
-        return value
-      } catch (error) {
-        const aborted = (error as Error)?.name === 'AbortError'
-        errors.push(`${source.name} ${aborted ? '超时' : '连不上'}`)
-      } finally {
-        clearTimeout(timer)
-      }
-    }
-
-    return { ok: false, error: `市场不可用（${errors.join(' / ')}）`, items: [] }
-  })
-
-  /** 当前版本号（界面显示用，不触发网络） */
-
-  ipcMain.handle('app:update-current', () => currentVersion())
-
-  /**
-   * 下载安装包。进度用 send 推给渲染层，避免 IPC invoke 一直挂着。
-   * 下载是长任务（约 100 MB），这里不设超时 —— 由用户取消或断网结束。
-   */
-  ipcMain.handle('app:update-download', async (event, asset: unknown) => {
-    const item = asset as {
-      name?: string
-      size?: number
-      url?: string
-      sha256?: string
-      token?: string
-      source?: string
-    }
-    if (!item || typeof item.url !== 'string' || typeof item.name !== 'string') {
-      return { ok: false, error: '下载信息不完整' }
-    }
-    const result = await downloadUpdate(
-      {
-        name: item.name,
-        size: Number(item.size ?? 0),
-        url: item.url,
-        sha256: item.sha256,
-        token: item.token,
-        source: item.source as never
-      },
-      (p) => {
-        if (event.sender.isDestroyed()) return
-        event.sender.send('app:update-progress', p)
-      }
-    )
-    console.log(`[update] 下载${result.ok ? '完成' : '失败'}：${result.path ?? result.error}`)
-    return result
-  })
-
-  /**
-   * 打开下载好的安装包（用系统默认方式，装不装由用户决定）。
-   *
-   * ★ 装之前先把用户数据备份一份（v1.0.5.0）：
-   *   设置、阅读位置、最近列表、背景图都在 userData 里，装机/回滚时最容易丢；
-   *   这里在打开安装包之前拷到 `userData/update-backups/<版本>-<时间>/`，
-   *   只保留最近 3 份，避免越攒越多。备份失败不影响安装（只打个日志）。
-   */
-  ipcMain.handle('app:update-install', (_e, path: unknown) => {
-    const target = String(path ?? '')
-    if (!target) return installUpdate(target)
-    try {
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-      const version = currentVersion()
-      const dir = join(app.getPath('userData'), 'update-backups')
-      mkdirSync(dir, { recursive: true })
-      const dest = join(dir, `${version}-${stamp}`)
-      mkdirSync(dest, { recursive: true })
-      let copied = 0
-      for (const name of ['settings.json', 'positions.json', 'recent.json']) {
-        const src = join(app.getPath('userData'), name)
-        if (!existsSync(src)) continue
-        copyFileSync(src, join(dest, name))
-        copied += 1
-      }
-      const bgDir = join(app.getPath('userData'), 'backgrounds')
-      if (existsSync(bgDir)) {
-        cpSync(bgDir, join(dest, 'backgrounds'), { recursive: true })
-      }
-      // 只留最近 3 份
-      const keep = readdirSync(dir)
-        .filter((name) => !name.endsWith('.txt'))
-        .sort()
-        .slice(-3)
-      for (const name of readdirSync(dir)) {
-        if (!keep.includes(name)) rmSync(join(dir, name), { recursive: true, force: true })
-      }
-      writeFileSync(
-        join(dest, 'README.txt'),
-        `升级前自动备份\n版本：${version}\n时间：${new Date().toISOString()}\n内容：${copied} 个 json（设置 / 阅读位置 / 最近列表）\n`,
-        'utf8'
-      )
-      console.log(`[update] 升级前已备份用户数据 → ${dest}（${copied} 个文件）`)
-    } catch (error) {
-      console.warn('[update] 备份用户数据失败（不影响安装）：', error)
-    }
-    return installUpdate(target)
-  })
-
-  /** 在浏览器里打开 release 页面，供用户自己看说明/手动下载 */
-  ipcMain.handle('app:update-open-page', (_e, url: unknown) => {
-    const target = String(url ?? '')
-    if (!/^https:\/\//i.test(target)) return false
-    void shell.openExternal(target)
-    return true
-  })
-
-  /*
-   * ---------- PDF 工具箱 ----------
-   * 合并 / 拆分 / 水印 / 压缩 / 加解密 / 图片互转 / Office→PDF。
-   * 实现集中在 src/main/pdf-tools.ts；这里只把「当前窗口」的取值函数交过去。
-   */
-  registerPdfToolsIpc(() => mainWindow)
-
-  /*
-   * ---------- 文档编辑（进阶） ----------
-   * 页面整理 / 页眉页脚 / 贝茨编号 / 元数据 / 书签 / 附件 / 表单 / 签名 /
-   * PDF/A / 安全遮盖 / 导出 Word、Excel / 对比 / 打印。
-   * 实现集中在 src/main/pdf-advanced.ts。
-   */
-  registerPdfAdvancedIpc(() => mainWindow)
-
-  /*
-   * ---------- 图片工具 ----------
-   * 编辑 / 调色 / 滤镜 / 格式转换 / 批量压缩。
-   * 像素运算在渲染层（ImageToolsPanel）用 canvas 做，
-   * 落盘与安全校验集中在 src/main/image-tools.ts。
-   */
-  registerImageToolsIpc(() => mainWindow)
-
-  /*
-   * ---------- 插件宿主（2.0.0） ----------
-   * 第三方插件的安装 / 启停 / 命令执行都在 src/main/plugins.ts。
-   * 插件跑在主进程的 vm 沙箱里（用户选的），权限靠清单声明 + 运行时闸门。
-   * 这里注册完通道后立刻加载已启用的插件，命令会出现在上栏「工具」的「插件」组。
-   */
-  registerPluginIpc()
-  loadPlugins()
-
-  /*
-   * 连续启动失败就主动问一句要不要回滚（B13）。
-   * 放在窗口创建之前：界面可能根本起不来，提示必须比渲染层更早。
-   */
-  void askRollbackIfUnstable()
-
-  /* ---------- 回滚（2.0.0 / B13） ---------- */
-  ipcMain.handle('rollback:list', () => listRollback())
-  ipcMain.handle('rollback:apply', (_e, version: unknown) =>
-    typeof version === 'string' ? rollbackTo(version) : { ok: false, error: '版本号不合法' }
-  )
-  ipcMain.handle('rollback:boot-ok', () => {
-    markBootOk()
-    return true
-  })
-  ipcMain.handle('rollback:failures', () => bootFailures())
-
-  /**
-   * 标签页切换时同步窗口标题。
-   *
-   * 不做的话，切到第二个文件后任务栏/Alt+Tab 里还写着第一个文件名，
-   * 对「一个窗口多个文件」的浏览器式用法来说很别扭。
-   */
-  ipcMain.on('doc:active', (_e, filePath: unknown) => {
-    if (!mainWindow || mainWindow.isDestroyed()) return
-    const name = typeof filePath === 'string' && filePath ? basename(filePath) : ''
-    mainWindow.setTitle(name ? `${name} - 秋夕-PDF阅读器` : '秋夕-PDF阅读器')
-  })
-
-  /* ---------- 导出：把批注烘焙成新 PDF ---------- */
-
-  /**
-   * 把渲染层画好的「批注图层」烘焙进一份**新** PDF（原文件一个字节都不动）。
-   *
-   * ── 为什么用位图而不是矢量 ─────────────────────────────────
-   *   · 文本框/图片/涂白/笔迹本来就是渲染层用 canvas 画的，同一套
-   *     绘制代码再往离屏 canvas 上画一遍，所见即所得，不会出现
-   *     「界面上是这样、导出后错位」的经典问题；
-   *   · 走矢量就得嵌入中文字体（pdf-lib 内置标准字体不含 CJK），
-   *     还要自己处理换行、字距、下划线 —— 代码量和出错面都大得多。
-   *   代价：导出的批注是位图，不能在别的软件里再编辑/搜索。
-   *   这个取舍在界面上有说明（导出对话框的提示语）。
-   *
-   * ── 为什么不需要旋转补偿 ───────────────────────────────────
-   *   渲染层保证每张 PNG 都在**未旋转**的页面框坐标系里绘制，
-   *   尺寸与 pdf-lib 的 page.getSize() 一致，所以这里直接铺满整页。
-   *
-   * ── 为什么禁止覆盖原文件 ───────────────────────────────────
-   *   导出是「另存为」语义：源文件可能正被别的程序占用，
-   *   写回原路径要么失败要么把用户的原稿改掉，都不合适。
-   */
-  ipcMain.handle('pdf:export', async (_e, payload: ExportPayload) => {
-    try {
-      if (!payload || typeof payload.sourcePath !== 'string' || !existsSync(payload.sourcePath)) {
-        return { ok: false, error: '源文件不存在' }
-      }
-
-      let target = typeof payload.targetPath === 'string' ? resolve(payload.targetPath) : ''
-      if (!target) {
-        const result = await dialog.showSaveDialog(mainWindow ?? undefined!, {
-          title: '导出为 PDF',
-          defaultPath:
-            payload.defaultName ??
-            `${basename(payload.sourcePath, extname(payload.sourcePath))}-已批注.pdf`,
-          filters: [{ name: 'PDF 文档', extensions: ['pdf'] }]
-        })
-        if (result.canceled || !result.filePath) return { ok: false, canceled: true }
-        target = result.filePath
-      }
-
-      if (resolve(target) === resolve(payload.sourcePath)) {
-        return { ok: false, error: '不能覆盖原文件，请换一个文件名' }
-      }
-
-      const pdfDoc = await PDFDocument.load(readFileSync(payload.sourcePath), {
-        ignoreEncryption: true
-      })
-      const total = pdfDoc.getPageCount()
-      const list = Array.isArray(payload.pages) ? payload.pages : []
-
-      let baked = 0
-      for (const item of list) {
-        const index = Math.max(0, Math.min(total - 1, Math.floor(item.page) - 1))
-        const bytes = item.data instanceof Uint8Array ? item.data : new Uint8Array(item.data)
-        if (bytes.byteLength === 0) continue
-        const png = await pdfDoc.embedPng(bytes)
-        const page = pdfDoc.getPage(index)
-        const { width, height } = page.getSize()
-        page.drawImage(png, { x: 0, y: 0, width, height })
-        baked++
-      }
-
-      await writeFile(target, await pdfDoc.save())
-      console.log(`[pdf] 导出完成：${target}（${baked} 页批注图层 / 共 ${total} 页）`)
-      return { ok: true, path: target, baked, pages: total }
-    } catch (error) {
-      console.error('[pdf] 导出失败:', error)
-      return { ok: false, error: String(error) }
-    }
-  })
-
-  /* ---------- 在系统文件管理器中定位 ---------- */
-
-  ipcMain.handle('pdf:reveal', (_e, filePath: string) => {
-    shell.showItemInFolder(resolve(filePath))
-    return true
-  })
-
-  /* ---------- 用系统默认程序打开（便于对照） ---------- */
-
-  ipcMain.handle('pdf:open-external', async (_e, filePath: string) => {
-    const error = await shell.openPath(resolve(filePath))
-    return error === ''
-  })
 }
-
-/** 未捕获异常时也要尽量把窗口关干净 */
-process.on('uncaughtException', (error) => {
-  console.error('[pdf] 未捕获异常：', error)
-})

@@ -93,7 +93,8 @@ export function listRollback(): RollbackEntry[] {
   const dir = rollbackDir()
   try {
     return readdirSync(dir)
-      .filter((name) => /\.(exe|zip)$/i.test(name))
+      /* ★ 审计 P1：只收 .exe —— 压缩包不是可执行的回滚点，混进来会让回滚列表变脏 */
+      .filter((name) => /\.exe$/i.test(name))
       .map((name) => {
         const full = join(dir, name)
         const info = statSync(full)
