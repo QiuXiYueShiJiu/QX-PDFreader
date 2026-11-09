@@ -44,6 +44,25 @@ const DATA_DIRS = ['$APPDATA\\秋夕月拾旧-PDF阅读器']
 /** 数据目录里的关键文件：直接删也算错 */
 const DATA_FILES = ['settings.json', 'recent.json', 'lastread.json', 'window-state.json']
 
+/**
+ * 允许的安装根目录。
+ *
+ * 公开版必须装到系统盘的标准位置；把 D:\QXClass\PDFReader 这种
+ * 「某个单位的内网路径」烘进安装包，对没有 D 盘的用户是**装不上**，
+ * 不是「装错地方」——2026-11-09 的 2.1.1.0 就是这么发出去的。
+ * @@INSTALL_DIR@@ 是模板占位符（构建时才替换），放行。
+ */
+const INSTALL_ROOTS = [
+  '@@INSTALL_DIR@@',
+  'C:\\Program Files',
+  'C:\\Program Files (x86)',
+  '$PROGRAMFILES',
+  '$PROGRAMFILES64',
+  '$PROGRAMFILES32',
+  '$LOCALAPPDATA',
+  '$APPDATA'
+]
+
 const errs = []
 let checked = 0
 
@@ -80,7 +99,18 @@ for (const rel of FILES) {
       }
     }
 
-    // ② 直接删数据文件
+    // ② 安装根目录不是系统盘标准位置（内网/个人路径被烘进公开包）
+    const inst = code.match(/StrCpy\s+\$INSTDIR\s+"([^"]+)"/i)
+    if (inst) {
+      const target = inst[1]
+      const lower = target.toLowerCase()
+      const ok = INSTALL_ROOTS.some((r) => lower.startsWith(r.toLowerCase()))
+      if (!ok) {
+        errs.push(`${at} 安装目录 ${target} 不在允许的根目录（C:\\Program Files 或 %LOCALAPPDATA%）—— 公开包不能带内网/个人路径，否则没 D 盘的用户装不上`)
+      }
+    }
+
+    // ③ 直接删数据文件
     const del = code.match(/^\s*Delete\s+"([^"]+)"/i)
     if (del) {
       const lower = del[1].toLowerCase()
