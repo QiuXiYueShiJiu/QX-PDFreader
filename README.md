@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-2.1.0.2-2f6fed" />
+  <img alt="version" src="https://img.shields.io/badge/version-2.1.1.0-2f6fed" />
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078d4" />
   <img alt="license" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-e5484d" />
   <img alt="offline" src="https://img.shields.io/badge/network-%E5%8F%AA%E6%A3%80%E6%9F%A5%E6%9B%B4%E6%96%B0-16a34a" />
@@ -457,6 +457,34 @@ A：工具箱「加密」可以加/解密码；带打开密码的 PDF 需先解�
 ---
 
 ## 更新日志
+
+### 2.1.1.0（2026-11-09）
+
+面向论坛 #3542 / #3517 的**性能优化为主，另含两处缩放落位的体验修正**。基准是 777 页纯文字电子书《操作系统真象还原》（28.5 MB）。
+
+**性能**
+- 侧栏缩略图懒渲染：`IntersectionObserver` 判断可见，不在视野里就不光栅化（777 页全画是约 50 MPx、200 MB 位图）；
+- 离屏页释放位图与文字层：页面移出视口后 canvas 缩到 1×1，回来按需重画；
+- `content-visibility: auto` + `contain-intrinsic-size`，跳过离屏布局与绘制；
+- 书写坐标换算缓存 120 ms，一笔内不再逐点强制同步布局。
+
+**体验修正**
+- 放大（`scale > 1.05`）时给页面容器补 45vh 纵向余量，页顶/页底可拖到视口正中；
+- 缩放落位后按页面中心对齐视口中心，避免页面贴在右边。
+
+**实测（777 页，来源：上游构建方）**
+
+| 指标 | 2.1.0.2 | 2.1.1.0 |
+|---|---|---|
+| 首屏出画 | 16,161 ms | 3,394 ms |
+| 画布总像素 | 96.7 MPx | 10.7 MPx |
+| DOM 节点 | 29,724 | 8,382 |
+| 文字 span | 17,412 | 136 |
+| 进程 RSS | 4,648 MB | 820 MB（连续跳页后约 1.1 GB） |
+
+跳页抽查：第 400 页 52 ms 出画；第 777 页 1576×2226 正常显示，不是黑页。
+
+试过但回退：离屏时调 `page.cleanup()` 清 pdf.js 操作符缓存 —— 跳页从约 170 ms 掉到 2.3~2.7 s，内存没降，且早期版本因它出过整页黑屏，故只保留画布与文字层释放。
 
 ### 2.1.0.2（2026-11-08）
 

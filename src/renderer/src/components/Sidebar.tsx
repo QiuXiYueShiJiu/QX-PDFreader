@@ -120,11 +120,45 @@ function Thumb({
   active: boolean
   onSelect: () => void
 }): JSX.Element {
+  /*
+   * 缩略图懒渲染：只有接近侧栏可视区的缩略图才真的去光栅化。
+   *
+   * 777 页的书如果每张都画，光缩略图就是 50 MPx 位图（约 200 MB），
+   * 加上正文画布能把进程吃到几个 G —— 论坛里「一打开就卡死」的主因之一。
+   * rootMargin 给 400px，滚动时下一屏的缩略图会提前备好，不出现空白。
+   */
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const [near, setNear] = useState(false)
+
+  useEffect(() => {
+    const el = btnRef.current
+    if (!el) return
+    if (typeof IntersectionObserver === 'undefined') {
+      setNear(true)
+      return
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        setNear(entries.some((e) => e.isIntersecting))
+      },
+      /*
+       * root 用视口而不是 `.thumbs`：侧栏的滚动容器是外层元素，
+       * `.thumbs` 本身不滚动 —— 拿它当 root 的话「与 root 相交」恒为真，
+       * 777 张缩略图会全部被判为可见（实测就是这样，一张都没省下）。
+       * 交给视口判定，被祖先滚动容器裁掉的那些自然不相交。
+       */
+      { root: null, rootMargin: '300px 0px' }
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [])
+
   // 缩略图宽度按栏宽取值，150 是 232px 栏宽下的合适尺寸
-  const canvasRef = useThumbnail(doc, pageNumber, 150)
+  const canvasRef = useThumbnail(doc, pageNumber, 150, near)
 
   return (
     <button
+      ref={btnRef}
       className={`thumb ${active ? 'is-active' : ''}`}
       data-thumb={pageNumber}
       onClick={onSelect}

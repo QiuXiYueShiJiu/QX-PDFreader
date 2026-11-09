@@ -882,7 +882,22 @@ function PdfPage({
     }
 
     if (!active) {
-      dbgWhy('非active直接返回')
+      /*
+       * ★ 离屏页释放位图（2.1.1.0）。
+       *
+       *   以前这里直接 return，画布连同它的后备位图原封不动留着。
+       *   一页 A4 在 150% 缩放、dpr 1.5 下是 1578×2231 ≈ 3.5 MPx ≈ 14 MB，
+       *   翻过 100 页就是 1.4 GB —— 论坛里「翻着翻着内存涨到几个 G」就是这么来的。
+       *   现在离开视口就缩到 1×1 把位图还给浏览器，同时把 rendered 置回 false，
+       *   重新接近视口时 effect 会再跑一遍按需重画。
+       */
+      dbgWhy('非active：释放位图')
+      const cv = getCanvas()
+      if (cv && (cv.width > 1 || cv.height > 1)) {
+        cv.width = 1
+        cv.height = 1
+      }
+      if (rendered) setRendered(false)
       return
     }
     /*
@@ -1350,6 +1365,22 @@ function PdfPage({
     const container = textRef.current
     if (!doc || !container || renderWidth <= 0 || renderHeight <= 0) return
 
+    /*
+     * ★ 离屏页不保留文字层（2.1.1.0）。
+     *
+     *   777 页的书一打开，每页都建一层文字层，实测 17,412 个 span、
+     *   DOM 节点总数近 3 万 —— 内存和样式计算全在这里。
+     *   视口外的页清空文字层，滚回来再按需重建（effect 依赖里有 active，
+     *   重新变为可见时会自动重跑）。
+     */
+    if (!active) {
+      if (container.children.length > 0) {
+        container.innerHTML = ''
+        delete container.dataset.textSig
+      }
+      return
+    }
+
     let cancelled = false
 
     const run = async (): Promise<void> => {
@@ -1452,7 +1483,7 @@ function PdfPage({
     return () => {
       cancelled = true
     }
-  }, [doc, pageNumber, renderWidth, renderHeight, rotation])
+  }, [doc, pageNumber, renderWidth, renderHeight, rotation, active])
 
   return (
     <div
@@ -1465,7 +1496,15 @@ function PdfPage({
       ref={(el) => registerRef(pageNumber, el)}
       className="pdf-page"
       data-page={pageNumber}
-      style={{ width: width > 0 ? width : undefined, minHeight: height > 0 ? height : undefined }}
+      style={
+        {
+          width: width > 0 ? width : undefined,
+          minHeight: height > 0 ? height : undefined,
+          /* 给 content-visibility:auto 的 contain-intrinsic-size 用，保证离屏页占位高度不变 */
+          '--page-w': width > 0 ? `${Math.round(width)}px` : undefined,
+          '--page-h': height > 0 ? `${Math.round(height)}px` : undefined
+        } as React.CSSProperties
+      }
     >
       <div
         ref={wrapRef}
@@ -3608,6 +3647,9 @@ export function DocumentView({
    *   底图是用户看到的东西，墨迹必须与它像素级重合，
    *   所以用它的 rect 做唯一基准，物理上不可能不一致。
    */
+  /** toPagePoint 的 rect 缓存（书写时避免每点一次强制布局） */
+  const rectCacheRef = useRef<{ el: HTMLElement; rect: DOMRect; t: number } | null>(null)
+
   const toPagePoint = (
     clientX: number,
     clientY: number,
@@ -3619,7 +3661,23 @@ export function DocumentView({
      */
     const canvasEl = pageEl.querySelector<HTMLCanvasElement>('.pdf-page__canvas')
     const refEl: HTMLElement = canvasEl ?? pageEl
-    const rect = refEl.getBoundingClientRect()
+    /*
+     * ★ 缓存 120ms 的 rect（2.1.1.0）。
+     *
+     *   书写时每个 pointermove 还要按 getCoalescedEvents 逐个点换算，
+     *   每次 getBoundingClientRect() 都是一次强制同步布局 —— 一帧里
+     *   十几次就够把笔迹拖出几十毫秒的延迟，手感就是「不跟手」。
+     *   同一笔内布局不会变，缓 120ms 足够，跨帧仍会重新量。
+     */
+    const now = performance.now()
+    const cached = rectCacheRef.current
+    let rect: DOMRect
+    if (cached && cached.el === refEl && now - cached.t < 120) {
+      rect = cached.rect
+    } else {
+      rect = refEl.getBoundingClientRect()
+      rectCacheRef.current = { el: refEl, rect, t: now }
+    }
     if (rect.width <= 0) return null
 
     /*
@@ -4525,6 +4583,24 @@ export function DocumentView({
 
     syncingRef.current = true
     container.scrollTop = Math.max(0, nextTop)
+    /*
+     * ★ 放大后把当前页横向摆到中间（2.1.1.0）。
+     *
+     *   放大时给 `.viewer-pages` 补了左右余量（见 viewer.css 的
+     *   `.viewer-scroll.is-zoomed`），滚动起点 0 会让页面贴在右边、
+     *   左边留一大块空白，看起来像「页面歪了」。
+     *   这里在缩放落位后按页面中心对齐视口中心一次；页面本身比视口
+     *   窄时不动，保持原来的居中样式。
+     */
+    const pageBox = el.getBoundingClientRect()
+    const viewport = container.getBoundingClientRect()
+    if (container.scrollWidth > container.clientWidth + 4 && pageBox.width > 0) {
+      const delta = pageBox.left - viewport.left
+      container.scrollLeft = Math.max(
+        0,
+        container.scrollLeft + delta - (viewport.width - pageBox.width) / 2
+      )
+    }
     // 与「页码变化 → 滚动到该页」保持一致：落位后短暂停掉页码观察，免得来回改
     const timer = window.setTimeout(() => {
       syncingRef.current = false
@@ -4711,7 +4787,9 @@ export function DocumentView({
       <div
         className={`viewer-scroll ${drawMode ? 'is-drawing' : ''} ${
           eraserMode ? 'is-erasing' : ''
-        } ${!drawMode && !eraserMode ? 'is-roaming' : ''} ${panning ? 'is-panning' : ''} ${editClass}`}
+        } ${!drawMode && !eraserMode ? 'is-roaming' : ''} ${panning ? 'is-panning' : ''} ${
+          pageSize.scale > 1.05 ? 'is-zoomed' : ''
+        } ${editClass}`}
         ref={scrollRef}
         onPointerDown={onPointerDown}
         onDoubleClick={handleViewerDoubleClick}
@@ -5005,12 +5083,29 @@ const EMPTY_ANNOTATIONS: Annotation[] = []
 export function useThumbnail(
   doc: PDFDocumentProxy | null,
   pageNumber: number,
-  targetWidth: number
+  targetWidth: number,
+  enabled = true
 ): React.RefObject<HTMLCanvasElement> {
   const ref = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
     if (!doc || targetWidth <= 0) return
+    /*
+     * ★ 侧栏缩略图按需渲染（2.1.1.0，用户反馈「777 页的书一打开就吃几个 G」）。
+     *
+     *   原来每张 Thumb 挂载即渲染：777 页 × 225×318 像素 ≈ 50 MPx 位图，
+     *   还没滚动就先占了小两百 MB，再加上正文页的画布，直接上 GB。
+     *   现在由父组件用 IntersectionObserver 判断「是否接近可视区」，
+     *   不可见的缩略图不画，滚出去之后连位图一起释放。
+     */
+    if (!enabled) {
+      const canvas = ref.current
+      if (canvas && (canvas.width > 1 || canvas.height > 1)) {
+        canvas.width = 1
+        canvas.height = 1
+      }
+      return
+    }
     let cancelled = false
     let task: { cancel: () => void } | null = null
 
@@ -5054,7 +5149,7 @@ export function useThumbnail(
         /* 忽略 */
       }
     }
-  }, [doc, pageNumber, targetWidth])
+  }, [doc, pageNumber, targetWidth, enabled])
 
   return ref
 }

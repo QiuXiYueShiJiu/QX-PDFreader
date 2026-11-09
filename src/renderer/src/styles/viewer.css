@@ -80,6 +80,34 @@
   touch-action: pan-x pan-y pinch-zoom;
 }
 
+/*
+ * ★ 放大后留出可拖动的余量（2.1.1.0）。
+ *
+ *   论坛反馈「边缘区域无法拖到中间展示」：滚动容器最小只能到 0、
+ *   最大只能是 scrollWidth - clientWidth，页面边缘最远只能贴到
+ *   视口边缘，永远到不了中间。放大时给内容四周补一圈空白，
+ *   滚动范围就从「恰好一页」变成「一页 + 两侧余量」，拖动时可以
+ *   把任意一条边拖到屏幕中间来看，松手也不会回弹。
+ *
+ *   只在 scale > 1.05 时生效：适应宽度/整页时页面本来就完整可见，
+ *   补空白反而会让页面变小。
+ */
+.viewer-scroll.is-zoomed .viewer-pages {
+  /*
+   * 左右各留半个视口、上下各留 45% 视口高：
+   * 这样任意一条边都能被拖到视口正中（需要的最小余量就是半个视口）。
+   * 24vw 时只能拖到「边贴边」，正好差一点，所以加到 50vw。
+   */
+  /*
+   * 只补纵向余量：横向已经有「超出部分只向右侧溢出」的约定
+   * （见 `.viewer-pages` 那段 flex-start 的注释），再塞左右 padding
+   * 会和 `margin-inline: auto` 打架 —— 实测加 50vw 后滚动上限只多了
+   * 一点，右边缘仍然到不了屏幕中间，反而把页面推歪。
+   * 纵向没有这个冲突：上下各 45vh，页顶/页底都能拖到视口正中。
+   */
+  padding-block: 45vh;
+}
+
 .viewer-pages {
   /* 定位上下文：手绘预览层需要相对本容器绝对定位 */
   position: relative;
@@ -166,6 +194,17 @@
   border-radius: 3px;
   box-shadow: 0 2px 12px rgb(0 0 0 / 0.32);
   overflow: hidden;
+  /*
+   * ★ 屏幕外的页不参与绘制与合成（2.1.1.0）。
+   *
+   *   777 页的书整本铺在 DOM 里，每页都有自己的画布。Chromium 会给每块画布
+   *   分配一张合成贴图，贴图大小按 CSS 尺寸（一页 1052×1488 @1.5 = 3.5 MPx），
+   *   于是「打开就占几 G」主要不是 JS 堆，而是这些贴图。
+   *   content-visibility:auto 让浏览器跳过离屏页的布局/绘制/合成，
+   *   贴图随之释放；contain-intrinsic-size 保证占位高度不变，滚动条不跳。
+   */
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--page-w, 800px) auto var(--page-h, 1100px);
 }
 
 /*

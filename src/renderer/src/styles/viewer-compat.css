@@ -411,6 +411,10 @@
   transition:
     border-color var(--dur-fast) var(--ease),
     background var(--dur-fast) var(--ease);
+
+  /* 离屏缩略图不绘制也不合成，配合懒渲染一起省显存 */
+  content-visibility: auto;
+  contain-intrinsic-size: 150px 210px;
 }
 
 .thumb:hover {
