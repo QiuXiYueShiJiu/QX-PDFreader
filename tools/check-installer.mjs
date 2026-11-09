@@ -56,6 +56,26 @@ const DATA_FILES = ['settings.json', 'recent.json', 'lastread.json', 'window-sta
 const SAFE_SHELL_DIRS = ['$APPDATA\\秋夕-PDF阅读器']
 
 /**
+ * 允许在**历史数据目录下**清理的已知缓存子目录（正好一层，不递归放宽）。
+ *
+ * 用途：老版本留下的数据目录不能整个删（见上），但里面的 Chromium 缓存
+ * 可以只清这几个。父目录本身仍不许删 —— 判据是「路径恰为 根\<目录>\<缓存名>」，
+ * 所以 $APPDATA\X\Cache\GPUCache 这种再深一层会被拦下。
+ *
+ * 不许进这张表的：Local Storage / Network / blob_storage / Dictionaries /
+ * annos / image-cache / plugin-output —— 要么是用户数据，要么删了不重建。
+ */
+const SAFE_CACHE_SUBDIRS = [
+  'Cache',
+  'Code Cache',
+  'GPUCache',
+  'DawnGraphiteCache',
+  'DawnWebGPUCache',
+  'GrShaderCache',
+  'ShaderCache'
+]
+
+/**
  * 允许的安装根目录。
  *
  * 公开版必须装到系统盘的标准位置；把 D:\QXClass\PDFReader 这种
@@ -109,13 +129,18 @@ for (const rel of FILES) {
         errs.push(`${at} 递归删除了数据目录下的子路径 ${target} —— 用户数据目录不应被安装器改动`)
         return
       }
-      // 数据根下的任何目录都必须逐个登记为「空壳」，否则视为误删候选
+      // 数据根下的任何目录都必须逐个登记为「空壳」，否则视为误删候选；
+      // 唯一例外是「根\<历史目录>\<已知缓存子目录>」这一层（正好一层）
       const lower = target.toLowerCase()
       const inDataRoot = lower.startsWith('$appdata\\') || lower.startsWith('$localappdata\\')
       if (inDataRoot) {
         const safe = SAFE_SHELL_DIRS.some((d) => lower === d.toLowerCase())
         if (!safe) {
-          errs.push(`${at} 递归删除了未登记的数据根目录 ${target} —— 若确认不含用户数据，请加进 SAFE_SHELL_DIRS 并写明依据`)
+          const m = lower.match(/^(\$appdata|\$localappdata)\\[^\\]+\\(.+)$/)
+          const suffixOk = m && SAFE_CACHE_SUBDIRS.some((x) => m[2].toLowerCase() === x.toLowerCase())
+          if (!suffixOk) {
+            errs.push(`${at} 递归删除了未登记的数据根目录 ${target} —— 若确认不含用户数据，请加进 SAFE_SHELL_DIRS 并写明依据；只清缓存则必须是 根\\<目录>\\<缓存名> 且缓存名在 SAFE_CACHE_SUBDIRS 里`)
+          }
         }
       }
     }
