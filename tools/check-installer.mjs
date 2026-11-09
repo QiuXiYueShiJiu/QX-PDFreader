@@ -53,10 +53,7 @@ const DATA_FILES = ['settings.json', 'recent.json', 'lastread.json', 'window-sta
  * 「我认为这个目录不含数据」写进仓库，改一处就要改一次，审查时看得见。
  * 2.1.1.0 的事故正是「以为某个 $APPDATA 目录是空壳」这类推断没被记录。
  */
-const SAFE_SHELL_DIRS = [
-  '$APPDATA\\秋夕-PDF阅读器',
-  '$LOCALAPPDATA\\秋夕月拾旧-PDF阅读器'
-]
+const SAFE_SHELL_DIRS = ['$APPDATA\\秋夕-PDF阅读器']
 
 /**
  * 允许的安装根目录。

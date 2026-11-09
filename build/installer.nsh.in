@@ -522,13 +522,17 @@
   ;   而用户拿到的说明写的是「覆盖安装即可，笔记与设置不受影响」。
   ;   实测：升级 2.1.1.0 后该目录整个消失，settings.json 也没了。
   ;
-  ;   现在只清 Electron 按新 productName 建的空壳目录和更早版本的残留，
-  ;   真正装数据的那两个目录留着 —— 卸载后重装仍能续上原来的设置。
+  ;   现在只清一个**已证实为空**的目录（$APPDATA\秋夕-PDF阅读器：main/index.ts
+  ;   在首次 getPath('userData') 之前就把 userData 钉到老名字，Electron 建完壳
+  ;   再没写过，实测 entries = 0）。其余历史目录全部保留 —— 无法证实为空就不删，
+  ;   卸载后重装仍能续上原来的设置。
   ;
   ; ① Electron 按新 productName 建的空壳目录（里面没有用户数据）
   RMDir /r "$APPDATA\秋夕-PDF阅读器"
-  ; ② Chromium 缓存目录（LocalAppData 下的 Cache/GPUCache，删了自动重建）
-  RMDir /r "$LOCALAPPDATA\秋夕月拾旧-PDF阅读器"
+  ; ② $LOCALAPPDATA\秋夕月拾旧-PDF阅读器 也**不删**：当前版本把 userData 钉在
+  ;   Roaming，Chromium 的 Cache/GPUCache 也跟着落在 Roaming；Local 那份只可能
+  ;   来自更早的、userData 尚未钉定的构建，没有快照能证明里面只有缓存。
+  ;   代价同样只是多一个旧文件夹。
   ;
   ; ③ 1.x 时代（productName 叫「智慧黑板PDF阅读器」）的 $APPDATA 目录：
   ;   **故意不删**。无法确认那一代的 userData 是写在它下面、还是只借用了
