@@ -51,6 +51,13 @@
   letter-spacing: 0.2px;
 }
 
+.frw-license {
+  margin: 14px 0 0;
+  font-size: 12px;
+  line-height: 1.75;
+  color: rgb(var(--muted, 110 122 140));
+  opacity: 0.9;
+}
 .frw-hero-sub {
   margin: 6px 0 0;
   font-size: 13px;

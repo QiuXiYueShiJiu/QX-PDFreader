@@ -191,6 +191,10 @@ export function FirstRunWizard({ settings, onChange }: Props) {
                 接下来只有四步：挑主题、定关联、决定要不要常驻后台。全部可以跳过，
                 装完也能随时在「设置」里改。
               </p>
+              <p className="frw-license">
+                本程序以 PolyForm Noncommercial License 1.0.0 授权：非商业用途免费，
+                商业用途需另行授权。阅读、批注、OCR 全部在本机完成，不向任何服务器上传文档。
+              </p>
             </section>
           ) : null}
 
