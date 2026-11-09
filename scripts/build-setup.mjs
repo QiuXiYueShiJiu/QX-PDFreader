@@ -50,7 +50,7 @@ const VARIANT = (() => {
  * 默认安装目录（**通用值，不含任何客户/示例单位信息**）。
  * 交付时由 build/packaging.json 覆盖。
  */
-const DEFAULT_INSTALL_DIR = 'C:\\Program Files\\QXPDFReader'
+const DEFAULT_INSTALL_DIR = '$LOCALAPPDATA\\Programs\\QiuXiPDFReader'
 
 /**
  * 首次运行 build-setup 时写进 build/packaging.json 的**通用默认值**。
@@ -59,7 +59,7 @@ const DEFAULT_INSTALL_DIR = 'C:\\Program Files\\QXPDFReader'
  *   交付时把真实值填进 build/packaging.json（该文件不发布），
  *   或者直接用环境变量 PDFREADER_INSTALL_DIR / PDFREADER_QUICK_NAME 覆盖。
  */
-const DEFAULT_DELIVERY_INSTALL_DIR = 'C:\\Program Files\\QXPDFReader'
+const DEFAULT_DELIVERY_INSTALL_DIR = '$LOCALAPPDATA\\Programs\\QiuXiPDFReader'
 const DEFAULT_DELIVERY_QUICK_ARTIFACT = 'PDF阅读器-快速安装.${ext}'
 
 /** 默认产物名（通用） */
