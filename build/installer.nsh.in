@@ -527,9 +527,14 @@
   ;
   ; ① Electron 按新 productName 建的空壳目录（里面没有用户数据）
   RMDir /r "$APPDATA\秋夕-PDF阅读器"
-  ; ② 更早版本（1.1.x / 1.2.x）的旧目录，与当前版本互不相干
-  RMDir /r "$APPDATA\智慧黑板PDF阅读器"
+  ; ② Chromium 缓存目录（LocalAppData 下的 Cache/GPUCache，删了自动重建）
   RMDir /r "$LOCALAPPDATA\秋夕月拾旧-PDF阅读器"
+  ;
+  ; ③ 1.x 时代（productName 叫「智慧黑板PDF阅读器」）的 $APPDATA 目录：
+  ;   **故意不删**。无法确认那一代的 userData 是写在它下面、还是只借用了
+  ;   界面名而数据仍落在 $APPDATA\秋夕月拾旧-PDF阅读器；只要有一条可能，
+  ;   删它就是升级清档。留着的代价只是 %APPDATA% 里多一个旧文件夹。
+  ;   要恢复清理，先拿到 1.x 的 app.getPath('userData') 证据再改这里。
 
   ; ④ 桌面 / 开始菜单里可能残留的快捷方式（老名字 + 新名字）
   Delete "$DESKTOP\秋夕-PDF阅读器.lnk"

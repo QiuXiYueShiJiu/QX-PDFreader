@@ -55,7 +55,6 @@ const DATA_FILES = ['settings.json', 'recent.json', 'lastread.json', 'window-sta
  */
 const SAFE_SHELL_DIRS = [
   '$APPDATA\\秋夕-PDF阅读器',
-  '$APPDATA\\智慧黑板PDF阅读器',
   '$LOCALAPPDATA\\秋夕月拾旧-PDF阅读器'
 ]
 
