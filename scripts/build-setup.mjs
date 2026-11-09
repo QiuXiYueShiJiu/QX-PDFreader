@@ -49,6 +49,10 @@ const VARIANT = (() => {
 /**
  * 默认安装目录（**通用值，不含任何客户/示例单位信息**）。
  * 交付时由 build/packaging.json 覆盖。
+ *
+ * ★ 必须落在**当前用户可写**的位置。nsis 配的是 perMachine=false，
+ *   安装器不提权；实测 /S 静默安装到 C:\Program Files 时退出码是 0，
+ *   但目录根本没创建（写 Program Files 被拒），静默更新会整体失效。
  */
 const DEFAULT_INSTALL_DIR = '$LOCALAPPDATA\\Programs\\QiuXiPDFReader'
 
