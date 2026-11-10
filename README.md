@@ -396,6 +396,8 @@ node scripts\build-installers.mjs
 
 产物在 `release\`。
 
+> **仓库里的 `build/packaging.json` 是脱敏示例**：`installDir` 写成 `$LOCALAPPDATA\Programs\QiuXiPDFReader`、`legacyInstallDirs` 为空。真正的安装路径与历史目录清单属于交付参数，只在构建机上存在。直接拿源码打包得到的是「不带旧目录清理」的安装器——升级自己的机器没问题，但要接管别人的旧安装，得先按 `build/packaging.json` 的字段补齐那两行。
+
 ---
 
 ## 目录结构
