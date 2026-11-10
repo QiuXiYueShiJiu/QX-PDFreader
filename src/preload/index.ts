@@ -403,6 +403,8 @@ const api = {
 
   /* 设置页展示「崩溃日志在哪」 */
   crashLog: (): Promise<{ path: string; bytes: number }> => invoke('app:crash-log'),
+  orphanUninstallList: (): Promise<Array<{ root: string; key: string; displayName: string; installLocation: string }>> => invoke('app:orphan-uninstall-list'),
+  orphanUninstallClean: (): Promise<Array<{ root: string; key: string; displayName: string; installLocation: string }>> => invoke('app:orphan-uninstall-clean'),
     rendererReady: (): Promise<boolean> => invoke('app:renderer-ready'),
     /** 选一张图片当阅读区背景（主进程负责落盘到 userData） */
     pickBackground: () =>
@@ -515,16 +517,6 @@ const api = {
   },
 
   /* ---------- 更新回滚（2.0.0） ---------- */
-  rollback: {
-    /** 还留着的旧安装包（最多三份） */
-    list: () => invoke<{ version: string; path: string; size: number; savedAt: string }[]>('rollback:list'),
-    /** 回滚到指定版本：静默装旧包并退出当前进程 */
-    apply: (version: string) => invoke<{ ok: boolean; error?: string }>('rollback:apply', version),
-    /** 渲染层画出来了 → 启动失败计数清零 */
-    bootOk: () => invoke<boolean>('rollback:boot-ok'),
-    /** 当前连续失败次数（诊断用） */
-    failures: () => invoke<number>('rollback:failures')
-  },
 
   plugins: {
     /** 商店清单（独立插件库，github 默认 / mirror 兜底） */

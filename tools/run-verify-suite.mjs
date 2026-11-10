@@ -92,7 +92,6 @@ const DEFAULT_SUITE = [
   'verify-store-detail.mjs', // 插件商店：分类/详情/一键更新（B10）
   'verify-plugin-store.mjs', // 插件商店：安装 / 权限闸门 / 命令 / 启停 / 卸载
   'verify-compare.mjs', // 分屏对比：右侧参考窗 / 独立滚动 / 关闭还原
-  'verify-rollback.mjs', // 紧急回滚：列表 / 同版本防呆 / 启动计数 / 设置页区块
   'verify-export-ipc.mjs', // 导出为新 PDF 的 IPC（带 targetPath 不弹框）：落盘、可解析、拒绝覆盖源文件
   'verify-no-foreground.mjs', // 前台不被改动：第二实例转交文件时不许把隐藏窗口拽到前台
   /* —— 退出相关的三支已从默认套件移除（用户 2026-10-19 要求：测试不需要测退出）——

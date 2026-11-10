@@ -152,7 +152,7 @@ function applyVersionInfo(exePath, version, productName) {
     FileVersion: verStr,
     ProductVersion: verStr,
     OriginalFilename: `${productName}.exe`,
-    CompanyName: '秋夕月拾旧',
+    CompanyName: '秋夕课堂',
     LegalCopyright: `Copyright (C) 2026 秋夕月拾旧`
   })
   // 声明可用语言，与字符串表保持一致（坑 ②）

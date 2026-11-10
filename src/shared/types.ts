@@ -197,6 +197,16 @@ export interface ReaderSettings {
   updateAutoCheck: boolean
   /** 公开版更新通道偏好（静默部署版忽略） */
   updateChannel: 'auto' | 'github' | 'mirror'
+  /**
+   * 发现新版本时的行为：
+   * ask   = 每次弹提示框问（默认）
+   * never = 不再通知（设置页里还能手动点「检查更新」）
+   */
+  updateNotify: 'ask' | 'never'
+  /** 「跳过这个版本」记下的版本号，空串表示没跳过 */
+  updateSkipVersion: string
+  /** 「七天不通知」的截止时间戳（毫秒），0 表示没设 */
+  updateSnoozeUntil: number
 }
 
 /** 一条最近打开的记录 */

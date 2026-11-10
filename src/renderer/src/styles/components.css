@@ -1094,3 +1094,33 @@ html[data-pack] .statusbar {
   margin: 0;
   cursor: pointer;
 }
+
+/* 设置页里跟在说明文字后面的小按钮（2.2：恢复更新提醒） */
+.sb-btn-xs {
+  margin-left: 8px;
+  padding: 2px 10px;
+  font-size: 12px;
+  border-radius: 8px;
+  border: 1px solid rgb(var(--border));
+  background: rgb(var(--surface-strong));
+  color: inherit;
+  cursor: pointer;
+}
+.sb-btn-xs:hover {
+  border-color: rgb(var(--accent));
+}
+/* 关于页的「打开网站」：贴着站点文字，弱化为链接样式 */
+.sb-about__link {
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-size: 12px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 6px;
+  background: transparent;
+  color: rgb(var(--accent));
+  cursor: pointer;
+}
+
+.sb-about__link:hover {
+  background: rgb(var(--accent) / 0.12);
+}

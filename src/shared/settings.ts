@@ -172,6 +172,9 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
    * 静默部署版忽略这个字段（它只走内置变量通道）。
    */
   updateChannel: 'auto',
+  updateNotify: 'ask',
+  updateSkipVersion: '',
+  updateSnoozeUntil: 0,
   /* 强调色覆盖：空串 = 跟随主题；用户可换成自己的主题色 */
   accentColor: '',
   /* 插件市场装的主题包与当前选用项（默认空） */
@@ -279,6 +282,15 @@ export function mergeSettings(raw: unknown): ReaderSettings {
       input.updateChannel === 'github' || input.updateChannel === 'mirror' || input.updateChannel === 'auto'
         ? input.updateChannel
         : base.updateChannel,
+    updateNotify: input.updateNotify === 'never' ? 'never' : base.updateNotify,
+    updateSkipVersion:
+      typeof input.updateSkipVersion === 'string' && /^\d+(\.\d+){1,3}$/.test(input.updateSkipVersion)
+        ? input.updateSkipVersion
+        : base.updateSkipVersion,
+    updateSnoozeUntil:
+      typeof input.updateSnoozeUntil === 'number' && Number.isFinite(input.updateSnoozeUntil) && input.updateSnoozeUntil >= 0
+        ? input.updateSnoozeUntil
+        : base.updateSnoozeUntil,
     accentColor:
       typeof input.accentColor === 'string' && /^#[0-9a-f]{6}$/i.test(input.accentColor)
         ? input.accentColor.toLowerCase()

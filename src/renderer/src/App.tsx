@@ -36,7 +36,7 @@ import { BottomDock } from './components/BottomDock'
 import { PasswordPrompt } from './components/PasswordPrompt'
 import { ToolsPanel } from './components/ToolsPanel'
 import { ScreenMask } from './components/ScreenMask'
-import { UpdateToast } from './components/UpdateToast'
+import { UpdateDialog } from './components/UpdateDialog'
 import { FeatureTour } from './components/FeatureTour'
 import { MarketPanel } from './components/MarketPanel'
 import { PluginStore } from './components/PluginStore'
@@ -536,15 +536,6 @@ const closeActiveTab = useViewer((s) => s.closeActiveTab)
    *     facing-continuous  双栏滚动：左右成对 + 纵向铺开
    */
   const singlePage = viewMode === 'single'
-  /*
-   * 回滚用的「启动成功」信号（B13）。
-   * 主进程在进程起来时就把失败计数 +1，这里等文档真的渲染出来再清零 ——
-   * 只有「能进到界面并画出内容」才算这次启动是好的。
-   */
-  useEffect(() => {
-    if (!doc) return
-    void window.pdfApp.rollback.bootOk()
-  }, [doc])
   const facing = viewMode === 'facing' || viewMode === 'facing-continuous'
 
   return (
@@ -637,7 +628,7 @@ const closeActiveTab = useViewer((s) => s.closeActiveTab)
       {/* 启动声明：右下角浮层，可见主题自适应，可勾选不再提示 */}
 
       {/* 版本更新：右下角浮层，自动下载、下完再问装不装 */}
-      <UpdateToast />
+      <UpdateDialog />
       <FeatureTour open={tourOpen} onClose={closeTour} />
       <MarketPanel />
       {/* 插件商店：右栏入口打开，与主题商店（设置→外观）分家 */}

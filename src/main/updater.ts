@@ -37,7 +37,6 @@ import { createHash } from 'node:crypto'
 import { createReadStream, createWriteStream, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { keepInstaller } from './rollback'
 
 const MIRROR_ORIGIN = 'https://xn--6rso4u4lc86ad09c.top'
 const MIRROR_CONTACT = `${MIRROR_ORIGIN}/contact/`
@@ -575,8 +574,6 @@ export async function downloadUpdate(
      * 这里失败不影响主流程：装不上旧版本是遗憾，但新版本该装还得装。
      */
     try {
-      const guessed = /(\d+\.\d+\.\d+(?:\.\d+)?)/.exec(asset.name)?.[1] ?? currentVersion()
-      keepInstaller(target, guessed)
     } catch {
       /* 忽略 */
     }

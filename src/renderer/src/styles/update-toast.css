@@ -191,3 +191,105 @@
     animation: none;
   }
 }
+
+/* ── 更新提示弹框（2.2，用户要求「先弹提示再下载」）────────────── */
+.upd-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(12, 14, 18, 0.44);
+  backdrop-filter: blur(2px);
+}
+
+.upd-card {
+  width: min(560px, 100%);
+  padding: 26px 26px 20px;
+  border-radius: 18px;
+  background: rgb(var(--surface, 255 255 255));
+  color: rgb(var(--text, 24 26 32));
+  border: 1px solid rgb(var(--border, 214 216 222));
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
+}
+
+.upd-title {
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.upd-sub {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: rgb(var(--muted, 108 114 126));
+}
+
+.upd-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgb(var(--border, 214 216 222));
+  overflow: hidden;
+}
+
+.upd-bar-fill {
+  display: block;
+  height: 100%;
+  background: rgb(var(--accent, 156 100 40));
+  transition: width 0.2s ease;
+}
+
+.upd-hint {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: rgb(var(--muted, 108 114 126));
+}
+
+.upd-hint--error {
+  color: #c2410c;
+}
+
+.upd-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.upd-btn {
+  padding: 9px 16px;
+  border-radius: 10px;
+  border: 1px solid rgb(var(--border, 214 216 222));
+  background: rgb(var(--surface-strong, 250 250 251));
+  color: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.upd-btn:hover:not(:disabled) {
+  border-color: rgb(var(--accent, 156 100 40));
+}
+
+.upd-btn--primary {
+  background: rgb(var(--accent, 156 100 40));
+  border-color: rgb(var(--accent, 156 100 40));
+  color: rgb(var(--accent-fg, 255 255 255));
+  font-weight: 600;
+}
+
+.upd-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.upd-note {
+  margin: 14px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgb(var(--muted, 108 114 126));
+}

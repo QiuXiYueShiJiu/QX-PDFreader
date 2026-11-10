@@ -304,7 +304,6 @@ interface ViewerState {
   /** 插件操作结果提示（成功/失败文案） */
   pluginNote: string
   /** 还留着的旧安装包（回滚用） */
-  rollbackVersions: { version: string; path: string; size: number; savedAt: string }[]
   /** 分屏对比：右侧参考窗是否打开 */
   compareOpen: boolean
   /** 参考窗里的文件路径（空串 = 还没选文件） */
@@ -517,9 +516,7 @@ interface ViewerState {
   /** 清掉插件提示 */
   clearPluginNote: () => void
   /** 刷新可回滚版本列表 */
-  loadRollback: () => Promise<void>
   /** 回滚到指定版本 */
-  applyRollback: (version: string) => Promise<void>
   /** 打开分屏对比（可带路径） */
   openComparePane: (filePath?: string) => void
   /** 打开分屏但先不选文件（拖到右半区时用） */
@@ -748,7 +745,6 @@ export const useViewer = create<ViewerState>((set, get) => ({
   pluginCommands: [],
   pluginBusy: false,
   pluginNote: '',
-  rollbackVersions: [],
   compareOpen: false,
   comparePath: '',
   pluginShopItems: null,
@@ -1247,19 +1243,6 @@ export const useViewer = create<ViewerState>((set, get) => ({
     }
   },
 
-  loadRollback: async () => {
-    try {
-      const list = await window.pdfApp.rollback.list()
-      set({ rollbackVersions: list })
-    } catch {
-      set({ rollbackVersions: [] })
-    }
-  },
-
-  applyRollback: async (version) => {
-    const result = await window.pdfApp.rollback.apply(version)
-    if (!result.ok) set({ error: result.error ?? '回滚失败' })
-  },
 
   openComparePane: (filePath) =>
     set({
@@ -1385,7 +1368,8 @@ export const useViewer = create<ViewerState>((set, get) => ({
       updateInfo: info,
       // 有新信息就重新显示浮层（用户可能刚点过「稍后」）
       updateDismissed: false,
-      updateStage: info?.newer ? 'downloading' : 'idle',
+      /* 2.2：只提示、不自动下载；等用户在弹框里点「立即更新」再走 download() */
+      updateStage: 'idle',
       updateProgress: { received: 0, total: info?.asset?.size ?? 0, fraction: 0 },
       updateFile: ''
     }),
@@ -1398,7 +1382,7 @@ export const useViewer = create<ViewerState>((set, get) => ({
     set({
       updateInfo: info,
       updateDismissed: false,
-      updateStage: info.newer ? 'downloading' : 'idle',
+      updateStage: 'idle',
       updateProgress: { received: 0, total: info.asset?.size ?? 0, fraction: 0 },
       updateFile: ''
     })

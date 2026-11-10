@@ -1,9 +1,9 @@
 {
   "name": "qiuxi-pdf-reader",
-  "version": "2.1.6",
+  "version": "2.2.0",
   "description": "秋夕-PDF阅读器 —— 面向教学一体机的双栏批注式 PDF 阅读工具",
   "main": "./out/main/index.js",
-  "author": "秋夕月拾旧",
+  "author": "秋夕课堂",
   "license": "SEE LICENSE IN LICENSE",
   "private": true,
   "scripts": {
@@ -40,7 +40,7 @@
   },
   "build": {
     "appId": "com.qiuxiyue.qxpdfreader",
-    "copyright": "Copyright 2026 秋夕月拾旧",
+    "copyright": "Copyright © 2026 秋夕月拾旧",
     "directories": {
       "output": "release"
     },
@@ -144,7 +144,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "秋夕-PDF阅读器",
-      "artifactName": "秋夕-PDF阅读器-2.1.6.0-安装程序.${ext}",
+      "artifactName": "秋夕-PDF阅读器-2.2.0.0-安装程序.${ext}",
       "include": "build/installer.nsh"
     },
     "afterPack": "scripts/after-pack.mjs",
@@ -185,8 +185,9 @@
         "from": "build/guard/QiuXiGuard.exe",
         "to": "guard/QiuXiGuard.exe"
       }
-    ]
+    ],
+    "productName": "秋夕-PDF阅读器"
   },
-  "buildVersion": "2.1.6.0",
+  "buildVersion": "2.2.0.0",
   "productName": "秋夕-PDF阅读器"
 }

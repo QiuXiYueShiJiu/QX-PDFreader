@@ -29,6 +29,7 @@ import { pathToFileURL } from 'node:url'
 import { PDFDocument, rgb as pdfRgb } from '@cantoo/pdf-lib'
 import { diagEnabled, diagLine, diagLogPath, diagMarkerPath, initDiagLog } from './diag-log'
 import { crashLog, crashLogBytes, crashLogPath, initCrashLog } from './crash-log'
+import { cleanOrphanUninstallEntries, listOrphanUninstallEntries } from './orphan-uninstall'
 import {
   getSettings,
   patchSettings,
@@ -45,7 +46,6 @@ import { registerPdfToolsIpc } from './pdf-tools'
 import { registerImageToolsIpc } from './image-tools'
 import { loadPlugins, registerPluginIpc } from './plugins'
 import { setPdfOpenHandler } from './plugin-host-io'
-import { askRollbackIfUnstable, bootFailures, listRollback, markBootOk, markBootStart, rollbackTo } from './rollback'
 import {
   decodeImage,
   getImageMeta,
@@ -127,16 +127,25 @@ const LEGACY_USER_DATA_NAME = '秋夕月拾旧-PDF阅读器'
     try {
       mkdirSync(pinned, { recursive: true })
       app.setPath('userData', pinned)
-
-  /* 崩溃日志：放在 userData 钉定之后，路径才正确 */
-  initCrashLog()
-  prunePageCopies()
       console.log('[pdf] userData 目录已钉定到:', pinned)
     } catch (error) {
       console.error('[pdf] userData 目录钉定失败，继续用默认目录:', error)
     }
   }
 }
+
+/*
+ * 下面三件事必须在钉定块**之外**执行。
+ * 踩坑：它们原本写在 if (basename(current) !== LEGACY) 分支里，
+ * 于是「userData 已经是老名字」的机器（也就是所有正常升级过来的机器）
+ * 整段跳过 —— 崩溃日志不初始化、孤儿卸载项永远不清。开发机上第一次没暴露，
+ * 是因为那次 dev 的 userData 恰好还是新名字。
+ */
+
+/* 崩溃日志：此时 userData 已定，路径才对 */
+initCrashLog()
+prunePageCopies()
+pruneUpdatesDir()
 
 /**
  * 待打开的**文件队列**。
@@ -294,17 +303,27 @@ if (!gotLock) {
     (process.env['PDF_READER_OPEN_FILE'] ? resolve(process.env['PDF_READER_OPEN_FILE']) : null)
   if (startFile) queueOpen(startFile)
 
-  /*
-   * 启动计数（回滚用）：进程活了但界面可能永远起不来，所以在这里先 +1，
-   * 渲染层真正画出来之后再由 rollback:boot-ok 清零。
-   */
-  markBootStart()
-
   void /* ★ 2026-11-09 审计：阅读器不需要任何浏览器权限，全部拒绝 */
 app.on('web-contents-created', (_e, contents) => {
   contents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
 })
-app.whenReady().then(onReady)
+app.whenReady().then(async () => {
+  await onReady()
+  /* 孤儿卸载项清理放到窗口起来之后：扫注册表约 3 秒，不能挡在首屏前面 */
+  setTimeout(() => {
+    try {
+      const removedOrphans = cleanOrphanUninstallEntries()
+      if (removedOrphans.length > 0) {
+        crashLog(
+          'orphan-uninstall-cleaned',
+          removedOrphans.map((e) => (e.displayName || '?') + ' @ ' + e.installLocation).join(' | '),
+        )
+      }
+    } catch (error) {
+      crashLog('orphan-uninstall-failed', String(error))
+    }
+  }, 2500)
+})
 }
 
 app.on('window-all-closed', () => {
@@ -522,6 +541,36 @@ async function runThumbMode(): Promise<void> {
  * 策略：保留最近 12 个（够 undo / 回滚用），其余按修改时间删掉，
  * 连带删掉同名的 .name 旁注文件。启动时跑一次，不占运行时开销。
  */
+/**
+ * 安装包缓存只留最新一个。
+ * 2.2 起删掉了「回滚到旧版本」，userData/updates 里的旧安装包再没人引用，
+ * 每份约 100MB，留着就是白占盘。
+ */
+function pruneUpdatesDir(keep = 1): void {
+  try {
+    const dir = join(app.getPath('userData'), 'updates')
+    if (!existsSync(dir)) return
+    const files = readdirSync(dir)
+      .map((name) => {
+        const full = join(dir, name)
+        try {
+          const st = statSync(full)
+          return st.isFile() ? { full, at: st.mtimeMs } : null
+        } catch {
+          return null
+        }
+      })
+      .filter((item): item is { full: string; at: number } => item !== null)
+      .sort((a, b) => b.at - a.at)
+    for (const file of files.slice(keep)) {
+      rmSync(file.full, { force: true })
+      crashLog('updates-pruned', basename(file.full))
+    }
+  } catch (error) {
+    crashLog('updates-prune-failed', String(error))
+  }
+}
+
 function prunePageCopies(keep = 12): void {
   try {
     const dir = join(app.getPath('userData'), 'pages')
@@ -2401,23 +2450,6 @@ setPdfOpenHandler(async (filePath: string) => {
 })
     loadPlugins()
 
-    /*
-     * 连续启动失败就主动问一句要不要回滚（B13）。
-     * 放在窗口创建之前：界面可能根本起不来，提示必须比渲染层更早。
-     */
-    void askRollbackIfUnstable()
-
-    /* ---------- 回滚（2.0.0 / B13） ---------- */
-    ipcMain.handle('rollback:list', () => listRollback())
-    ipcMain.handle('rollback:apply', (_e, version: unknown) =>
-      typeof version === 'string' ? rollbackTo(version) : { ok: false, error: '版本号不合法' }
-    )
-    ipcMain.handle('rollback:boot-ok', () => {
-      markBootOk()
-      return true
-    })
-    ipcMain.handle('rollback:failures', () => bootFailures())
-
     /**
      * 标签页切换时同步窗口标题。
      *
@@ -3136,6 +3168,8 @@ ipcMain.handle('app:update-stage', (_e, path: unknown) => {
  *   只放行 http/https —— file:/ms-settings:/search-ms: 这些交给 shell
  *   就是任意本地文件或系统设置被打开，等于把 shell 借给渲染层。
  */
+ipcMain.handle('app:orphan-uninstall-list', () => listOrphanUninstallEntries())
+ipcMain.handle('app:orphan-uninstall-clean', () => cleanOrphanUninstallEntries())
 ipcMain.handle('app:open-url', async (_e, url: unknown) => {
   if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
     crashLog('open-url-blocked', String(url).slice(0, 120))

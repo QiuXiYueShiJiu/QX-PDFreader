@@ -50,9 +50,9 @@ const VARIANT = (() => {
  * 默认安装目录（**通用值，不含任何客户/示例单位信息**）。
  * 交付时由 build/packaging.json 覆盖。
  *
- * ★ 必须落在**当前用户可写**的位置。nsis 配的是 perMachine=false，
- *   安装器不提权；实测 /S 静默安装到 C:\Program Files 时退出码是 0，
- *   但目录根本没创建（写 Program Files 被拒），静默更新会整体失效。
+ * 2026-11-09：从 C:\Program Files 改成 per-user（$LOCALAPPDATA\Programs）。
+ * 原因：应用内的静默更新是「退出时以普通权限 spawn 安装包 /S」，装到 Program Files
+ * 会因为缺提权而写不进去（实测 /S 退出码 0 但目录没创建），等于静默更新整个失效。
  */
 const DEFAULT_INSTALL_DIR = '$LOCALAPPDATA\\Programs\\QiuXiPDFReader'
 
@@ -115,6 +115,9 @@ const cfg = readPackaging()
  *   special   → 同 quick
  * 兼容旧配置：没配 installDirs 时仍读 cfg.installDir。
  */
+/* ★ 注意：build-installers 依次渲染 standard/quick/special，最后一次是 special 变体，
+   于是 package.json 的 nsis.artifactName 会停在 special 变体的产物名——这是构建副作用，
+   下次跑 set-version 会被重写回标准名。不要照着它判断版本号。 */
 const variantArg = (process.argv.find((a) => a.startsWith('--variant=')) ?? '--variant=standard')
 const variant = variantArg.split('=')[1] || 'standard'
 const installDirsByVariant = cfg.installDirs ?? {}
@@ -131,6 +134,10 @@ const installDir = String(installDirRaw).replace(/\\+$/, '')
  */
 /* 旧目录同理按变体取：标准版的旧位置是 C:\Program Files\QiuXiPDFReader，
    快速版还要顺带清 1.x 的 C:\Program Files\QiuXiPDFReader\QXPDFReader。 */
+/* 逐变体取旧目录：标准版清 C:\Program Files\QiuXiPDFReader 与 C:\Program Files\QiuXiPDFReader，
+   快速/special 变体清 1.x 的 C:\Program Files\QiuXiPDFReader\QXPDFReader。
+   ★ 2026-11-09 踩过：真实 packaging.json 里标准版只写了 C:\Program Files\QiuXiPDFReader，
+     生成的 nsh 因此只有一条 RMDir；加旧位置只改 json，不要动模板。 */
 const legacyByVariant = cfg.legacyInstallDirsByVariant ?? {}
 const legacyRaw = Array.isArray(legacyByVariant[variant])
   ? legacyByVariant[variant]

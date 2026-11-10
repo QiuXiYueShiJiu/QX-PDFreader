@@ -522,23 +522,45 @@
   ;   而用户拿到的说明写的是「覆盖安装即可，笔记与设置不受影响」。
   ;   实测：升级 2.1.1.0 后该目录整个消失，settings.json 也没了。
   ;
-  ;   现在只清一个**已证实为空**的目录（$APPDATA\秋夕-PDF阅读器：main/index.ts
-  ;   在首次 getPath('userData') 之前就把 userData 钉到老名字，Electron 建完壳
-  ;   再没写过，实测 entries = 0）。其余历史目录全部保留 —— 无法证实为空就不删，
-  ;   卸载后重装仍能续上原来的设置。
+  ;   现在只清 Electron 按新 productName 建的空壳目录和更早版本的残留，
+  ;   真正装数据的那两个目录留着 —— 卸载后重装仍能续上原来的设置。
   ;
-  ; ① Electron 按新 productName 建的空壳目录（里面没有用户数据）
+  ; ① Electron 按新 productName 建的空壳目录：**可删**。
+  ;    证据：本机从 1.0.x 一直跑到现在的机器上，这个目录存在但 entries = 0
+  ;    —— 因为主进程在任何 getPath('userData') 使用之前就把 userData 钉到了
+  ;    老名字上（src/main/index.ts:121-130），Electron 建完壳就再没写进去过。
   RMDir /r "$APPDATA\秋夕-PDF阅读器"
-  ; ② $LOCALAPPDATA\秋夕月拾旧-PDF阅读器 也**不删**：当前版本把 userData 钉在
-  ;   Roaming，Chromium 的 Cache/GPUCache 也跟着落在 Roaming；Local 那份只可能
-  ;   来自更早的、userData 尚未钉定的构建，没有快照能证明里面只有缓存。
-  ;   代价同样只是多一个旧文件夹。
+
+  ; ② 历史数据目录里只清「纯缓存」子目录（2026-11-09，SUFFIX 白名单）。
+  ;    父目录本身保留：里面还可能有 settings.json / 最近文件 / 批注。
+  ;    只允许这一层，再深一层（Cache\GPUCache）不放行。
+  RMDir /r "$APPDATA\智慧黑板PDF阅读器\Cache"
+  RMDir /r "$APPDATA\智慧黑板PDF阅读器\Code Cache"
+  RMDir /r "$APPDATA\智慧黑板PDF阅读器\GPUCache"
+  RMDir /r "$APPDATA\智慧黑板PDF阅读器\DawnGraphiteCache"
+  RMDir /r "$APPDATA\智慧黑板PDF阅读器\DawnWebGPUCache"
+  RMDir /r "$APPDATA\智慧黑板PDF阅读器\GrShaderCache"
+  RMDir /r "$APPDATA\智慧黑板PDF阅读器\ShaderCache"
+  RMDir /r "$LOCALAPPDATA\秋夕月拾旧-PDF阅读器\Cache"
+  RMDir /r "$LOCALAPPDATA\秋夕月拾旧-PDF阅读器\Code Cache"
+  RMDir /r "$LOCALAPPDATA\秋夕月拾旧-PDF阅读器\GPUCache"
+  RMDir /r "$LOCALAPPDATA\秋夕月拾旧-PDF阅读器\DawnGraphiteCache"
+  RMDir /r "$LOCALAPPDATA\秋夕月拾旧-PDF阅读器\DawnWebGPUCache"
+  RMDir /r "$LOCALAPPDATA\秋夕月拾旧-PDF阅读器\GrShaderCache"
+  RMDir /r "$LOCALAPPDATA\秋夕月拾旧-PDF阅读器\ShaderCache"
   ;
-  ; ③ 1.x 时代（productName 叫「智慧黑板PDF阅读器」）的 $APPDATA 目录：
-  ;   **故意不删**。无法确认那一代的 userData 是写在它下面、还是只借用了
-  ;   界面名而数据仍落在 $APPDATA\秋夕月拾旧-PDF阅读器；只要有一条可能，
-  ;   删它就是升级清档。留着的代价只是 %APPDATA% 里多一个旧文件夹。
-  ;   要恢复清理，先拿到 1.x 的 app.getPath('userData') 证据再改这里。
+  ; ② 1.1.x 时代的 `$APPDATA\智慧黑板PDF阅读器`：**不删**（2026-11-09 改）。
+  ;    无法证明它只是空壳 —— 「智慧黑板PDF阅读器」正是 1.1.x 的 productName，
+  ;    那时 Electron 的 userData = appData + productName，所以它极可能就是
+  ;    1.1.x 用户的真实数据目录（settings.json / 最近文件）。
+  ;    删它等于替老用户清档，而 1.1.x → 2.x 的升级路径我们从未实测过。
+  ;    宁可留一个旧文件夹，也不做无法回滚的删除。
+  ;
+  ; ③ `$LOCALAPPDATA\秋夕月拾旧-PDF阅读器`：同样**不删**。
+  ;    当前版本把 userData 钉在 `$APPDATA\秋夕月拾旧-PDF阅读器`，Chromium 的
+  ;    Cache/GPUCache 都落在 Roaming 那一份里；这个 Local 目录只可能来自
+  ;    某个更早的、userData 未钉定的构建，而我们没有那台机器的快照能证明
+  ;    里面只有缓存。同样按「无法证明就不删」处理。
 
   ; ④ 桌面 / 开始菜单里可能残留的快捷方式（老名字 + 新名字）
   Delete "$DESKTOP\秋夕-PDF阅读器.lnk"
@@ -583,6 +605,9 @@
   !insertmacro CleanQiuXiExt ".tif"
   !insertmacro CleanQiuXiExt ".tiff"
   DeleteRegKey SHCTX "Software\${COMPANY_NAME}\${PRODUCT_NAME}\Capabilities"
+  ; 2.1.6.1 品牌修正：COMPANY_NAME 从「秋夕月拾旧」改成「秋夕课堂」，
+  ; 上面那行只能删掉新键。2.1.6.0 及更早写入的旧键没人清，会变成注册表垃圾 —— 补一行。
+  DeleteRegKey SHCTX "Software\秋夕月拾旧\${PRODUCT_NAME}\Capabilities"
   DeleteRegValue SHCTX "Software\RegisteredApplications" "${PRODUCT_NAME}"
 
   ; ⑤ v2.1.3 起开始菜单用独立文件夹（安装时可选建/不建）；（安装时可选建/不建）；

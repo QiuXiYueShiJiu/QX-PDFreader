@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-2.1.6.0-2f6fed" />
+  <img alt="version" src="https://img.shields.io/badge/version-2.2.0.0-2f6fed" />
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078d4" />
   <img alt="license" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-e5484d" />
   <img alt="offline" src="https://img.shields.io/badge/network-%E5%8F%AA%E6%A3%80%E6%9F%A5%E6%9B%B4%E6%96%B0-16a34a" />
@@ -207,7 +207,7 @@
 | 检查更新 | 设置页手动检查；启动后自动检查一次（可关） |
 | 双通道 | GitHub Releases + 镜像站，自动取版本更高的一边，同版本优先镜像 |
 | 下载与校验 | 下载安装包后校验 SHA256，再询问是否立即安装 |
-| 紧急回滚 | 最近 3 个安装包留在本地，可一键装回旧版；设置与批注不动 |
+| 更新提示 | 发现新版本先弹框：立即更新 / 七天不通知 / 跳过这个版本 / 不再通知；只提示不自动下载 |
 | 主题商店 | 「设置 → 外观 → 主题商店」，浏览 / 一键装回配色包，可切 GitHub 或镜像源 |
 | 插件商店 | 右栏入口，装的是能执行代码的插件；清单声明权限，没声明就拦 |
 | 市场仓库 | [`plugin-store/`](plugin-store/README.md)：`index.json` 清单 + [API 规范](plugin-store/docs/API.md) + [JSON Schema](plugin-store/schema/plugin.schema.json) + [上架流程](plugin-store/docs/PUBLISHING.md) |
@@ -310,12 +310,12 @@
 |---|---|---|
 | 安装方式 | 向导（可选目录与快捷方式） | 一路到底静默装好 |
 | 适合 | 自己电脑、需要挑安装位置 | 教室一体机、批量部署 |
-| 文件名 | `QX-PDFreader-2.0.3.0-setup.exe`（公开下载用 ASCII 名） | `PDF阅读器-快速安装.exe` |
+| 文件名 | `QX-PDFreader-2.2.0.0-setup.exe`（公开下载用 ASCII 名） | `PDF阅读器-快速安装.exe` |
 
 ### 安装步骤
 
 1. 双击安装包，按向导下一步（标准版可改安装目录）。
-2. 安装目录默认在 D 盘，装好后桌面与开始菜单都有快捷方式。
+2. 标准版默认装到 `%LOCALAPPDATA%\Programs\QiuXiPDFReader`（当前用户目录，安装时不需要管理员权限）；装好后桌面与开始菜单都有快捷方式。
 3. 想成为 PDF/图片的默认打开程序：**设置 → 应用 → 默认应用 → 按文件类型指定**，选「秋夕-PDF阅读器」。
 
 ### 静默安装（批量部署）
@@ -324,10 +324,14 @@
 PDF阅读器-快速安装.exe /S
 ```
 
+### 历史版本
+
+装回旧版用下载页底部的「历史版本下载」：按版本列出安装包、日期、大小与两个入口（本站直下 / GitHub Release）。从 2.1.6.0 起逐版记录，不删旧条目。
+
 ### 校验安装包
 
 ```powershell
-Get-FileHash .\QX-PDFreader-2.0.3.0-setup.exe -Algorithm SHA256
+Get-FileHash .\QX-PDFreader-2.2.0.0-setup.exe -Algorithm SHA256
 ```
 
 ---
@@ -460,6 +464,15 @@ A：工具箱「加密」可以加/解密码；带打开密码的 PDF 需先解�
 ---
 
 ## 更新日志
+
+### 2.2.0.0（2026-11-10）
+
+- **更新方式变了**：不再自动下载。首次发现新版本会弹框让你选「立即更新 / 七天不通知 / 跳过这个版本 / 不再通知」，点「立即更新」才开始下载，下载完成在退出时安装；这些选择随时能在「设置 → 更新」里改回来。
+- **移除「回滚到旧版本」**：设置页里那块连同 `rollback:*` 接口一起删掉。历史版本改由下载页提供（见下方「历史版本」），不再占用本地磁盘。
+- **自动清理旧安装包**：启动时扫描 `userData/updates`，只保留最新一份，其余删除并记入 `crash.log`（回滚移除后这些文件再没人引用，每份约 100 MB）。
+- **著作权更正**：设置 → 关于 显示「著作权所有 by 秋夕月拾旧」，可执行文件属性和它保持一致；`CompanyName` 仍是「秋夕课堂」。
+- **关于页可点开官网**：「打开网站」按钮走主进程 `open.url`，只放行 `http` / `https`，其它协议一律拦下并记 `open-url-blocked`。
+
 
 ### 2.1.6.0（2026-11-09）
 

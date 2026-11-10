@@ -256,15 +256,6 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
    */
   const checkUpdateNow = useViewer((s) => s.checkUpdateNow)
   const setShowThemeStore = useViewer((s) => s.setShowThemeStore)
-  const rollbackVersions = useViewer((s) => s.rollbackVersions)
-  const loadRollback = useViewer((s) => s.loadRollback)
-  const applyRollback = useViewer((s) => s.applyRollback)
-  const onRollback = async (version: string): Promise<void> => {
-    await applyRollback(version)
-  }
-  useEffect(() => {
-    void loadRollback()
-  }, [loadRollback])
   const [checking, setChecking] = useState(false)
   const [checkMsg, setCheckMsg] = useState('')
 
@@ -928,36 +919,50 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
               onChange={(v) => onChange({ updateAutoCheck: v })}
             />
             <p className="sb-field-hint">
-              自动检查是静默的：只有查到新版本才会在右下角提示并开始下载，下载完由你决定什么时候装。
+              自动检查是静默的：只有查到新版本才会弹一次提示框，不会自己下载。
             </p>
 
-            {/*
-              回滚（2.0.0 / B13）。
-              只列「保留着的旧安装包」，最多三份 —— 这些都是自动更新时顺手存下的，
-              不是让用户自己去找安装包。连续两次启动没进界面，主进程会自己弹框问。
-            */}
-            {rollbackVersions.length > 0 ? (
-              <div className="sb-field" data-rollback="1">
-                <span className="sb-label">回滚到旧版本</span>
-                <p className="sb-field-hint">
-                  还留着 {rollbackVersions.length} 个旧安装包。装回去不会动设置、最近文件和批注。
-                </p>
-                <div className="sb-field-inline">
-                  {rollbackVersions.map((entry) => (
-                    <button
-                      key={entry.version}
-                      type="button"
-                      className="sb-btn"
-                      data-tb-id={`rollback-${entry.version}`}
-                      onClick={() => void onRollback(entry.version)}
-                      title={`${entry.version} · ${Math.round(entry.size / 1048576)}MB`}
-                    >
-                      回滚到 {entry.version}
-                    </button>
-                  ))}
-                </div>
+            <div className="sb-field">
+              <span className="sb-field-label">新版本提示</span>
+              <div className="sb-seg" role="radiogroup" aria-label="新版本提示">
+                {(
+                  [
+                    ['ask', '每次询问', '查到就弹框：立即更新 / 七天不通知 / 跳过这个版本 / 不再通知'],
+                    ['never', '不再通知', '彻底不弹；想更新时点上面的「检查更新」']
+                  ] as const
+                ).map(([value, label, tip]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={settings.updateNotify === value}
+                    aria-pressed={settings.updateNotify === value}
+                    data-update-notify-option={value}
+                    className="sb-seg-btn"
+                    title={tip}
+                    onClick={() => onChange({ updateNotify: value })}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
-            ) : null}
+              {settings.updateSkipVersion || settings.updateSnoozeUntil > Date.now() ? (
+                <p className="sb-field-hint" data-update-suppress="1">
+                  {settings.updateSkipVersion ? `已跳过 v${settings.updateSkipVersion}。` : ''}
+                  {settings.updateSnoozeUntil > Date.now()
+                    ? `七天内不提醒（到 ${new Date(settings.updateSnoozeUntil).toLocaleString()}）。`
+                    : ''}
+                  <button
+                    type="button"
+                    className="sb-btn sb-btn-xs"
+                    data-tb-id="settings-update-reset"
+                    onClick={() => onChange({ updateSkipVersion: '', updateSnoozeUntil: 0 })}
+                  >
+                    恢复提醒
+                  </button>
+                </p>
+              ) : null}
+            </div>
 
             {/*
               通道偏好：只有公开版能选。
@@ -1029,6 +1034,20 @@ export function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProp
               {about?.site ? (
                 <p className="sb-about__site" data-about-site="1">
                   官方网站：<strong>{about.site}</strong>
+                  {/* 直接调主进程 open.url（只放行 http/https）：自绘窗口里 a 标签会被 will-navigate 拦掉 */}
+                  <button
+                    type="button"
+                    className="sb-about__link"
+                    data-about-site-open="1"
+                    onClick={() => {
+                      const host = about.site.includes('秋夕月拾旧.top')
+                        ? 'https://xn--6rso4u4lc86ad09c.top/'
+                        : `https://${about.site}/`
+                      void window.pdfApp.open.url(host)
+                    }}
+                  >
+                    打开网站
+                  </button>
                 </p>
               ) : null}
               {about?.notice ? (

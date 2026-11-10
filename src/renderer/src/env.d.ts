@@ -143,6 +143,8 @@ export interface PdfAppApi {
     line?: number
   }) => Promise<boolean>
   crashLog: () => Promise<{ path: string; bytes: number }>
+  orphanUninstallList: () => Promise<Array<{ root: string; key: string; displayName: string; installLocation: string }>>
+  orphanUninstallClean: () => Promise<Array<{ root: string; key: string; displayName: string; installLocation: string }>>
     /** 退出应用（渲染层已弹确认框；主进程负责落盘后退出） */
     quit: () => Promise<void>
     /** 问完用户后真正退出（不再弹一次「确定退出吗」） */
@@ -256,12 +258,6 @@ export interface PdfAppApi {
     list: (prefer?: 'github' | 'mirror') => Promise<{ ok: boolean; items: unknown[]; at?: number; error?: string }>
     setSources: (list: { name: string; url: string }[]) => Promise<boolean>
     clearCache: () => Promise<boolean>
-  }
-  rollback: {
-    list: () => Promise<{ version: string; path: string; size: number; savedAt: string }[]>
-    apply: (version: string) => Promise<{ ok: boolean; error?: string }>
-    bootOk: () => Promise<boolean>
-    failures: () => Promise<number>
   }
   plugins: {
     index: (prefer?: 'github' | 'mirror') => Promise<{ ok: boolean; items: unknown[]; source?: string; error?: string }>
