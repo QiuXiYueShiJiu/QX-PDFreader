@@ -582,11 +582,14 @@ export function registerPluginIpc(): void {
     return result
   })
 
-  ipcMain.handle('plugin:install-path', (_e, archivePath: unknown) => {
-    /* 本地导入的测试通道：界面不用它，验证脚本用它装一个构造好的包 */
-    if (typeof archivePath !== 'string') return { ok: false, error: '路径不合法' }
-    return installFromArchive(archivePath)
-  })
+  // 仅 --test-hooks 或开发模式下暴露，生产包不注册
+  if (process.argv.includes('--test-hooks') || !app.isPackaged) {
+    ipcMain.handle('plugin:install-path', (_e, archivePath: unknown) => {
+      /* 本地导入的测试通道：界面不用它，验证脚本用它装一个构造好的包 */
+      if (typeof archivePath !== 'string') return { ok: false, error: '路径不合法' }
+      return installFromArchive(archivePath)
+    })
+  }
 
   /**
    * 从商店装：先下载到临时文件，校验 sha256（清单里给了就必须对），再安装。

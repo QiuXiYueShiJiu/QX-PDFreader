@@ -648,6 +648,11 @@ app.on('before-quit', () => {
     return
   }
   const target = stagedInstaller
+  // 二次校验：执行前再次确认路径合法
+  if (!isStagedInstallerPath(target)) {
+    crashLog('update-before-quit-rejected', '路径校验失败')
+    return
+  }
   stagedInstaller = ''
   try {
     const { spawn } = require('node:child_process') as typeof import('node:child_process')
@@ -713,11 +718,10 @@ function allowDocPath(p: string): void {
 
 function isPathAllowed(p: string): boolean {
   const full = normalize(resolve(p)).toLowerCase()
+  // 仅允许显式登记的文件
   if (allowedDocPaths.has(full)) return true
-  const ud = normalize(resolve(app.getPath('userData'))).toLowerCase()
-  for (const sub of ['pages', 'image-cache']) {
-    if (full.startsWith(ud + '\\' + sub + '\\')) return true
-  }
+  // 兼容：历史缓存目录下的文件需显式登记后才可访问
+  // 如需放行整目录，请在打开文件时逐个 allowDocPath()
   return false
 }
 
@@ -2364,40 +2368,10 @@ function registerIpcRest(): void {
     ipcMain.handle('app:update-install', (_e, path: unknown) => {
       const target = String(path ?? '')
       if (!target) return installUpdate(target)
-      try {
-        const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-        const version = currentVersion()
-        const dir = join(app.getPath('userData'), 'update-backups')
-        mkdirSync(dir, { recursive: true })
-        const dest = join(dir, `${version}-${stamp}`)
-        mkdirSync(dest, { recursive: true })
-        let copied = 0
-        for (const name of ['settings.json', 'positions.json', 'recent.json']) {
-          const src = join(app.getPath('userData'), name)
-          if (!existsSync(src)) continue
-          copyFileSync(src, join(dest, name))
-          copied += 1
-        }
-        const bgDir = join(app.getPath('userData'), 'backgrounds')
-        if (existsSync(bgDir)) {
-          cpSync(bgDir, join(dest, 'backgrounds'), { recursive: true })
-        }
-        // 只留最近 3 份
-        const keep = readdirSync(dir)
-          .filter((name) => !name.endsWith('.txt'))
-          .sort()
-          .slice(-3)
-        for (const name of readdirSync(dir)) {
-          if (!keep.includes(name)) rmSync(join(dir, name), { recursive: true, force: true })
-        }
-        writeFileSync(
-          join(dest, 'README.txt'),
-          `升级前自动备份\n版本：${version}\n时间：${new Date().toISOString()}\n内容：${copied} 个 json（设置 / 阅读位置 / 最近列表）\n`,
-          'utf8'
-        )
-        console.log(`[update] 升级前已备份用户数据 → ${dest}（${copied} 个文件）`)
-      } catch (error) {
-        console.warn('[update] 备份用户数据失败（不影响安装）：', error)
+      // 复用阶段校验：仅允许 userData/updates 下的安装包
+      if (!isStagedInstallerPath(target)) {
+        crashLog('update-install-rejected', '路径不在 updates 目录内')
+        return { ok: false, error: '安装包路径不合法' }
       }
       return installUpdate(target)
     })
