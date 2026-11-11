@@ -298,7 +298,10 @@ export function installFromArchive(archivePath: string): InstallResult {
       if (name.endsWith('/')) continue
       const dst = join(target, name)
       // 再查一次：join 之后仍必须落在 target 之内
-      if (!resolve(dst).startsWith(resolve(target))) {
+      // ★ 必须用 resolve(target) + sep 作为前缀，防止同前缀目录绕过（如 target=.../plugin，dst=.../pluginX）
+      const base = resolve(target) + sep
+      const full = resolve(dst)
+      if (full !== resolve(target) && !full.startsWith(base)) {
         return { ok: false, error: `压缩包里有越界路径：${name}` }
       }
       mkdirSync(join(dst, '..'), { recursive: true })
@@ -582,11 +585,14 @@ export function registerPluginIpc(): void {
     return result
   })
 
-  ipcMain.handle('plugin:install-path', (_e, archivePath: unknown) => {
-    /* 本地导入的测试通道：界面不用它，验证脚本用它装一个构造好的包 */
-    if (typeof archivePath !== 'string') return { ok: false, error: '路径不合法' }
-    return installFromArchive(archivePath)
-  })
+  // 仅 --test-hooks 或开发模式下暴露，生产包不注册
+  if (process.argv.includes('--test-hooks') || !app.isPackaged) {
+    ipcMain.handle('plugin:install-path', (_e, archivePath: unknown) => {
+      /* 本地导入的测试通道：界面不用它，验证脚本用它装一个构造好的包 */
+      if (typeof archivePath !== 'string') return { ok: false, error: '路径不合法' }
+      return installFromArchive(archivePath)
+    })
+  }
 
   /**
    * 从商店装：先下载到临时文件，校验 sha256（清单里给了就必须对），再安装。
