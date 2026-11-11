@@ -298,7 +298,10 @@ export function installFromArchive(archivePath: string): InstallResult {
       if (name.endsWith('/')) continue
       const dst = join(target, name)
       // 再查一次：join 之后仍必须落在 target 之内
-      if (!resolve(dst).startsWith(resolve(target))) {
+      // ★ 必须用 resolve(target) + sep 作为前缀，防止同前缀目录绕过（如 target=.../plugin，dst=.../pluginX）
+      const base = resolve(target) + sep
+      const full = resolve(dst)
+      if (full !== resolve(target) && !full.startsWith(base)) {
         return { ok: false, error: `压缩包里有越界路径：${name}` }
       }
       mkdirSync(join(dst, '..'), { recursive: true })

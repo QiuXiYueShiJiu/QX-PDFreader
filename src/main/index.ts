@@ -144,8 +144,12 @@ const LEGACY_USER_DATA_NAME = '秋夕月拾旧-PDF阅读器'
 
 /* 崩溃日志：此时 userData 已定，路径才对 */
 initCrashLog()
-prunePageCopies()
-pruneUpdatesDir()
+/* 缓存清理异步执行，不阻塞启动 */
+Promise.resolve().then(() => {
+  prunePageCopies()
+  pruneUpdatesDir()
+  pruneImageCache(join(app.getPath('userData'), 'image-cache'))
+})
 
 /**
  * 待打开的**文件队列**。
